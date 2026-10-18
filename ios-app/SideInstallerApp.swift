@@ -1,4 +1,16 @@
 import SwiftUI
+import UserNotifications
+
+/// Shows notifications even when the app is in foreground.
+final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+}
 
 @main
 struct SideInstallerApp: App {
@@ -12,6 +24,8 @@ struct SideInstallerApp: App {
     @StateObject private var accounts = AccountStore.shared
     // Keeps the app alive in background for Shortcuts-triggered resign.
     private let keepAlive = KeepAlive()
+    // Shows notifications even when the app is in foreground.
+    private let notificationDelegate = NotificationDelegate()
     /// False until the TOS is accepted, after which the welcome page is gone.
     @AppStorage("hasAcceptedTOS") private var hasAcceptedTOS = false
     /// False until account setup is completed or skipped. Never reset, even if
@@ -22,6 +36,13 @@ struct SideInstallerApp: App {
         // A pairing code still up from a run that was killed means nothing now.
         PairingLiveActivity.shared.endLeftovers()
         PairingNotification.shared.reset()
+        // Show resign notifications even in foreground.
+        UNUserNotificationCenter.current().delegate = notificationDelegate
+        // Request notification permission for resign alerts.
+        Task {
+            _ = try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
+        }
     }
 
     var body: some Scene {
