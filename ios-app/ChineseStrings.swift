@@ -193,6 +193,8 @@ let chineseStrings: [String: String] = [
     "Regenerate": "重新生成",
     "Generate pairing file": "生成配对文件",
     "Export pairing file": "导出配对文件",
+    "Export certificate (p12)": "导出证书 (p12)",
+    "Exporting": "正在导出",
     "Pair in Settings": "在 设置 中配对",
     "Install into an app": "安装到应用",
     "Scanning": "正在扫描",

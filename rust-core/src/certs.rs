@@ -5,14 +5,17 @@
 
 use std::ffi::{c_char, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use base64::{prelude::BASE64_STANDARD, Engine as _};
 use isideload::dev::{
     certificates::{CertificatesApi, DevelopmentCertificate},
     developer_session::DeveloperSession,
     device_type::DeveloperDeviceType,
     teams::DeveloperTeam,
 };
+use isideload::sideload::cert_identity::CertificateIdentity;
+use isideload::util::fs_storage::FsStorage;
 use serde::Serialize;
 
 use crate::account::{make_2fa, TwoFactorCb, TwoFaCtx};
@@ -234,6 +237,89 @@ pub unsafe fn cert_revoke(
         }
         Err(_) => {
             *out_error = cstr("panic while revoking certificate");
+            2
+        }
+    }
+}
+
+/// Export the signing certificate as PKCS#12 (base64-encoded).
+///
+/// Retrieves the existing certificate identity for `machine_name`/`email`,
+/// builds the p12 with the machine ID as password, and returns it
+/// base64-encoded via `out_b64`.
+///
+/// # Safety
+/// `session` must be a valid pointer from `cert_signin`; `email`,
+/// `machine_name`, `storage_dir` valid C strings; `out_b64`, `out_error`
+/// valid and writable.
+pub unsafe fn si_cert_export_p12(
+    session: *mut CertSession,
+    email: *const c_char,
+    machine_name: *const c_char,
+    storage_dir: *const c_char,
+    out_b64: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    if session.is_null() {
+        *out_error = cstr("null session");
+        return 2;
+    }
+    let session = &mut *session;
+    let email = opt_str(email, "");
+    let machine_name = opt_str(machine_name, "");
+    let storage_dir = opt_str(storage_dir, "");
+    if email.is_empty() || machine_name.is_empty() || storage_dir.is_empty() {
+        *out_error = cstr("email, machine_name and storage_dir are required");
+        return 2;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let storage = FsStorage::new(PathBuf::from(&storage_dir));
+        session.rt.block_on(async {
+            tracing::info!("Exporting p12 for '{machine_name}' ({email})");
+            let identity = CertificateIdentity::retrieve_existing(
+                &machine_name,
+                &email,
+                &mut session.dev,
+                &session.team,
+                &storage,
+            )
+            .await
+            .map_err(|e| format!("certificate lookup failed: {}", report_text(&e)))?
+            .ok_or_else(|| {
+                format!(
+                    "no '{machine_name}' certificate on this Apple ID yet — install \
+                     an app first, which is what creates it"
+                )
+            })?;
+
+            // The machine id is the password AltStore-family apps expect.
+            let password = identity.machine_id.clone();
+            let p12 = identity
+                .as_p12(&password)
+                .await
+                .map_err(|e| format!("failed to build PKCS#12: {e}"))?;
+
+            // Return base64 + password as JSON so Swift gets both.
+            let payload = serde_json::json!({
+                "p12_b64": BASE64_STANDARD.encode(&p12),
+                "password": password,
+            });
+            serde_json::to_string(&payload).map_err(|e| format!("serialize p12: {e}"))
+        })
+    }));
+
+    match result {
+        Ok(Ok(json)) => {
+            *out_b64 = cstr(json);
+            0
+        }
+        Ok(Err(e)) => {
+            *out_error = cstr(e);
+            1
+        }
+        Err(_) => {
+            *out_error = cstr("panic while exporting p12");
             2
         }
     }

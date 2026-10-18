@@ -58,7 +58,12 @@ struct SideInstallerApp: App {
             // Files opened in the app (share sheet, "Open with", other apps), as
             // an alternative to the document picker.
             .onOpenURL { url in
-                // Ignore `sideinstaller://` URLs: LocalDevVPN only uses them to
+                // Handle `sideinstaller://refresh-all` from Shortcuts App Intent.
+                if url.scheme == "sideinstaller" && url.host == "refresh-all" {
+                    NotificationCenter.default.post(name: .refreshAllApps, object: nil)
+                    return
+                }
+                // Ignore other `sideinstaller://` URLs: LocalDevVPN only uses them to
                 // return to the app.
                 guard url.isFileURL else { return }
                 // `.mobiledevicepairing`/`.plist` are pairing files; anything else

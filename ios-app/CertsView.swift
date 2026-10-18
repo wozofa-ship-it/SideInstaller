@@ -10,12 +10,17 @@ struct CertsView: View {
     @State private var showSettings = false
     /// The certificate the user tapped "Revoke" on, pending confirmation.
     @State private var pendingRevoke: DevCert?
+    /// Exported p12 file URL for ShareLink.
+    @State private var exportURL: URL?
+    @State private var isExporting = false
+    @State private var exportError: String?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 header.cascadeItem(0)
                 loadButton.cascadeItem(1)
+                exportButton.cascadeItem(2)
                 // Errors show as a popup, which `RootView` lays over the app.
                 certList
             }
@@ -74,6 +79,69 @@ struct CertsView: View {
         }
         .buttonStyle(PrimaryButtonStyle())
         .disabled(manager.isWorking || manager.revokingID != nil)
+    }
+
+    /// Export certificate as p12 for LiveContainer import.
+    private var exportButton: some View {
+        VStack(spacing: 10) {
+            if let url = exportURL {
+                ShareLink(item: url) {
+                    Label(L("Export certificate (p12)"), systemImage: "square.and.arrow.up")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+                .tint(Theme.accent)
+            } else {
+                Button {
+                    doExport()
+                } label: {
+                    HStack(spacing: 10) {
+                        if isExporting {
+                            ProgressView().tint(.white)
+                            Text(L("Exporting"))
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                            Text(L("Export certificate (p12)"))
+                        }
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(manager.isWorking || isExporting || !manager.isSignedIn)
+            }
+            if let err = exportError {
+                Text(err).font(.caption).foregroundColor(.red)
+            }
+        }
+    }
+
+    private func doExport() {
+        isExporting = true
+        exportError = nil
+        exportURL = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let (p12Data, password) = try manager.exportP12()
+                // Write to temp file
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("certificate.p12")
+                try p12Data.write(to: tempURL)
+                // Also save password to a txt file for convenience
+                let pwdURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("certificate-password.txt")
+                try password.write(to: pwdURL, atomically: true, encoding: .utf8)
+                DispatchQueue.main.async {
+                    isExporting = false
+                    exportURL = tempURL
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    isExporting = false
+                    exportError = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: Certificate list

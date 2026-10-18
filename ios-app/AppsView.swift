@@ -584,6 +584,10 @@ struct AppsView: View {
         .toolbar { settingsToolbarItem(isPresented: $showSettings) }
         .sheet(isPresented: $showSettings) { SettingsView() }
         .onAppear { manager.autoLoad() }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshAllApps)) { _ in
+            // From Shortcuts App Intent: skip confirmation, refresh directly.
+            manager.refreshAll()
+        }
         .alert(L("Refresh all apps?"), isPresented: $confirmRefresh) {
             Button(L("Refresh all")) { manager.refreshAll() }
             Button(L("Cancel"), role: .cancel) { }

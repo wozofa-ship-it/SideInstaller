@@ -322,6 +322,40 @@ final class CertManager: ObservableObject {
         }
     }
 
+    /// Export the signing certificate as p12 (base64) + password.
+    /// Returns (p12Data, password).
+    func exportP12() throws -> (Data, String) {
+        guard let session = self.session else { throw EngineError.message("Not signed in.") }
+        let email = engine.appleID
+        // Machine name: use the first cert's machineName, or fallback
+        let machineName = certs.first?.machineName ?? "SideInstaller"
+        let storageDir = PrivateStore.isideload.path
+
+        var outJson: UnsafeMutablePointer<CChar>?
+        var outError: UnsafeMutablePointer<CChar>?
+        let rc = si_cert_export_p12(
+            session,
+            email, machineName, storageDir,
+            &outJson, &outError
+        )
+        if rc == 0 {
+            let jsonStr = outJson.map { String(cString: $0) } ?? "{}"
+            outJson.map { si_string_free($0) }
+            guard let jsonData = jsonStr.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: String],
+                  let b64 = obj["p12_b64"],
+                  let password = obj["password"],
+                  let p12Data = Data(base64Encoded: b64) else {
+                throw EngineError.message("Couldn't parse p12 export result.")
+            }
+            return (p12Data, password)
+        } else {
+            let msg = outError.map { String(cString: $0) } ?? "rc=\(rc)"
+            outError.map { si_string_free($0) }
+            throw EngineError.message("Export failed: \(msg)")
+        }
+    }
+
     // MARK: - Helpers
 
     /// Anisette addresses to try, in the engine's order.
