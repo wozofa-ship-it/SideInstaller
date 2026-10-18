@@ -10,6 +10,8 @@ struct SideInstallerApp: App {
     @StateObject private var localizer = Localizer.shared
     // The saved Apple IDs, shared by every screen that signs in.
     @StateObject private var accounts = AccountStore.shared
+    // Keeps the app alive in background for Shortcuts-triggered resign.
+    private let keepAlive = KeepAlive()
     /// False until the TOS is accepted, after which the welcome page is gone.
     @AppStorage("hasAcceptedTOS") private var hasAcceptedTOS = false
     /// False until account setup is completed or skipped. Never reset, even if
@@ -33,6 +35,10 @@ struct SideInstallerApp: App {
                         .environmentObject(accounts)
                         // Version update check disabled (user request: no nagging)
                         // .task { await updateChecker.check() }
+                        .onAppear {
+                            // Start background keep-alive for Shortcuts resign
+                            keepAlive.startAudio()
+                        }
                         .transition(.opacity)
                 } else if hasAcceptedTOS {
                     AccountSetupView()
