@@ -938,15 +938,22 @@ private struct AppProfileDetail: View {
     let status: SideloadedAppStatus
 
     @EnvironmentObject private var loc: Localizer
+    @EnvironmentObject private var certManager: CertManager
+
+    @State private var exportURL: URL?
+    @State private var exportPassword: String?
+    @State private var isExporting = false
+    @State private var exportError: String?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 appCard.cascadeItem(0)
+                exportCertCard.cascadeItem(1)
                 if let current = status.current {
-                    profileCard(current, isCurrent: true).cascadeItem(1)
+                    profileCard(current, isCurrent: true).cascadeItem(2)
                 } else {
-                    noProfileCard.cascadeItem(1)
+                    noProfileCard.cascadeItem(2)
                 }
                 if !status.superseded.isEmpty {
                     HStack {
@@ -979,6 +986,85 @@ private struct AppProfileDetail: View {
                 }
                 if let version = status.app.version {
                     field(L("Version"), version)
+                }
+            }
+        }
+    }
+
+    private var exportCertCard: some View {
+        PanelCard {
+            VStack(spacing: 10) {
+                if let url = exportURL {
+                    ShareLink(item: url) {
+                        Label(L("Export certificate (p12)"), systemImage: "square.and.arrow.up")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.accent)
+                    if let pwd = exportPassword {
+                        VStack(spacing: 4) {
+                            Text(L("Certificate password:"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(pwd)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .background(Color.secondary.opacity(0.1))
+                                .cornerRadius(8)
+                        }
+                    }
+                } else {
+                    Button {
+                        doExportCert()
+                    } label: {
+                        HStack(spacing: 10) {
+                            if isExporting {
+                                ProgressView()
+                                Text(L("Exporting"))
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                Text(L("Export certificate (p12)"))
+                            }
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .disabled(isExporting)
+                    if let err = exportError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+        }
+    }
+
+    private func doExportCert() {
+        isExporting = true
+        exportError = nil
+        Task {
+            do {
+                let (p12Data, password) = try certManager.exportP12()
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("certificate.p12")
+                try p12Data.write(to: tempURL)
+                let pwdURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("certificate-password.txt")
+                try password.write(to: pwdURL, atomically: true, encoding: .utf8)
+                await MainActor.run {
+                    isExporting = false
+                    exportURL = tempURL
+                    exportPassword = password
+                }
+            } catch {
+                await MainActor.run {
+                    isExporting = false
+                    exportError = error.localizedDescription
                 }
             }
         }
