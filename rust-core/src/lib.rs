@@ -285,6 +285,22 @@ pub unsafe extern "C" fn si_cert_revoke(
     certs::cert_revoke(session, serial_number, out_error)
 }
 
+/// Export the signing certificate as PKCS#12 (base64 JSON). Blocks.
+///
+/// # Safety
+/// See `certs::cert_export_p12`.
+#[no_mangle]
+pub unsafe extern "C" fn si_cert_export_p12(
+    session: *mut CertSession,
+    email: *const c_char,
+    machine_name: *const c_char,
+    storage_dir: *const c_char,
+    out_b64: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    certs::cert_export_p12(session, email, machine_name, storage_dir, out_b64, out_error)
+}
+
 /// Free a certificate session.
 ///
 /// # Safety

@@ -252,7 +252,7 @@ pub unsafe fn cert_revoke(
 /// `session` must be a valid pointer from `cert_signin`; `email`,
 /// `machine_name`, `storage_dir` valid C strings; `out_b64`, `out_error`
 /// valid and writable.
-pub unsafe fn si_cert_export_p12(
+pub unsafe fn cert_export_p12(
     session: *mut CertSession,
     email: *const c_char,
     machine_name: *const c_char,
