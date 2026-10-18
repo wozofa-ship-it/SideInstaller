@@ -12,6 +12,7 @@ struct CertsView: View {
     @State private var pendingRevoke: DevCert?
     /// Exported p12 file URL for ShareLink.
     @State private var exportURL: URL?
+    @State private var exportPassword: String?
     @State private var isExporting = false
     @State private var exportError: String?
 
@@ -93,6 +94,19 @@ struct CertsView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .tint(Theme.accent)
+                if let pwd = exportPassword {
+                    VStack(spacing: 4) {
+                        Text(L("Certificate password:"))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(pwd)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(8)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                }
             } else {
                 Button {
                     doExport()
@@ -134,6 +148,7 @@ struct CertsView: View {
                 DispatchQueue.main.async {
                     isExporting = false
                     exportURL = tempURL
+                    exportPassword = password
                 }
             } catch {
                 DispatchQueue.main.async {
