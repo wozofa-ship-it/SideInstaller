@@ -492,7 +492,7 @@ final class SideloadedAppsManager: ObservableObject {
             content.body = L("Refreshed %d of %d apps.", refreshed, jobs.count)
             content.sound = .default
             let request = UNNotificationRequest(identifier: "resign-done", content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request)
+            try? await UNUserNotificationCenter.current().add(request)
             // Read the device again, so the days on screen are the new ones.
             if refreshed > 0 {
                 isRefreshing = false        // `load` won't run while a refresh holds the link
