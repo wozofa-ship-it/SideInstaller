@@ -222,6 +222,16 @@ int32_t si_cert_revoke(CertSession *session,
                        const char *serial_number,
                        char **out_error);
 
+// Export the signing certificate as PKCS#12 (base64 JSON). BLOCKS.
+// On success *out_b64 is a heap JSON string: {p12_b64, password}.
+// Free with si_string_free. Returns 0 on success, non-zero on error.
+int32_t si_cert_export_p12(CertSession *session,
+                           const char *email,
+                           const char *machine_name,
+                           const char *storage_dir,
+                           char **out_b64,
+                           char **out_error);
+
 // Free a certificate session.
 void si_cert_session_free(CertSession *session);
 
