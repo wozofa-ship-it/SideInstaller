@@ -31,7 +31,8 @@ struct SideInstallerApp: App {
                         .environmentObject(updateChecker)
                         .environmentObject(localizer)
                         .environmentObject(accounts)
-                        .task { await updateChecker.check() }
+                        // Version update check disabled (user request: no nagging)
+                        // .task { await updateChecker.check() }
                         .transition(.opacity)
                 } else if hasAcceptedTOS {
                     AccountSetupView()
