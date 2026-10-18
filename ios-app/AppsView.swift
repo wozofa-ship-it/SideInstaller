@@ -950,6 +950,7 @@ private struct AppProfileDetail: View {
 
     @State private var exportURL: URL?
     @State private var exportPassword: String?
+    @State private var exportP12Data: Data?
     @State private var isExporting = false
     @State private var exportError: String?
 
@@ -1023,6 +1024,18 @@ private struct AppProfileDetail: View {
                                 .cornerRadius(8)
                         }
                     }
+                    // Direct import to LiveContainer (no password input needed)
+                    if exportP12Data != nil, exportPassword != nil {
+                        Button {
+                            importToLiveContainer()
+                        } label: {
+                            Label(L("导入到 LiveContainer"), systemImage: "arrow.right.circle")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
+                    }
                 } else {
                     Button {
                         doExportCert()
@@ -1068,6 +1081,7 @@ private struct AppProfileDetail: View {
                     isExporting = false
                     exportURL = tempURL
                     exportPassword = password
+                    exportP12Data = p12Data
                 }
             } catch {
                 await MainActor.run {
@@ -1076,6 +1090,18 @@ private struct AppProfileDetail: View {
                 }
             }
         }
+    }
+
+    /// Open LiveContainer with the certificate via URL scheme (no password input needed).
+    private func importToLiveContainer() {
+        guard let p12Data = exportP12Data, let password = exportPassword else { return }
+        let b64 = p12Data.base64EncodedString()
+        guard let b64Enc = b64.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let pwdEnc = password.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "livecontainer://certificate?cert=\(b64Enc)&password=\(pwdEnc)") else {
+            return
+        }
+        UIApplication.shared.open(url)
     }
 
     private func profileCard(_ profile: ProvisioningProfile, isCurrent: Bool) -> some View {
