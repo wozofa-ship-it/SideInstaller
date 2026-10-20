@@ -336,6 +336,15 @@ struct RefreshJob: Identifiable, Equatable {
 /// device, matches them, and runs "Refresh all" through the install pipeline.
 @MainActor
 final class SideloadedAppsManager: ObservableObject {
+    /// 界面和快捷指令共用同一个实例，这样后台触发的续签状态界面也能看到，
+    /// 且两条路径靠 isRefreshing 互斥、不会重复跑。
+    static let shared = SideloadedAppsManager()
+
+    /// 续签期间的无声音频保活（快捷指令后台触发时没有界面，靠它撑住进程不被挂起）。
+    private let keepAlive = KeepAlive()
+
+    /// LocalDevVPN 跳回后待续签的标记（UserDefaults 键）。
+    static let pendingRefreshKey = "SIDPendingRefreshAll"
 
     @Published private(set) var entries: [SideloadedAppStatus] = []
     /// Profiles belonging to no installed app — deleted apps' leftovers.
@@ -452,12 +461,15 @@ final class SideloadedAppsManager: ObservableObject {
         refreshSummary = nil
         refreshStatus = L("Getting ready")
         engine.log("=== Refresh all: \(jobs.count) app(s) ===")
+        // 续签全程开无声保活，息屏/切后台也不会被系统挂起
+        keepAlive.startAudio()
 
         refreshTask = Task {
             defer {
                 isRefreshing = false
                 refreshStatus = nil
                 refreshTask = nil
+                self.keepAlive.stopAudio()
             }
             do {
                 try await engine.prepareRefresh()
@@ -502,8 +514,8 @@ final class SideloadedAppsManager: ObservableObject {
             engine.log("Refresh all finished: \(refreshed)/\(jobs.count) refreshed.")
             // Post local notification for background resign
             let content = UNMutableNotificationContent()
-            content.title = L("续签完成")
-            content.body = L("Refreshed %d of %d apps.", refreshed, jobs.count)
+            content.title = refreshed > 0 ? L("续签成功") : L("续签完成")
+            content.body = refreshSummary ?? L("Refreshed %d of %d apps.", refreshed, jobs.count)
             content.sound = .default
             let request = UNNotificationRequest(identifier: "resign-done", content: content, trigger: nil)
             try? await UNUserNotificationCenter.current().add(request)
@@ -522,6 +534,74 @@ final class SideloadedAppsManager: ObservableObject {
         refreshTask?.cancel()
         refreshStatus = L("Stopping after this app")
         engine.log("Refresh all: stopping after the current app.")
+    }
+
+    // MARK: - 快捷指令后台续签
+
+    /// 快捷指令入口：不依赖界面存在，自己加载列表再续签。
+    /// 隧道没通且装了 LocalDevVPN 时，先记待续签标记并打开它连接，
+    /// 它连好跳回 App 后由 consumePendingRefresh() 接着跑完。
+    @MainActor
+    func refreshAllFromShortcut() async {
+        guard !isRefreshing else { return }
+        engine.refreshNetworkStatus()
+        if !engine.vpnConnected {
+            if !engine.wifiConnected {
+                await postResignNotification(title: L("续签失败"), body: L("WiFi 未打开，请先打开 WiFi 再续签。"))
+                return
+            }
+            if !engine.localDevVPNInstalled {
+                await postResignNotification(title: L("续签失败"), body: L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。"))
+                return
+            }
+            UserDefaults.standard.set(true, forKey: Self.pendingRefreshKey)
+            engine.log("Refresh all (shortcut): tunnel down, opening LocalDevVPN; will resume on return.")
+            _ = engine.startLocalDevVPN()
+            return
+        }
+        await loadThenRefreshAll()
+    }
+
+    /// App 回到前台时调用：有待续签标记且隧道已通就清掉标记接着跑。
+    @MainActor
+    func consumePendingRefresh() {
+        guard UserDefaults.standard.bool(forKey: Self.pendingRefreshKey), !isRefreshing else { return }
+        engine.refreshNetworkStatus()
+        guard engine.vpnConnected else { return }
+        UserDefaults.standard.set(false, forKey: Self.pendingRefreshKey)
+        Task { await loadThenRefreshAll() }
+    }
+
+    /// 先（必要时）加载设备上的可续签列表，再开续签。
+    @MainActor
+    private func loadThenRefreshAll() async {
+        if !hasLoaded {
+            load(quiet: true)
+            for _ in 0..<40 {
+                if hasLoaded || !isWorking { break }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        guard hasLoaded else {
+            await postResignNotification(title: L("续签失败"), body: L("读取设备失败，请打开 SideInstaller 查看。"))
+            return
+        }
+        guard !refreshable.isEmpty else {
+            await postResignNotification(title: L("续签完成"), body: L("没有需要续签的应用。"))
+            return
+        }
+        refreshAll()
+    }
+
+    private func postResignNotification(title: String, body: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "resign-shortcut-\(Int(Date().timeIntervalSince1970))",
+            content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 
     /// A thrown error as the page should print it.

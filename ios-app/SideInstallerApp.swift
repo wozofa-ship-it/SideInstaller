@@ -26,6 +26,9 @@ struct SideInstallerApp: App {
     private let keepAlive = KeepAlive()
     // Shows notifications even when the app is in foreground.
     private let notificationDelegate = NotificationDelegate()
+    /// Watched so a pending shortcut resign resumes when LocalDevVPN
+    /// bounces back or the app returns to the foreground.
+    @Environment(\.scenePhase) private var scenePhase
     /// False until the TOS is accepted, after which the welcome page is gone.
     @AppStorage("hasAcceptedTOS") private var hasAcceptedTOS = false
     /// False until account setup is completed or skipped. Never reset, even if
@@ -83,12 +86,21 @@ struct SideInstallerApp: App {
             }
             .animation(.smooth(duration: 0.5), value: hasAcceptedTOS)
             .animation(.smooth(duration: 0.5), value: hasCompletedAccountSetup)
+            // LocalDevVPN 连好跳回来（或 App 从后台回前台）时，
+            // 若有快捷指令留下的待续签标记，接着把续签跑完。
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    SideloadedAppsManager.shared.consumePendingRefresh()
+                }
+            }
             // Files opened in the app (share sheet, "Open with", other apps), as
             // an alternative to the document picker.
             .onOpenURL { url in
                 // Handle `sideinstaller://refresh-all` from Shortcuts App Intent.
                 if url.scheme == "sideinstaller" && url.host == "refresh-all" {
                     NotificationCenter.default.post(name: .refreshAllApps, object: nil)
+                    // 界面不在应用页时通知没人接，共享 manager 自己在后台跑
+                    Task { await SideloadedAppsManager.shared.refreshAllFromShortcut() }
                     return
                 }
                 // Ignore other `sideinstaller://` URLs: LocalDevVPN only uses them to

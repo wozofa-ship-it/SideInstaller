@@ -67,7 +67,8 @@ struct RootView: View {
     @StateObject private var pairingManager = PairingManager()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var entitlementsManager = EntitlementsManager()
-    @StateObject private var appsManager = SideloadedAppsManager()
+    /// 与快捷指令共用同一个实例（SideloadedAppsManager.shared），后台续签状态界面可见。
+    @ObservedObject private var appsManager = SideloadedAppsManager.shared
     @StateObject private var sideBySideManager = SideBySideManager()
     /// The last two-factor prompt shown, so the sheet keeps its content while it
     /// slides away after the sign-in clears it.
