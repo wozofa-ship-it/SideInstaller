@@ -796,7 +796,17 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let label = Guides.vpn.actionLabel, let url = Guides.vpn.actionURL {
+                    if engine.localDevVPNInstalled {
+                        // 装了就直接打开 LocalDevVPN 连接并自动跳回，不再去 App Store 获取
+                        Button { engine.startLocalDevVPN() } label: {
+                            Label(L("打开 LocalDevVPN"), systemImage: "arrow.up.right")
+                                .font(.footnote.weight(.semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(.red)
+                        .padding(.top, 2)
+                    } else if let label = Guides.vpn.actionLabel, let url = Guides.vpn.actionURL {
                         Button { openURL(url) } label: {
                             Label(label, systemImage: "arrow.up.right")
                                 .font(.footnote.weight(.semibold))
