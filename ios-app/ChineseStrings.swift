@@ -17,7 +17,7 @@ let chineseStrings: [String: String] = [
     "Cancelling": "正在取消",
     "Installed": "已安装",
     "Something went wrong": "出了点问题",
-    "an app by Frizzle": "解剖自我 🅥修改版",
+    "an app by Frizzle": "由 Frizzle 打造的应用 · 解剖自我 🅥修改版",
     "device": "设备",
 
     // MARK: - Welcome

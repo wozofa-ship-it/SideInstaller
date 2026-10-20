@@ -433,6 +433,19 @@ final class SideloadedAppsManager: ObservableObject {
             lastError = L("An install is already running. Wait for it to finish, then refresh.")
             return
         }
+        // 隧道没通时先查 WiFi：没开 WiFi 隧道那头连不上，先把话说清。
+        // 没装 LocalDevVPN 也一样，别让流程跑到一半才报个看不懂的连接错误。
+        engine.refreshNetworkStatus()
+        if !engine.vpnConnected && !engine.wifiConnected {
+            lastError = L("WiFi 未打开，请先打开 WiFi 再续签。")
+            engine.log("⛔️ Refresh all: Wi-Fi is off.")
+            return
+        }
+        if !engine.vpnConnected && !engine.localDevVPNInstalled {
+            lastError = L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。")
+            engine.log("⛔️ Refresh all: LocalDevVPN isn't installed.")
+            return
+        }
         jobs = refreshable
         isRefreshing = true
         lastError = nil
@@ -570,6 +583,11 @@ struct AppsView: View {
     @State private var showSettings = false
     /// Shows the "Refresh all" confirmation alert.
     @State private var confirmRefresh = false
+    /// Shows the "LocalDevVPN isn't installed" prompt with a link to get it.
+    @State private var showInstallLOCPrompt = false
+    /// Shows the "Wi-Fi is off" prompt.
+    @State private var showNoWiFiPrompt = false
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
@@ -598,7 +616,21 @@ struct AppsView: View {
             manager.refreshAll()
         }
         .alert(L("Refresh all apps?"), isPresented: $confirmRefresh) {
-            Button(L("Refresh all")) { manager.refreshAll() }
+            Button(L("Refresh all")) {
+                // 点续签先做一轮检查：隧道已通直接签；没通先看 WiFi 开没开、
+                // LocalDevVPN 装没装，缺哪个提示哪个。都齐了就开签，
+                // 流程里的 tunnelUp() 会自己打开 LocalDevVPN 连接并跳回来。
+                engine.refreshNetworkStatus()
+                if engine.vpnConnected {
+                    manager.refreshAll()
+                } else if !engine.wifiConnected {
+                    showNoWiFiPrompt = true
+                } else if !engine.localDevVPNInstalled {
+                    showInstallLOCPrompt = true
+                } else {
+                    manager.refreshAll()
+                }
+            }
             Button(L("Cancel"), role: .cancel) { }
         } message: {
             Text(manager.refreshable.count == 1
@@ -606,6 +638,26 @@ struct AppsView: View {
                      manager.refreshable.first?.name ?? "")
                  : L("%d apps will be signed again with your Apple ID and installed over the copies on this device. They keep their data, and their seven days start over.",
                      manager.refreshable.count))
+        }
+        .alert(L("未安装 LocalDevVPN"), isPresented: $showInstallLOCPrompt) {
+            Button(L("去安装")) {
+                if let url = URL(string: "https://xiaofang-source.pages.dev/localdevvpn.ipa") {
+                    openURL(url)
+                }
+            }
+            Button(L("Cancel"), role: .cancel) { }
+        } message: {
+            Text(L("续签要走 LocalDevVPN 的本地隧道。先装好 LocalDevVPN，之后点续签会自动打开它连接，不用手动开。"))
+        }
+        .alert(L("WiFi 未打开"), isPresented: $showNoWiFiPrompt) {
+            Button(L("去设置")) {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            }
+            Button(L("Cancel"), role: .cancel) { }
+        } message: {
+            Text(L("续签要用本地网络，先打开 WiFi 再点续签。"))
         }
     }
 

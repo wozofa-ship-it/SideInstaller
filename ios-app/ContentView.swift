@@ -23,6 +23,11 @@ struct ContentView: View {
     @State private var installPressed = false
     /// Shows the "are you sure" alert before the progress card's X stops a run.
     @State private var confirmingCancel = false
+    /// Shows the "install LocalDevVPN first" prompt when Install is tapped
+    /// with no tunnel and no LocalDevVPN on the phone.
+    @State private var showInstallLOCPrompt = false
+    /// Shows the "Wi-Fi is off" prompt when Install is tapped with no tunnel.
+    @State private var showNoWiFiPrompt = false
     /// Text in the IPA download-link field.
     @State private var ipaLink = ""
     @FocusState private var linkFieldFocused: Bool
@@ -464,6 +469,26 @@ struct ContentView: View {
             Button(L("Yes"), role: .destructive) { engine.cancelOneClick() }
             Button(L("No"), role: .cancel) { }
         }
+        .alert(L("未安装 LocalDevVPN"), isPresented: $showInstallLOCPrompt) {
+            Button(L("去安装")) {
+                if let url = URL(string: "https://xiaofang-source.pages.dev/localdevvpn.ipa") {
+                    openURL(url)
+                }
+            }
+            Button(L("Cancel"), role: .cancel) { }
+        } message: {
+            Text(L("安装要走 LocalDevVPN 的本地隧道。先装好 LocalDevVPN，之后点安装会自动打开它连接，不用手动开。"))
+        }
+        .alert(L("WiFi 未打开"), isPresented: $showNoWiFiPrompt) {
+            Button(L("去设置")) {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(url)
+                }
+            }
+            Button(L("Cancel"), role: .cancel) { }
+        } message: {
+            Text(L("安装要用本地网络，先打开 WiFi 再点安装。"))
+        }
         .onChange(of: engine.isRunning) { _, running in
             // A run that ended by itself leaves nothing to cancel.
             if !running { confirmingCancel = false }
@@ -479,6 +504,20 @@ struct ContentView: View {
     /// run is going, so nothing waits on the animation.
     private func startInstall() {
         installPressed = false
+        // 点安装先检查隧道：没通就先看 WiFi 开没开、LocalDevVPN 装没装，
+        // 缺哪个提示哪个；都齐了就开装，流程里的 tunnelUp() 会自己
+        // 打开 LocalDevVPN 连接并跳回来。
+        engine.refreshNetworkStatus()
+        if !engine.vpnConnected {
+            if !engine.wifiConnected {
+                showNoWiFiPrompt = true
+                return
+            }
+            if !engine.localDevVPNInstalled {
+                showInstallLOCPrompt = true
+                return
+            }
+        }
         engine.runOneClick()
     }
 
