@@ -23,6 +23,29 @@ enum Theme {
     }
 }
 
+/// 界面外观：跟随系统 / 浅色 / 深色。设置页与 App 入口共用同一
+/// UserDefaults 键（SIDAppearance），入口处统一用 preferredColorScheme 生效。
+enum AppAppearance: String, CaseIterable {
+    case system, light, dark
+
+    /// 传给 preferredColorScheme 的值；nil 表示跟随系统。
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .system: return L("Follow System")
+        case .light:  return L("Light")
+        case .dark:   return L("Dark")
+        }
+    }
+}
+
 // MARK: - Backdrop level
 
 /// Shared backdrop darkness level and its animation between tabs.
@@ -81,20 +104,25 @@ enum Backdrop {
 /// whose control points sway on sine waves, and over that the tab's `Backdrop`
 /// wash.
 struct AppBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         // Ticks every frame, with the points derived from the clock so the
         // motion is continuous rather than resetting on a keyframe.
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let dark = colorScheme == .dark
             ZStack {
-                Color.black
+                // 深色是原来的 OLED 黑；浅色用系统背景，让同一套网格透出来。
+                dark ? Color.black : Color(.systemBackground)
                 mesh(at: t)
                     .blur(radius: 24)
                     // Low enough to read as a deep tint rather than a light.
-                    .opacity(0.2)
+                    .opacity(dark ? 0.2 : 0.35)
                 // Off the same clock as the mesh, so every page's copy of this
                 // backdrop is at the identical point of the transition.
-                Color.black.opacity(Backdrop.wash(at: t))
+                // 浅色下压暗层减弱，只留一点层次，不把白底压成灰。
+                Color.black.opacity(Backdrop.wash(at: t) * (dark ? 1 : 0.35))
             }
             .ignoresSafeArea()
         }
@@ -167,6 +195,8 @@ private struct CardSurface<S: InsettableShape>: ViewModifier {
     /// is a card only some of the time.
     var shown: Bool
 
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         content
             .background(shape.fill(wash))
@@ -174,17 +204,30 @@ private struct CardSurface<S: InsettableShape>: ViewModifier {
     }
 
     /// A sheen that fades out down the pane, so it has a surface at all.
+    /// 深色下是白色微光；浅色下换成白色磨砂面，压住背后的网格。
     private var wash: LinearGradient {
-        LinearGradient(colors: [.white.opacity(shown ? 0.025 : 0), .clear],
-                       startPoint: .top, endPoint: .bottom)
+        if colorScheme == .dark {
+            return LinearGradient(colors: [.white.opacity(shown ? 0.025 : 0), .clear],
+                                  startPoint: .top, endPoint: .bottom)
+        }
+        return LinearGradient(colors: [.white.opacity(shown ? 0.55 : 0), .white.opacity(shown ? 0.22 : 0)],
+                              startPoint: .top, endPoint: .bottom)
     }
 
+    /// 深色下描白边；浅色下白边看不见，换成黑色细边。
     private var rim: LinearGradient {
-        LinearGradient(stops: [.init(color: .white.opacity(shown ? 0.38 : 0), location: 0),
-                               .init(color: .white.opacity(shown ? 0.08 : 0), location: 0.35),
-                               .init(color: .white.opacity(shown ? 0.05 : 0), location: 0.8),
-                               .init(color: .white.opacity(shown ? 0.18 : 0), location: 1)],
-                       startPoint: .top, endPoint: .bottom)
+        if colorScheme == .dark {
+            return LinearGradient(stops: [.init(color: .white.opacity(shown ? 0.38 : 0), location: 0),
+                                           .init(color: .white.opacity(shown ? 0.08 : 0), location: 0.35),
+                                           .init(color: .white.opacity(shown ? 0.05 : 0), location: 0.8),
+                                           .init(color: .white.opacity(shown ? 0.18 : 0), location: 1)],
+                                  startPoint: .top, endPoint: .bottom)
+        }
+        return LinearGradient(stops: [.init(color: .black.opacity(shown ? 0.20 : 0), location: 0),
+                                      .init(color: .black.opacity(shown ? 0.08 : 0), location: 0.35),
+                                      .init(color: .black.opacity(shown ? 0.05 : 0), location: 0.8),
+                                      .init(color: .black.opacity(shown ? 0.12 : 0), location: 1)],
+                              startPoint: .top, endPoint: .bottom)
     }
 }
 
@@ -386,13 +429,15 @@ struct PopupGroupCard<Content: View>: View {
 private struct PopupCloseButton: View {
     var action: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(.secondary)
                 .padding(8)
-                .background(Circle().fill(.white.opacity(0.08)))
+                .background(Circle().fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.06)))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L("Close"))
@@ -687,13 +732,15 @@ struct BrandHeader<Accessory: View>: View {
 
 /// Inset, filled text-field background, softer than `.roundedBorder`.
 private struct FieldBackground: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.white.opacity(0.07))
+                    .fill(colorScheme == .dark ? .white.opacity(0.07) : .black.opacity(0.05))
             )
     }
 }

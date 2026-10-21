@@ -23,12 +23,20 @@ struct SettingsView: View {
     /// True once "Custom…" is picked, revealing the free-form URL field.
     @State private var anisetteIsCustom = false
 
+    /// 常驻后台自动续签开关，与 AutoRefreshService 共用同一 UserDefaults 键。
+    @AppStorage("SIDAutoRefreshEnabled") private var autoRefreshEnabled = false
+
+    /// 界面外观，与 App 入口共用同一 UserDefaults 键，改完立即生效。
+    @AppStorage("SIDAppearance") private var appearance: AppAppearance = .system
+
     var body: some View {
         NavigationStack {
             Form {
                 accountSection
                 languageSection
+                appearanceSection
                 tunnelSection
+                autoRefreshSection
                 downloadsSection
                 anisetteSection
                 advancedSection
@@ -168,6 +176,22 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Appearance
+
+    /// 外观三档：跟随系统 / 浅色 / 深色，由 App 入口统一应用到整个窗口。
+    private var appearanceSection: some View {
+        Section {
+            Picker(L("Appearance"), selection: $appearance) {
+                ForEach(AppAppearance.allCases, id: \.self) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text(L("Appearance"))
+        }
+    }
+
     // MARK: Tunnel
 
     /// LocalDevVPN controls: start it whenever something needs the tunnel, or
@@ -190,6 +214,23 @@ struct SettingsView: View {
             if !engine.localDevVPNInstalled {
                 Text(L("LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you."))
             }
+        }
+    }
+
+    // MARK: Auto refresh
+
+    /// 常驻后台自动续签：开了之后 AutoRefreshService 双保活巡检，
+    /// 描述文件 3 天内到期的 App 自动续签，不用再靠手动或快捷指令触发。
+    private var autoRefreshSection: some View {
+        Section {
+            Toggle(L("Refresh apps automatically in background"), isOn: $autoRefreshEnabled)
+                .onChange(of: autoRefreshEnabled) { _, _ in
+                    AutoRefreshService.shared.applySetting()
+                }
+        } header: {
+            Text(L("Auto Refresh"))
+        } footer: {
+            Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected."))
         }
     }
 

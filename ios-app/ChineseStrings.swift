@@ -462,6 +462,10 @@ let chineseStrings: [String: String] = [
     "Language": "语言",
     "App language": "应用语言",
     "Auto": "自动",
+    "Appearance": "外观",
+    "Follow System": "跟随系统",
+    "Light": "浅色",
+    "Dark": "深色",
     // The Tunnel section: starting LocalDevVPN from here.
     "Tunnel": "隧道",
     "Something at %@:%d refused the connection, so the tunnel is carrying traffic — the device just isn't listening on its pairing port. That port only opens while Developer Mode is on, and iOS asks for it again after every restart: turn it on under Settings › Privacy & Security › Developer Mode, then try again. If it's already on, pair this iPhone again under “Pairing file”.":
@@ -470,6 +474,12 @@ let chineseStrings: [String: String] = [
     "Start LocalDevVPN now": "立即启动 LocalDevVPN",
     "LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you.":
         "未安装 LocalDevVPN。请从 App Store 获取，SideInstaller 就能为你启动它。",
+
+    // The Auto Refresh section: resident background patrol re-signing.
+    "Auto Refresh": "自动续签",
+    "Refresh apps automatically in background": "后台自动续签",
+    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected.":
+        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且 LocalDevVPN 需保持连接。",
 
     "Downloaded IPAs": "已下载的 IPA",
     "%@ used": "已用 %@",

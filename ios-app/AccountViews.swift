@@ -33,7 +33,6 @@ struct AccountSetupView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .preferredColorScheme(.dark)
         // Focus only once the welcome page has zoomed away and the card has
         // faded in. AutoFill pairs the username field with a *visible* password
         // field when it gains focus; focusing during the entrance (card still

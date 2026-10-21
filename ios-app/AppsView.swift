@@ -436,8 +436,13 @@ final class SideloadedAppsManager: ObservableObject {
 
     /// Re-signs and reinstalls every refreshable app, one at a time (they share
     /// one device link and signing queue, and Apple's API is rate-limited).
-    func refreshAll() {
-        guard !isRefreshing, !isWorking, !refreshable.isEmpty else { return }
+    /// `onlyBundleIDs` 给定时，自动巡检只续到期的那几个；界面和快捷指令不传，
+    /// 照旧全续。
+    func refreshAll(onlyBundleIDs: Set<String>? = nil) {
+        let candidates = onlyBundleIDs.map { ids in
+            refreshable.filter { ids.contains($0.bundleID) }
+        } ?? refreshable
+        guard !isRefreshing, !isWorking, !candidates.isEmpty else { return }
         guard !engine.isRunning else {
             lastError = L("An install is already running. Wait for it to finish, then refresh.")
             return
@@ -455,7 +460,7 @@ final class SideloadedAppsManager: ObservableObject {
             engine.log("⛔️ Refresh all: LocalDevVPN isn't installed.")
             return
         }
-        jobs = refreshable
+        jobs = candidates
         isRefreshing = true
         lastError = nil
         refreshSummary = nil

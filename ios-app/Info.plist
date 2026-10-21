@@ -9,7 +9,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>SideInstaller</string>
+	<string>Side+</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -77,7 +77,7 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SideInstaller advertises an on-device pairing service so this iPhone can pair with it, and connects to the local lockdown daemon to install apps.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>SideInstaller can use location to keep running while you approve pairing in Settings.</string>
+	<string>SideInstaller can use location to keep running while you approve pairing in Settings, and to stay alive in the background so automatic refresh can re-sign your apps before they expire.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>SideInstaller can use location to keep running while you approve pairing in Settings.</string>
 	<key>NSSupportsLiveActivities</key>

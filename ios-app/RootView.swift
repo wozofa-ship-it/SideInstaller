@@ -111,7 +111,6 @@ struct RootView: View {
             sideBySideManager.signOut()
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
         // A swipe down is a cancel; the sign-in closing it is not.
         .sheet(isPresented: Binding(
             get: { engine.twoFactor != nil },

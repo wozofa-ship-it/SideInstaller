@@ -47,7 +47,6 @@ struct WelcomeView: View {
                 .padding(.bottom, 28)
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     /// Notice for iOS below 27, explaining the extra pairing-file step.

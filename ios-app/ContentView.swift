@@ -164,7 +164,7 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "SideInstaller",
+        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "Side+",
                     animateIcon: engine.isRunning) {
             statusPill
                 .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))
