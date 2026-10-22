@@ -40,31 +40,38 @@ enum BuiltinTunnel {
             return false
         }
         for attempt in 1...2 {
+            let manager: NETunnelProviderManager
             do {
-                let manager = try await loadOrCreateManager()
-                if manager.connection.status == .connected { return true }
-                try manager.connection.startVPNTunnel()
-                let deadline = Date().addingTimeInterval(timeout)
-                var invalid = false
-                while Date() < deadline, !invalid {
-                    switch manager.connection.status {
-                    case .connected:
-                        return true
-                    case .invalid:
-                        invalid = true
-                    default:
-                        break
-                    }
-                    if !invalid {
-                        try? await Task.sleep(nanoseconds: 300_000_000)
-                    }
-                    if Task.isCancelled { return false }
-                }
-                if invalid {
-                    Engine.shared.log("Built-in tunnel: connection went invalid on attempt \(attempt).")
-                }
+                manager = try await loadOrCreateManager()
             } catch {
-                Engine.shared.log("Built-in tunnel: start failed on attempt \(attempt): \(error.localizedDescription)")
+                Engine.shared.log("Built-in tunnel: load/create configuration failed on attempt \(attempt): \(error.localizedDescription)")
+                continue
+            }
+            if manager.connection.status == .connected { return true }
+            do {
+                try manager.connection.startVPNTunnel()
+            } catch {
+                Engine.shared.log("Built-in tunnel: startVPNTunnel failed on attempt \(attempt): \(error.localizedDescription) (enabled=\(manager.isEnabled))")
+                continue
+            }
+            let deadline = Date().addingTimeInterval(timeout)
+            var invalid = false
+            while Date() < deadline, !invalid {
+                switch manager.connection.status {
+                case .connected:
+                    return true
+                case .invalid:
+                    invalid = true
+                default:
+                    break
+                }
+                if !invalid {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                }
+                if Task.isCancelled { return false }
+            }
+            if invalid {
+                Engine.shared.log("Built-in tunnel: connection went invalid on attempt \(attempt).")
             }
         }
         Engine.shared.log("Built-in tunnel: not connected after 2 attempts.")
@@ -79,6 +86,15 @@ enum BuiltinTunnel {
         if let existing = managers.first(where: {
             ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == providerBundleID
         }) {
+            // 已有配置若是禁用状态，startVPNTunnel 会立刻抛
+            // NEVPNErrorDomain error 2（ConfigurationDisabled）：
+            // 先启用、保存、重读，再交给启动流程。
+            if !existing.isEnabled {
+                existing.isEnabled = true
+                try await existing.saveToPreferences()
+                try await existing.loadFromPreferences()
+                Engine.shared.log("Built-in tunnel: existing configuration was disabled; re-enabled it.")
+            }
             return existing
         }
         let manager = NETunnelProviderManager()
