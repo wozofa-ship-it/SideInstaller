@@ -2308,16 +2308,22 @@ final class Engine: ObservableObject {
     var startsVPNWhenNeeded: Bool { autoStartVPN }
 
     /// True when the tunnel is up, or will be started by what needs it.
-    var tunnelAvailable: Bool { vpnConnected || startsVPNWhenNeeded }
+    /// The built-in tunnel counts: it's part of the app itself, so it can
+    /// always be started — the auto-start setting only governs jumping
+    /// over to the separate LocalDevVPN app.
+    var tunnelAvailable: Bool { vpnConnected || startsVPNWhenNeeded || BuiltinTunnel.isBundled }
 
-    /// Makes sure the tunnel is up for something about to use it. With “Start
-    /// LocalDevVPN when needed” on and no tunnel, starts Side+'s built-in
-    /// tunnel first; only if that fails does it hand over to LocalDevVPN and
-    /// wait for the tunnel once SideInstaller is back. Returns whether it's up.
+    /// Makes sure the tunnel is up for something about to use it. Starts
+    /// Side+'s built-in tunnel first — that part is not gated by the
+    /// “Start LocalDevVPN when needed” setting; only if the built-in fails
+    /// and that setting is on does it hand over to LocalDevVPN and wait
+    /// for the tunnel once SideInstaller is back. Returns whether it's up.
     @MainActor
     func tunnelUp() async -> Bool {
         refreshNetworkStatus()
-        guard !vpnConnected, startsVPNWhenNeeded else { return vpnConnected }
+        // 内置隧道不受自动启动开关限制：它是 App 自带的一部分。
+        // 那个开关只管内置起不来时要不要自动跳去打开独立装的 LOC。
+        guard !vpnConnected, startsVPNWhenNeeded || BuiltinTunnel.isBundled else { return vpnConnected }
         // Built-in tunnel first: no app switch, no dependency on a
         // separately installed LocalDevVPN.
         if await BuiltinTunnel.startAndWait() {
@@ -2328,8 +2334,9 @@ final class Engine: ObservableObject {
             }
         }
         // Built-in didn't come up (e.g. the network-extension entitlement
-        // didn't survive signing) — fall back to LocalDevVPN if it's there.
-        guard localDevVPNInstalled else { return false }
+        // didn't survive signing) — fall back to LocalDevVPN if it's there
+        // and the user left automatic start on.
+        guard startsVPNWhenNeeded, localDevVPNInstalled else { return false }
         // A handover a moment ago is still under way: wait for it, don't
         // open LocalDevVPN again.
         let handingOver = lastVPNStartAttempt.map { Date().timeIntervalSince($0) < 5 } ?? false
@@ -2574,7 +2581,9 @@ final class Engine: ObservableObject {
     private func ensurePairingConnection() async throws {
         // No Wi-Fi check: this all runs over the loopback tunnel.
         guard await tunnelUp() else {
-            throw EngineError.message(L("LocalDevVPN isn't connected. Connect it, then try again."))
+            throw EngineError.message(BuiltinTunnel.isBundled
+                ? L("The built-in tunnel couldn't start. See the log for the reason, then try again.")
+                : L("LocalDevVPN isn't connected. Connect it, then try again."))
         }
         let path = pairingFilePath ?? PairingController.pairingFilePath()
         guard fileExistsNonEmpty(path) else {

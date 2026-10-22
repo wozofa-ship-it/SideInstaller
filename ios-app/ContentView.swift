@@ -121,7 +121,7 @@ struct ContentView: View {
             // 打开 App 就把隧道连上（内置优先，首次会弹一次系统的
             // VPN 许可，之后静默自动连），不等用到时才手忙脚乱。
             .task {
-                if engine.startsVPNWhenNeeded, !engine.vpnConnected {
+                if !engine.vpnConnected {
                     _ = await engine.tunnelUp()
                 }
             }
@@ -190,7 +190,7 @@ struct ContentView: View {
             StatusPill(text: summary, systemImage: "iphone", color: .green)
         } else if engine.vpnConnected {
             StatusPill(text: L("Tunnel connected"), systemImage: "checkmark.shield.fill", color: .green)
-        } else if engine.startsVPNWhenNeeded {
+        } else if engine.startsVPNWhenNeeded || BuiltinTunnel.isBundled {
             // Install starts it, so this isn't a problem to flag.
             StatusPill(text: L("Tunnel off"), systemImage: "shield.slash.fill", color: .orange, glass: true)
         } else {

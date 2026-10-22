@@ -121,9 +121,10 @@ final class LocationManager: ObservableObject {
     /// Runs setup in the background: downloads the disk image, mounts it if the
     /// device has none, and opens the DVT session.
     ///
-    /// Called when the page opens. Without a tunnel it stops after the
-    /// download, since opening the page doesn't start LocalDevVPN. Failures are
-    /// only logged; `simulate` repeats the setup and shows errors to the user.
+    /// Called when the page opens. It brings the tunnel up first (built-in
+    /// first); if the tunnel still isn't up it stops after the download.
+    /// Failures are only logged; `simulate` repeats the setup and shows
+    /// errors to the user.
     ///
     /// Uses its own task, so leaving the page doesn't cancel it.
     func prepareQuietly() {
@@ -139,10 +140,16 @@ final class LocationManager: ObservableObject {
 
     /// Download the image if it's missing, mount it if the device has none, and
     /// open the location session. Every step is a no-op once it has run, so this
-    /// is cheap to call again. `quietly` leaves the device alone unless the
-    /// tunnel is already up.
+    /// is cheap to call again. The tunnel is brought up first; `quietly` then
+    /// still skips the device steps if it didn't come up.
     private func ensureReady(quietly: Bool = false) async throws {
         guard stage != .ready else { return }
+        // 需要隧道的步骤先把隧道拉起来（内置优先）：进页面准备、
+        // 设置定位都一样，不再干等隧道已经连上。
+        if !engine.vpnConnected {
+            _ = await engine.tunnelUp()
+            engine.refreshNetworkStatus()
+        }
         if !DeveloperDiskImage.isDownloaded {
             stage = .downloading
             try await DeveloperDiskImage.downloadMissing { _ in }

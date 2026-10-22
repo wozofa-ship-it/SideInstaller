@@ -455,7 +455,7 @@ final class SideloadedAppsManager: ObservableObject {
             engine.log("⛔️ Refresh all: Wi-Fi is off.")
             return
         }
-        if !engine.vpnConnected && !engine.localDevVPNInstalled {
+        if !engine.vpnConnected && !engine.localDevVPNInstalled && !BuiltinTunnel.isBundled {
             lastError = L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。")
             engine.log("⛔️ Refresh all: LocalDevVPN isn't installed.")
             return
