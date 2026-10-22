@@ -44,6 +44,7 @@ targets:
     # extension. Whether it survives depends on the final signing —
     # the same requirement LocalDevVPN has always had.
     entitlements:
+      path: ios-app/SideInstaller.entitlements
       properties:
         com.apple.developer.networking.networkextension:
           - packet-tunnel-provider
@@ -88,6 +89,7 @@ targets:
     sources:
       - path: TunnelProv
     entitlements:
+      path: TunnelProv/TunnelProv.entitlements
       properties:
         com.apple.developer.networking.networkextension:
           - packet-tunnel-provider
