@@ -482,8 +482,8 @@ let chineseStrings: [String: String] = [
     // The Auto Refresh section: resident background patrol re-signing.
     "Auto Refresh": "自动续签",
     "Refresh apps automatically in background": "后台自动续签",
-    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected. The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
-        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且 LocalDevVPN 需保持连接。系统也会在后台适时唤醒它巡检，请勿在多任务界面手动划掉。",
+    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
+        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且隧道需保持连接（内置隧道即可）。系统也会在后台适时唤醒它巡检，请勿在多任务界面手动划掉。",
 
     "Downloaded IPAs": "已下载的 IPA",
     "%@ used": "已用 %@",

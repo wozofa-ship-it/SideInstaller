@@ -166,7 +166,7 @@ final class Engine: ObservableObject {
     var deviceHost: String { NetworkStatus.host(deviceIP) }
     // Which build to install (SideStore, LiveContainer + SideStore, Madeira, or
     // an imported IPA).
-    @Published var installSource: InstallSource = .sideStore
+    @Published var installSource: InstallSource = .custom
     // Which release track to pull that build from (stable or nightly).
     @Published var releaseChannel: ReleaseChannel = .stable
     /// The track the selected build is installed from: the picked one, or

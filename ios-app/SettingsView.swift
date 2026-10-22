@@ -203,13 +203,6 @@ struct SettingsView: View {
     @ViewBuilder
     private var tunnelSection: some View {
         Section {
-            Toggle(L("Start LocalDevVPN when needed"), isOn: $engine.autoStartVPN)
-            Button {
-                engine.startLocalDevVPN()
-            } label: {
-                Label(L("Start LocalDevVPN now"), systemImage: "bolt.horizontal.circle")
-            }
-            .disabled(!engine.localDevVPNInstalled)
             HStack {
                 Text(L("Built-in tunnel interface"))
                 Spacer()
@@ -245,19 +238,9 @@ struct SettingsView: View {
         } header: {
             Text(L("Tunnel"))
         } footer: {
-            Text(tunnelFooterText)
+            // 只留内置隧道：说明地址默认值与生效时机。
+            Text(L("Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects."))
         }
-    }
-
-    /// 隧道段脚注：LocalDevVPN 未装时先解释按钮为何点不了，
-    /// 再说明内置隧道地址的默认值与生效时机。
-    private var tunnelFooterText: String {
-        var parts: [String] = []
-        if !engine.localDevVPNInstalled {
-            parts.append(L("LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you."))
-        }
-        parts.append(L("Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects."))
-        return parts.joined(separator: "\n")
     }
 
     // MARK: Auto refresh
@@ -277,7 +260,7 @@ struct SettingsView: View {
         } header: {
             Text(L("Auto Refresh"))
         } footer: {
-            Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected. The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher."))
+            Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher."))
         }
     }
 

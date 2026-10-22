@@ -171,7 +171,7 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "解剖自我 🅥 修改内置隧道版",
+        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "SideStore 🅥",
                     animateIcon: engine.isRunning) {
             statusPill
                 .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))

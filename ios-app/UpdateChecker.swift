@@ -8,9 +8,9 @@ final class UpdateChecker: ObservableObject {
 
     /// Raw contents of the version file on the default branch.
     static let versionFileURL =
-        "https://raw.githubusercontent.com/FrizzleM/SideInstaller/main/latest_version.txt"
+        "https://raw.githubusercontent.com/wozofa-ship-it/SideInstaller/main/latest_version.txt"
     /// The install page the banner opens, which carries the OTA links.
-    static let installPageURL = "https://frizzlem.github.io/SideInstaller/"
+    static let installPageURL = "https://github.com/wozofa-ship-it/SideInstaller"
 
     /// The newest version GitHub advertises, once fetched.
     @Published private(set) var latestVersion: String?
