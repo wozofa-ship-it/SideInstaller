@@ -586,8 +586,14 @@ final class Engine: ObservableObject {
             return
         }
         guard tunnelAvailable else {
-            setGuide(Guides.vpn)
-            log("⛔️ No loopback VPN is connected. Turn one on, then tap Install again.")
+            if BuiltinTunnel.isBundled {
+                // 内置隧道在包里就不再弹 LocalDevVPN 指引卡：
+                // 自动启动关着时，装不成的原因是那个开关。
+                log("⛔️ No loopback VPN is connected, and automatic tunnel start is off. Turn on “Start LocalDevVPN when needed” in Settings, then tap Install again.")
+            } else {
+                setGuide(Guides.vpn)
+                log("⛔️ No loopback VPN is connected. Turn one on, then tap Install again.")
+            }
             return
         }
         // A tunnel pointed at this iPhone's own address can never connect.
@@ -802,10 +808,14 @@ final class Engine: ObservableObject {
                 setGuide(Guides.wifi)
             } else {
                 if announced != "vpn" {
-                    log("Waiting for the loopback tunnel… connect LocalDevVPN, ClashMi, or whichever VPN app you use.")
+                    log("Waiting for the loopback tunnel…")
                     announced = "vpn"
                 }
-                setGuide(Guides.vpn)
+                // 内置隧道在包里时不弹 LocalDevVPN 指引卡：隧道由
+                // tunnelUp() 和打开 App 时自动连接，弹卡只会误导。
+                if !BuiltinTunnel.isBundled {
+                    setGuide(Guides.vpn)
+                }
             }
             try await Task.sleep(nanoseconds: 1_500_000_000)
         }

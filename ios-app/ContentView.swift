@@ -56,7 +56,7 @@ struct ContentView: View {
                         } else if !engine.wifiConnected, engine.needsFreshPairing, engine.canSelfPair {
                             wifiRequirement.cascadeItem(cascade(2))
                         // Not when Install starts LocalDevVPN itself.
-                        } else if !engine.tunnelAvailable {
+                        } else if !engine.tunnelAvailable, !BuiltinTunnel.isBundled {
                             vpnRequirement.cascadeItem(cascade(2))
                         }
                     }
@@ -118,6 +118,13 @@ struct ContentView: View {
                 .ignoresSafeArea()
             }
             .scrollDismissesKeyboard(.interactively)
+            // 打开 App 就把隧道连上（内置优先，首次会弹一次系统的
+            // VPN 许可，之后静默自动连），不等用到时才手忙脚乱。
+            .task {
+                if engine.startsVPNWhenNeeded, !engine.vpnConnected {
+                    _ = await engine.tunnelUp()
+                }
+            }
         }
     }
 

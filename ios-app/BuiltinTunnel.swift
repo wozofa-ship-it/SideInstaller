@@ -29,32 +29,46 @@ enum BuiltinTunnel {
     }
 
     /// 确保内置隧道已连接：没有配置就建（首次会弹系统的 VPN 许可
-    /// 提示），已在连/已连上直接等结果。成功返回 true；任何一步
-    /// 失败返回 false，交给调用方回退 LocalDevVPN。
+    /// 提示），已在连/已连上直接等结果。给两次机会：第一次若是刚
+    /// 保存完配置、系统还没就绪而失败，重新读一遍配置再启一次。
+    /// 成功返回 true；两次都失败返回 false，交给调用方回退
+    /// LocalDevVPN。失败原因写进 App 日志，方便定位。
     @MainActor
-    static func startAndWait(timeout: TimeInterval = 15) async -> Bool {
-        guard isBundled else { return false }
-        do {
-            let manager = try await loadOrCreateManager()
-            if manager.connection.status == .connected { return true }
-            try manager.connection.startVPNTunnel()
-            let deadline = Date().addingTimeInterval(timeout)
-            while Date() < deadline {
-                switch manager.connection.status {
-                case .connected:
-                    return true
-                case .invalid:
-                    return false
-                default:
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                if Task.isCancelled { return false }
-            }
-            return manager.connection.status == .connected
-        } catch {
+    static func startAndWait(timeout: TimeInterval = 10) async -> Bool {
+        guard isBundled else {
+            Engine.shared.log("Built-in tunnel: TunnelProv.appex is missing from the app bundle.")
             return false
         }
+        for attempt in 1...2 {
+            do {
+                let manager = try await loadOrCreateManager()
+                if manager.connection.status == .connected { return true }
+                try manager.connection.startVPNTunnel()
+                let deadline = Date().addingTimeInterval(timeout)
+                var invalid = false
+                while Date() < deadline, !invalid {
+                    switch manager.connection.status {
+                    case .connected:
+                        return true
+                    case .invalid:
+                        invalid = true
+                    default:
+                        break
+                    }
+                    if !invalid {
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                    }
+                    if Task.isCancelled { return false }
+                }
+                if invalid {
+                    Engine.shared.log("Built-in tunnel: connection went invalid on attempt \(attempt).")
+                }
+            } catch {
+                Engine.shared.log("Built-in tunnel: start failed on attempt \(attempt): \(error.localizedDescription)")
+            }
+        }
+        Engine.shared.log("Built-in tunnel: not connected after 2 attempts.")
+        return false
     }
 
     /// 找到我们自己的 VPN 配置；没有就按 LocalDevVPN 的默认地址建
