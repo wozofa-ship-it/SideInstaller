@@ -2292,20 +2292,34 @@ final class Engine: ObservableObject {
         return true
     }
 
-    /// True when something that needs the tunnel starts LocalDevVPN itself, so
-    /// the UI needn't ask for the tunnel first.
-    var startsVPNWhenNeeded: Bool { autoStartVPN && localDevVPNInstalled }
+    /// True when something that needs the tunnel starts it itself, so
+    /// the UI needn't ask for the tunnel first. The built-in tunnel is
+    /// tried first; LocalDevVPN is only the fallback.
+    var startsVPNWhenNeeded: Bool { autoStartVPN }
 
     /// True when the tunnel is up, or will be started by what needs it.
     var tunnelAvailable: Bool { vpnConnected || startsVPNWhenNeeded }
 
     /// Makes sure the tunnel is up for something about to use it. With “Start
-    /// LocalDevVPN when needed” on and no tunnel, hands over to LocalDevVPN and
-    /// waits for the tunnel once SideInstaller is back. Returns whether it's up.
+    /// LocalDevVPN when needed” on and no tunnel, starts Side+'s built-in
+    /// tunnel first; only if that fails does it hand over to LocalDevVPN and
+    /// wait for the tunnel once SideInstaller is back. Returns whether it's up.
     @MainActor
     func tunnelUp() async -> Bool {
         refreshNetworkStatus()
         guard !vpnConnected, startsVPNWhenNeeded else { return vpnConnected }
+        // Built-in tunnel first: no app switch, no dependency on a
+        // separately installed LocalDevVPN.
+        if await BuiltinTunnel.startAndWait() {
+            refreshNetworkStatus()
+            if vpnConnected {
+                log("Tunnel up (built-in).")
+                return true
+            }
+        }
+        // Built-in didn't come up (e.g. the network-extension entitlement
+        // didn't survive signing) — fall back to LocalDevVPN if it's there.
+        guard localDevVPNInstalled else { return false }
         // A handover a moment ago is still under way: wait for it, don't
         // open LocalDevVPN again.
         let handingOver = lastVPNStartAttempt.map { Date().timeIntervalSince($0) < 5 } ?? false

@@ -30,11 +30,25 @@ targets:
     platform: iOS
     sources:
       - path: ios-app
+      # Tunnel addresses shared with the TunnelProv extension.
+      - path: TunnelProv/TunnelConstants.swift
     dependencies:
       - framework: SideInstallerFFI.xcframework
         embed: false
       # Embedded as PlugIns/SideInstallerLiveActivity.appex.
       - target: SideInstallerLiveActivity
+      # Embedded as PlugIns/TunnelProv.appex (built-in loopback tunnel).
+      - target: TunnelProv
+    # Creating/starting our own packet-tunnel VPN configuration needs
+    # the Network Extension entitlement on the app too, not just the
+    # extension. Whether it survives depends on the final signing —
+    # the same requirement LocalDevVPN has always had.
+    entitlements:
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+        com.apple.developer.networking.vpn.api:
+          - allow-vpn
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.frizzle.sideinstaller
@@ -59,5 +73,29 @@ targets:
         # install the app. Change both together.
         PRODUCT_BUNDLE_IDENTIFIER: com.frizzle.sideinstaller.LiveActivity
         INFOPLIST_FILE: ios-live-activity/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+
+  # The built-in loopback tunnel, ported from the open-source
+  # LocalDevVPN (same 10.7.0.1 peer address minimuxer expects, same
+  # packet-reflection trick). Lets Side+ open the tunnel itself
+  # instead of handing over to a separately installed LocalDevVPN;
+  # that app remains the fallback when the built-in tunnel can't
+  # start (e.g. the entitlement didn't survive signing).
+  TunnelProv:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: TunnelProv
+    entitlements:
+      properties:
+        com.apple.developer.networking.networkextension:
+          - packet-tunnel-provider
+    settings:
+      base:
+        # Must stay the app's identifier plus ".TunnelProv" — the app
+        # looks its provider up by this exact bundle ID.
+        PRODUCT_BUNDLE_IDENTIFIER: com.frizzle.sideinstaller.TunnelProv
+        INFOPLIST_FILE: TunnelProv/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         SKIP_INSTALL: YES
