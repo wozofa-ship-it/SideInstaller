@@ -206,6 +206,48 @@ pub unsafe extern "C" fn si_sign_ipa_with_cert(
     )
 }
 
+/// Like `si_sign_ipa_with_cert`, plus a JSON options object with
+/// optional pre-signing modifications (display name, bundle ID,
+/// version, minimum OS, icon) and a signed-.ipa output path.
+///
+/// # Safety
+/// Same contract as `si_sign_ipa_with_cert`; `options_json` may be
+/// null for no modifications.
+#[no_mangle]
+pub unsafe extern "C" fn si_sign_ipa_with_cert_ex(
+    ipa_path: *const c_char,
+    cert_der_path: *const c_char,
+    key_der_path: *const c_char,
+    provision_path: *const c_char,
+    options_json: *const c_char,
+    out_signed_path: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::sign_ipa_with_cert_ex(
+        ipa_path,
+        cert_der_path,
+        key_der_path,
+        provision_path,
+        options_json,
+        out_signed_path,
+        out_error,
+    )
+}
+
+/// Extract an .ipa and return its .app bundle directory, for
+/// installing an already-signed IPA without signing it again.
+///
+/// # Safety
+/// Same contract as `si_sign_ipa_with_cert`.
+#[no_mangle]
+pub unsafe extern "C" fn si_extract_ipa(
+    ipa_path: *const c_char,
+    out_bundle_path: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::extract_ipa(ipa_path, out_bundle_path, out_error)
+}
+
 /// Set `*out_json` to the sign-in an app needs to renew its own provisioning
 /// profile: `{team_id, adsid, token, token_expires, anisette_identifier,
 /// anisette_adi_pb}`. Blocks, but asks Apple nothing.

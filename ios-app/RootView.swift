@@ -8,10 +8,12 @@ struct RootView: View {
     /// The tabs and their backdrop level. The selection is tracked so a tab
     /// switch can animate `Backdrop` to the new level.
     private enum Page: Hashable {
-        case install, tools, about
+        case cert, files, install, tools, about
 
         var wash: Backdrop.Level {
             switch self {
+            case .cert:    .bright
+            case .files:   .bright
             case .install: .bright
             case .tools:   .dark
             // Same as Install, so switching between them doesn't change the backdrop.
@@ -70,6 +72,8 @@ struct RootView: View {
     /// 与快捷指令共用同一个实例（SideloadedAppsManager.shared），后台续签状态界面可见。
     @ObservedObject private var appsManager = SideloadedAppsManager.shared
     @StateObject private var sideBySideManager = SideBySideManager()
+    /// 证书页与文件页之间传递待签 IPA。
+    @StateObject private var certWorkspace = CertWorkspace()
     /// The last two-factor prompt shown, so the sheet keeps its content while it
     /// slides away after the sign-in clears it.
     @State private var shownTwoFactor: TwoFactorPhase?
@@ -78,6 +82,12 @@ struct RootView: View {
     var body: some View {
         // `.tabItem`/`.tag` rather than iOS 18's `Tab`, to keep iOS 17.
         TabView(selection: $page) {
+            CertTabView()
+                .tabItem { Label(L("证书"), systemImage: "checkmark.seal.fill") }
+                .tag(Page.cert)
+            FilesTabView(onGoCert: { page = .cert })
+                .tabItem { Label(L("文件"), systemImage: "folder.fill") }
+                .tag(Page.files)
             ContentView()
                 .tabItem { Label(L("Install"), systemImage: "square.and.arrow.down") }
                 .tag(Page.install)
@@ -93,6 +103,7 @@ struct RootView: View {
                 .tabItem { Label(L("About"), systemImage: "info.circle") }
                 .tag(Page.about)
         }
+        .environmentObject(certWorkspace)
         // Animate the backdrop to the new tab's level.
         .onChange(of: page) { _, page in Backdrop.settle(on: page.wash) }
         // Over the tab bar too, so the whole app dims behind the popups.

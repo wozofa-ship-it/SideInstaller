@@ -168,6 +168,23 @@ int32_t si_sign_ipa_with_cert(const char *ipa_path,
                               char **out_signed_path,
                               char **out_error);
 
+// Like si_sign_ipa_with_cert, plus a JSON options object (may be
+// NULL) with optional pre-signing modifications and a signed-.ipa
+// output: {name, bundleId, version, minOS, iconPng, outIpa}.
+int32_t si_sign_ipa_with_cert_ex(const char *ipa_path,
+                                 const char *cert_der_path,
+                                 const char *key_der_path,
+                                 const char *provision_path,
+                                 const char *options_json,
+                                 char **out_signed_path,
+                                 char **out_error);
+
+// Extract an .ipa and return its .app bundle directory in
+// *out_bundle_path. Free strings with si_string_free.
+int32_t si_extract_ipa(const char *ipa_path,
+                       char **out_bundle_path,
+                       char **out_error);
+
 // The sign-in an app needs to renew its own provisioning profile, for handing
 // to Madeira. BLOCKS, but asks Apple nothing. On success *out_json is a heap
 // JSON object: {team_id, adsid, token, token_expires: <unix seconds, 0 if Apple

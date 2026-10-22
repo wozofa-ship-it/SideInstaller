@@ -92,6 +92,8 @@ plist = "1.8"
 # 企业证书本地签名直接用的两个类型（版本与 isideload 对齐，锁文件里已有）
 rsa = { version = "0.9.10" }
 x509-cert = "0.2.5"
+# 已签 IPA 打包（版本/spec 与 isideload 对齐，锁文件里已有）
+zip = { version = "8.3", default-features = false, features = ["deflate"] }
 base64 = "0.22.1"
 
 # Named in the 2FA bridge's signature: isideload's login callback returns a

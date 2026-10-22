@@ -1732,6 +1732,17 @@ final class Engine: ObservableObject {
     /// 一键安装共用同一套。装完同样要去系统设置里信任该企业证书。
     @MainActor
     func runEnterpriseCertInstall() {
+        guard let entry = IPALibrary.customImport() else {
+            guard !isRunning else { return }
+            setGuide(Guides.customIPA)
+            log("⛔️ 还没导入 IPA。先在上面导入一个 .ipa，再用企业证书签名。")
+            return
+        }
+        runEnterpriseCertInstall(ipaURL: entry.url, mods: CertSignMods())
+    }
+
+    /// 证书页入口：对指定 IPA 用企业证书签名（可带修改项）并安装。
+    func runEnterpriseCertInstall(ipaURL: URL, mods: CertSignMods) {
         guard !isRunning else { return }
         guard osSupported else {
             log("⛔️ iOS \(osVersionText) isn't supported — SideInstaller needs iOS \(Engine.minimumTunnelOSText) or later.")
@@ -1740,11 +1751,6 @@ final class Engine: ObservableObject {
         guard canSelfPair || hasPairingFile else {
             setGuide(Guides.importPairing)
             log("⛔️ 需要配对文件：先导入配对文件，再用企业证书签名。")
-            return
-        }
-        guard let entry = IPALibrary.customImport() else {
-            setGuide(Guides.customIPA)
-            log("⛔️ 还没导入 IPA。先在上面导入一个 .ipa，再用企业证书签名。")
             return
         }
         guard EnterpriseCertStore.ready else {
@@ -1774,9 +1780,9 @@ final class Engine: ObservableObject {
             do {
                 try await ensureNetwork()
                 try await pairAndConnect()
-                downloadedIPAPath = entry.url.path
+                downloadedIPAPath = ipaURL.path
                 downloadedSource = .custom
-                try await signAppWithCert()
+                try await signAppWithCert(mods: mods)
                 try await install(prestaged: nil)
                 finishSuccess()
             } catch is CancellationError {
@@ -1797,18 +1803,18 @@ final class Engine: ObservableObject {
         }
     }
 
-    private func signAppWithCert() async throws {
+    private func signAppWithCert(mods: CertSignMods = CertSignMods()) async throws {
         guard let ipa = downloadedIPAPath else { throw EngineError.message(L("No IPA imported.")) }
         setStep(.sign, .active)
-        let path = try await onSignQueue { try self.performCertSign(ipa: ipa) }
+        let path = try await onSignQueue { try self.performCertSign(ipa: ipa, mods: mods) }
         signedAppPath = path
         signedDisplayName = signedAppName()
         setStep(.sign, .done)
     }
 
     /// 在 Swift 侧用 Security 解开 .p12（证书 + 私钥 DER），交给
-    /// Rust 侧 si_sign_ipa_with_cert 本地签名。
-    private func performCertSign(ipa: String) throws -> String {
+    /// Rust 侧 si_sign_ipa_with_cert_ex 本地签名（可带修改项）。
+    private func performCertSign(ipa: String, mods: CertSignMods = CertSignMods()) throws -> String {
         let (certDER, keyDER) = try EnterpriseCertStore.identityDERs()
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("EnterpriseSign-\(UUID().uuidString)", isDirectory: true)
@@ -1818,11 +1824,19 @@ final class Engine: ObservableObject {
         let keyPath = tmp.appendingPathComponent("key.der")
         try certDER.write(to: certPath)
         try keyDER.write(to: keyPath)
+        var iconPath: String? = nil
+        if let icon = mods.icon {
+            let path = tmp.appendingPathComponent("icon.png")
+            try icon.write(to: path)
+            iconPath = path.path
+        }
+        let json = mods.json(iconPath: iconPath, outIpaPath: nil)
         log("Signing \(ipa) with enterprise cert …")
         var signed: UnsafeMutablePointer<CChar>?
         var error: UnsafeMutablePointer<CChar>?
-        let rc = si_sign_ipa_with_cert(ipa, certPath.path, keyPath.path,
-                                       EnterpriseCertStore.provisionURL.path, &signed, &error)
+        let rc = si_sign_ipa_with_cert_ex(ipa, certPath.path, keyPath.path,
+                                          EnterpriseCertStore.provisionURL.path,
+                                          json, &signed, &error)
         if rc == 0 {
             let path = signed.map { String(cString: $0) } ?? ""
             signed.map { si_string_free($0) }
@@ -1832,6 +1846,83 @@ final class Engine: ObservableObject {
         let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
         error.map { si_string_free($0) }
         throw EngineError.message(L("企业证书签名失败：%@", msg))
+    }
+
+    /// 已签名页入口：解包一个已签好的 IPA 直接安装（不再签一次）。
+    func runInstallSignedIPA(ipaURL: URL) {
+        guard !isRunning else { return }
+        guard osSupported else {
+            log("⛔️ iOS \(osVersionText) isn't supported — SideInstaller needs iOS \(Engine.minimumTunnelOSText) or later.")
+            return
+        }
+        guard canSelfPair || hasPairingFile else {
+            setGuide(Guides.importPairing)
+            log("⛔️ 需要配对文件：先导入配对文件，再安装。")
+            return
+        }
+        refreshNetworkStatus()
+        guard tunnelAvailable else {
+            if BuiltinTunnel.useBuiltinDirectly {
+                log("⛔️ No loopback VPN is connected, and automatic tunnel start is off. Turn on “Start LocalDevVPN when needed” in Settings, then tap Install again.")
+            } else {
+                setGuide(Guides.vpn)
+                log("⛔️ No loopback VPN is connected. Turn one on, then tap Install again.")
+            }
+            return
+        }
+        if NetworkStatus.isOwnAddress(deviceHost) {
+            setGuide(Guides.deviceIPMismatch)
+            log("⛔️ Device IP \(deviceHost) is an address this iPhone already holds — that's the tunnel's own end, not the one to connect to. Check Settings › Advanced › Device IP (the default is 10.7.0.1).")
+            return
+        }
+        resetRun()
+        isRunning = true
+        log("=== Installing already-signed IPA ===")
+
+        pipelineTask = Task { @MainActor in
+            do {
+                try await ensureNetwork()
+                try await pairAndConnect()
+                downloadedIPAPath = ipaURL.path
+                downloadedSource = .custom
+                setStep(.sign, .active)
+                let bundle = try await onSignQueue { try self.performExtract(ipa: ipaURL.path) }
+                signedAppPath = bundle
+                signedDisplayName = signedAppName()
+                setStep(.sign, .done)
+                try await install(prestaged: nil)
+                finishSuccess()
+            } catch is CancellationError {
+                log("Install cancelled.")
+                for s in Step.allCases { stepStates[s] = .pending }
+                installProgress = 0
+                setGuide(nil)
+            } catch {
+                let msg = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                lastError = msg
+                log("⛔️ Stopped: \(msg)")
+                failActiveStep(to: .failed)
+            }
+            stopBackgroundWork()
+            isRunning = false
+            isCancelling = false
+            pairingPIN = nil
+        }
+    }
+
+    /// 用 Rust 侧解包 IPA，返回 .app 包目录。
+    private func performExtract(ipa: String) throws -> String {
+        var bundle: UnsafeMutablePointer<CChar>?
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = si_extract_ipa(ipa, &bundle, &error)
+        if rc == 0 {
+            let path = bundle.map { String(cString: $0) } ?? ""
+            bundle.map { si_string_free($0) }
+            return path
+        }
+        let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
+        error.map { si_string_free($0) }
+        throw EngineError.message(L("IPA 解包失败：%@", msg))
     }
 
     /// True when the IPA at `ipaPath` is Madeira, whichever way it got here: the
