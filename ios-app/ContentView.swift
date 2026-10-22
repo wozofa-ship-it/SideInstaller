@@ -56,7 +56,7 @@ struct ContentView: View {
                         } else if !engine.wifiConnected, engine.needsFreshPairing, engine.canSelfPair {
                             wifiRequirement.cascadeItem(cascade(2))
                         // Not when Install starts LocalDevVPN itself.
-                        } else if !engine.tunnelAvailable, !BuiltinTunnel.isBundled {
+                        } else if !engine.tunnelAvailable, !BuiltinTunnel.useBuiltinDirectly {
                             vpnRequirement.cascadeItem(cascade(2))
                         }
                     }
@@ -190,7 +190,7 @@ struct ContentView: View {
             StatusPill(text: summary, systemImage: "iphone", color: .green)
         } else if engine.vpnConnected {
             StatusPill(text: L("Tunnel connected"), systemImage: "checkmark.shield.fill", color: .green)
-        } else if engine.startsVPNWhenNeeded || BuiltinTunnel.isBundled {
+        } else if engine.startsVPNWhenNeeded || BuiltinTunnel.useBuiltinDirectly {
             // Install starts it, so this isn't a problem to flag.
             StatusPill(text: L("Tunnel off"), systemImage: "shield.slash.fill", color: .orange, glass: true)
         } else {
@@ -531,17 +531,17 @@ struct ContentView: View {
     /// run is going, so nothing waits on the animation.
     private func startInstall() {
         installPressed = false
-        // 点安装先检查隧道：没通就先看 WiFi 开没开。内置隧道在包里
-        // 时不再查 LocalDevVPN——流程里的 tunnelUp() 会自己把内置
-        // 隧道拉起来（首次弹一次系统许可）；只有不带内置隧道的包
-        // 才按老规矩查 LocalDevVPN 装没装、缺了才提示。
+        // 点安装先检查隧道：没通就先看 WiFi 开没开。签名带隧道权限
+        // （企业证书等）时不再查 LocalDevVPN——流程里的 tunnelUp()
+        // 会自己把内置隧道拉起来（首次弹一次系统许可）；签名带不了
+        // 隧道（个人 ID 等）就按老规矩查 LocalDevVPN、缺了才提示。
         engine.refreshNetworkStatus()
         if !engine.vpnConnected {
             if !engine.wifiConnected {
                 showNoWiFiPrompt = true
                 return
             }
-            if !BuiltinTunnel.isBundled, !engine.localDevVPNInstalled {
+            if !BuiltinTunnel.useBuiltinDirectly, !engine.localDevVPNInstalled {
                 showInstallLOCPrompt = true
                 return
             }

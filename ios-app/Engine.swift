@@ -142,14 +142,14 @@ final class Engine: ObservableObject {
     /// Servers for the picker; a bundled snapshot until the live list loads.
     @Published private(set) var anisetteServers: [AnisetteServer] = AnisetteServer.bundledDefaults
     /// "Start LocalDevVPN when needed" setting: whatever needs the tunnel starts
-    /// LocalDevVPN when it's down, instead of asking for it. Off by default:
-    /// the built-in tunnel is the primary path now, and a first-run user
-    /// shouldn't be thrown over to another app before the built-in tunnel
-    /// has even had its system permission prompt. A stored choice still wins.
+    /// LocalDevVPN when it's down, instead of asking for it. On by default.
+    /// With an entitled signature the built-in tunnel is tried first and
+    /// almost always wins, so this only ever fires for signatures whose
+    /// profile can't run the built-in tunnel (personal ID etc.).
     /// Stored here (not `@AppStorage`) so the engine and the Settings toggle
     /// share one value.
     @Published var autoStartVPN: Bool =
-        (UserDefaults.standard.object(forKey: Engine.autoStartVPNKey) as? Bool) ?? false {
+        (UserDefaults.standard.object(forKey: Engine.autoStartVPNKey) as? Bool) ?? true {
         didSet {
             guard autoStartVPN != oldValue else { return }
             UserDefaults.standard.set(autoStartVPN, forKey: Engine.autoStartVPNKey)
@@ -590,7 +590,7 @@ final class Engine: ObservableObject {
             return
         }
         guard tunnelAvailable else {
-            if BuiltinTunnel.isBundled {
+            if BuiltinTunnel.useBuiltinDirectly {
                 // 内置隧道在包里就不再弹 LocalDevVPN 指引卡：
                 // 自动启动关着时，装不成的原因是那个开关。
                 log("⛔️ No loopback VPN is connected, and automatic tunnel start is off. Turn on “Start LocalDevVPN when needed” in Settings, then tap Install again.")
@@ -815,9 +815,9 @@ final class Engine: ObservableObject {
                     log("Waiting for the loopback tunnel…")
                     announced = "vpn"
                 }
-                // 内置隧道在包里时不弹 LocalDevVPN 指引卡：隧道由
+                // 签名能用内置隧道时不弹 LocalDevVPN 指引卡：隧道由
                 // tunnelUp() 和打开 App 时自动连接，弹卡只会误导。
-                if !BuiltinTunnel.isBundled {
+                if !BuiltinTunnel.useBuiltinDirectly {
                     setGuide(Guides.vpn)
                 }
             }
@@ -2315,7 +2315,7 @@ final class Engine: ObservableObject {
     /// The built-in tunnel counts: it's part of the app itself, so it can
     /// always be started — the auto-start setting only governs jumping
     /// over to the separate LocalDevVPN app.
-    var tunnelAvailable: Bool { vpnConnected || startsVPNWhenNeeded || BuiltinTunnel.isBundled }
+    var tunnelAvailable: Bool { vpnConnected || startsVPNWhenNeeded || BuiltinTunnel.useBuiltinDirectly }
 
     /// Makes sure the tunnel is up for something about to use it. Starts
     /// Side+'s built-in tunnel first — that part is not gated by the
@@ -2327,7 +2327,7 @@ final class Engine: ObservableObject {
         refreshNetworkStatus()
         // 内置隧道不受自动启动开关限制：它是 App 自带的一部分。
         // 那个开关只管内置起不来时要不要自动跳去打开独立装的 LOC。
-        guard !vpnConnected, startsVPNWhenNeeded || BuiltinTunnel.isBundled else { return vpnConnected }
+        guard !vpnConnected, startsVPNWhenNeeded || BuiltinTunnel.useBuiltinDirectly else { return vpnConnected }
         // Built-in tunnel first: no app switch, no dependency on a
         // separately installed LocalDevVPN.
         if await BuiltinTunnel.startAndWait() {
@@ -2585,7 +2585,7 @@ final class Engine: ObservableObject {
     private func ensurePairingConnection() async throws {
         // No Wi-Fi check: this all runs over the loopback tunnel.
         guard await tunnelUp() else {
-            throw EngineError.message(BuiltinTunnel.isBundled
+            throw EngineError.message(BuiltinTunnel.useBuiltinDirectly
                 ? L("The built-in tunnel couldn't start. See the log for the reason, then try again.")
                 : L("LocalDevVPN isn't connected. Connect it, then try again."))
         }

@@ -455,7 +455,7 @@ final class SideloadedAppsManager: ObservableObject {
             engine.log("⛔️ Refresh all: Wi-Fi is off.")
             return
         }
-        if !engine.vpnConnected && !engine.localDevVPNInstalled && !BuiltinTunnel.isBundled {
+        if !engine.vpnConnected && !engine.localDevVPNInstalled && !BuiltinTunnel.useBuiltinDirectly {
             lastError = L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。")
             engine.log("⛔️ Refresh all: LocalDevVPN isn't installed.")
             return
@@ -556,8 +556,8 @@ final class SideloadedAppsManager: ObservableObject {
                 await postResignNotification(title: L("续签失败"), body: L("WiFi 未打开，请先打开 WiFi 再续签。"))
                 return
             }
-            if BuiltinTunnel.isBundled {
-                // 内置隧道不依赖任何外部 App：拉不起来才报失败
+            if BuiltinTunnel.useBuiltinDirectly {
+                // 签名带隧道权限：内置隧道不依赖任何外部 App，拉不起来才报失败
                 guard await BuiltinTunnel.startAndWait() else {
                     await postResignNotification(title: L("续签失败"), body: L("内置隧道没能启动，打开 SideStore 🅥 重试一次。"))
                     return
@@ -713,15 +713,15 @@ struct AppsView: View {
         .alert(L("Refresh all apps?"), isPresented: $confirmRefresh) {
             Button(L("Refresh all")) {
                 // 点续签先做一轮检查：隧道已通直接签；没通先看 WiFi 开没开。
-                // 内置隧道在包里时不再查 LocalDevVPN，refreshAll 里的
-                // tunnelUp() 会自己把内置隧道拉起来；不带内置隧道的包
-                // 才按老规矩查 LocalDevVPN。
+                // 签名带隧道权限时不再查 LocalDevVPN，refreshAll 里的
+                // tunnelUp() 会自己把内置隧道拉起来；签名带不了隧道
+                // （个人 ID 等）才按老规矩查 LocalDevVPN。
                 engine.refreshNetworkStatus()
                 if engine.vpnConnected {
                     manager.refreshAll()
                 } else if !engine.wifiConnected {
                     showNoWiFiPrompt = true
-                } else if !BuiltinTunnel.isBundled, !engine.localDevVPNInstalled {
+                } else if !BuiltinTunnel.useBuiltinDirectly, !engine.localDevVPNInstalled {
                     showInstallLOCPrompt = true
                 } else {
                     manager.refreshAll()

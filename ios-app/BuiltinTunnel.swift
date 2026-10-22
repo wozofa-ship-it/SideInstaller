@@ -28,6 +28,43 @@ enum BuiltinTunnel {
         Bundle.main.path(forResource: "TunnelProv", ofType: "appex", inDirectory: "PlugIns") != nil
     }
 
+    /// 本机这份签名能不能建隧道：看描述文件（embedded.mobileprovision）
+    /// 的权限表里有没有 packet-tunnel 的网络扩展权限。企业证书和开了
+    /// 该能力的付费开发者描述文件都有；免费个人 ID 的 7 天描述文件
+    /// 没有——那种签名下内置隧道根本起不来（LOC 同理，它也是隧道）。
+    static var profileGrantsTunnel: Bool { cachedProfileGrantsTunnel }
+
+    /// 签名在运行时不会变，解析一次就缓存（界面刷新会反复读）。
+    private static let cachedProfileGrantsTunnel: Bool = {
+        guard let profile = embeddedProfile(),
+              let entitlements = profile["Entitlements"] as? [String: Any],
+              let providers = entitlements["com.apple.developer.networking.networkextension"] as? [String] else {
+            return false
+        }
+        return providers.contains("packet-tunnel-provider") || providers.contains("packet-tunnel")
+    }()
+
+    /// 内置隧道在这台设备上真能用：扩展在包里且签名带隧道权限。
+    /// 安装/续签那些入口按这个分支：能用就直走内置隧道，不弹
+    /// LocalDevVPN 的任何提示；不能用就回到原来的 LOC 提示。
+    static var useBuiltinDirectly: Bool { isBundled && profileGrantsTunnel }
+
+    /// embedded.mobileprovision 是 CMS 签名包着的一份 plist：按
+    /// latin1 逐字节映射成字符串（字节不错位）截出 XML 段再解析。
+    /// 只读 Entitlements（纯 ASCII），团队名之类非 ASCII 字段不碰。
+    private static func embeddedProfile() -> [String: Any]? {
+        guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let text = String(data: data, encoding: .isoLatin1),
+              let start = text.range(of: "<?xml"),
+              let end = text.range(of: "</plist>", options: .backwards) else {
+            return nil
+        }
+        let xml = String(text[start.lowerBound..<end.upperBound])
+        guard let xmlData = xml.data(using: .utf8) else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: xmlData, options: [], format: nil)) as? [String: Any]
+    }
+
     /// 隧道在系统 VPN 列表里显示的名字，与 App 显示名一致。
     static let tunnelDisplayName = "SideStore 🅥"
 
@@ -64,6 +101,12 @@ enum BuiltinTunnel {
     static func startAndWait(timeout: TimeInterval = 10) async -> Bool {
         guard isBundled else {
             Engine.shared.log("Built-in tunnel: TunnelProv.appex is missing from the app bundle.")
+            return false
+        }
+        guard profileGrantsTunnel else {
+            // 签名描述文件不带隧道权限（个人 ID 等）：系统不会让
+            // 扩展起来，直接放弃，别白等两轮超时。
+            Engine.shared.log("Built-in tunnel: provisioning profile has no packet-tunnel entitlement (personal-ID signing?) — built-in tunnel unavailable.")
             return false
         }
         for attempt in 1...2 {
