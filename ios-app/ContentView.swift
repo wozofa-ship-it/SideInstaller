@@ -531,16 +531,17 @@ struct ContentView: View {
     /// run is going, so nothing waits on the animation.
     private func startInstall() {
         installPressed = false
-        // 点安装先检查隧道：没通就先看 WiFi 开没开、LocalDevVPN 装没装，
-        // 缺哪个提示哪个；都齐了就开装，流程里的 tunnelUp() 会自己
-        // 打开 LocalDevVPN 连接并跳回来。
+        // 点安装先检查隧道：没通就先看 WiFi 开没开。内置隧道在包里
+        // 时不再查 LocalDevVPN——流程里的 tunnelUp() 会自己把内置
+        // 隧道拉起来（首次弹一次系统许可）；只有不带内置隧道的包
+        // 才按老规矩查 LocalDevVPN 装没装、缺了才提示。
         engine.refreshNetworkStatus()
         if !engine.vpnConnected {
             if !engine.wifiConnected {
                 showNoWiFiPrompt = true
                 return
             }
-            if !engine.localDevVPNInstalled {
+            if !BuiltinTunnel.isBundled, !engine.localDevVPNInstalled {
                 showInstallLOCPrompt = true
                 return
             }

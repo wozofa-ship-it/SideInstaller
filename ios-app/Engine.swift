@@ -142,11 +142,14 @@ final class Engine: ObservableObject {
     /// Servers for the picker; a bundled snapshot until the live list loads.
     @Published private(set) var anisetteServers: [AnisetteServer] = AnisetteServer.bundledDefaults
     /// "Start LocalDevVPN when needed" setting: whatever needs the tunnel starts
-    /// LocalDevVPN when it's down, instead of asking for it. On by default.
+    /// LocalDevVPN when it's down, instead of asking for it. Off by default:
+    /// the built-in tunnel is the primary path now, and a first-run user
+    /// shouldn't be thrown over to another app before the built-in tunnel
+    /// has even had its system permission prompt. A stored choice still wins.
     /// Stored here (not `@AppStorage`) so the engine and the Settings toggle
     /// share one value.
     @Published var autoStartVPN: Bool =
-        (UserDefaults.standard.object(forKey: Engine.autoStartVPNKey) as? Bool) ?? true {
+        (UserDefaults.standard.object(forKey: Engine.autoStartVPNKey) as? Bool) ?? false {
         didSet {
             guard autoStartVPN != oldValue else { return }
             UserDefaults.standard.set(autoStartVPN, forKey: Engine.autoStartVPNKey)

@@ -544,6 +544,7 @@ final class SideloadedAppsManager: ObservableObject {
     // MARK: - 快捷指令后台续签
 
     /// 快捷指令入口：不依赖界面存在，自己加载列表再续签。
+    /// 内置隧道在包里时自己把它拉起来接着签；不带的包才走老路：
     /// 隧道没通且装了 LocalDevVPN 时，先记待续签标记并打开它连接，
     /// 它连好跳回 App 后由 consumePendingRefresh() 接着跑完。
     @MainActor
@@ -555,14 +556,23 @@ final class SideloadedAppsManager: ObservableObject {
                 await postResignNotification(title: L("续签失败"), body: L("WiFi 未打开，请先打开 WiFi 再续签。"))
                 return
             }
-            if !engine.localDevVPNInstalled {
-                await postResignNotification(title: L("续签失败"), body: L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。"))
+            if BuiltinTunnel.isBundled {
+                // 内置隧道不依赖任何外部 App：拉不起来才报失败
+                guard await BuiltinTunnel.startAndWait() else {
+                    await postResignNotification(title: L("续签失败"), body: L("内置隧道没能启动，打开 SideStore 🅥 重试一次。"))
+                    return
+                }
+                engine.refreshNetworkStatus()
+            } else {
+                if !engine.localDevVPNInstalled {
+                    await postResignNotification(title: L("续签失败"), body: L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。"))
+                    return
+                }
+                UserDefaults.standard.set(true, forKey: Self.pendingRefreshKey)
+                engine.log("Refresh all (shortcut): tunnel down, opening LocalDevVPN; will resume on return.")
+                _ = engine.startLocalDevVPN()
                 return
             }
-            UserDefaults.standard.set(true, forKey: Self.pendingRefreshKey)
-            engine.log("Refresh all (shortcut): tunnel down, opening LocalDevVPN; will resume on return.")
-            _ = engine.startLocalDevVPN()
-            return
         }
         await loadThenRefreshAll()
     }
@@ -702,15 +712,16 @@ struct AppsView: View {
         }
         .alert(L("Refresh all apps?"), isPresented: $confirmRefresh) {
             Button(L("Refresh all")) {
-                // 点续签先做一轮检查：隧道已通直接签；没通先看 WiFi 开没开、
-                // LocalDevVPN 装没装，缺哪个提示哪个。都齐了就开签，
-                // 流程里的 tunnelUp() 会自己打开 LocalDevVPN 连接并跳回来。
+                // 点续签先做一轮检查：隧道已通直接签；没通先看 WiFi 开没开。
+                // 内置隧道在包里时不再查 LocalDevVPN，refreshAll 里的
+                // tunnelUp() 会自己把内置隧道拉起来；不带内置隧道的包
+                // 才按老规矩查 LocalDevVPN。
                 engine.refreshNetworkStatus()
                 if engine.vpnConnected {
                     manager.refreshAll()
                 } else if !engine.wifiConnected {
                     showNoWiFiPrompt = true
-                } else if !engine.localDevVPNInstalled {
+                } else if !BuiltinTunnel.isBundled, !engine.localDevVPNInstalled {
                     showInstallLOCPrompt = true
                 } else {
                     manager.refreshAll()
