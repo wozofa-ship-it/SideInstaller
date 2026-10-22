@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SideInstallerFFI
 import SwiftUI
 import UniformTypeIdentifiers
 
