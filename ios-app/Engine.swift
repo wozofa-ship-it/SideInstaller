@@ -1725,6 +1725,115 @@ final class Engine: ObservableObject {
         }
     }
 
+    // MARK: - 企业证书签名安装（本地证书，不用 Apple ID）
+
+    /// 用导入的企业证书（.p12 + 描述文件）给已导入的 IPA 本地
+    /// 签名并安装：跳过登录/下载/苹果那套，配对、隧道、安装与
+    /// 一键安装共用同一套。装完同样要去系统设置里信任该企业证书。
+    @MainActor
+    func runEnterpriseCertInstall() {
+        guard !isRunning else { return }
+        guard osSupported else {
+            log("⛔️ iOS \(osVersionText) isn't supported — SideInstaller needs iOS \(Engine.minimumTunnelOSText) or later.")
+            return
+        }
+        guard canSelfPair || hasPairingFile else {
+            setGuide(Guides.importPairing)
+            log("⛔️ 需要配对文件：先导入配对文件，再用企业证书签名。")
+            return
+        }
+        guard let entry = IPALibrary.customImport() else {
+            setGuide(Guides.customIPA)
+            log("⛔️ 还没导入 IPA。先在上面导入一个 .ipa，再用企业证书签名。")
+            return
+        }
+        guard EnterpriseCertStore.ready else {
+            log("⛔️ 企业证书材料不齐：需要 .p12、描述文件和证书密码。")
+            return
+        }
+        refreshNetworkStatus()
+        guard tunnelAvailable else {
+            if BuiltinTunnel.useBuiltinDirectly {
+                log("⛔️ No loopback VPN is connected, and automatic tunnel start is off. Turn on “Start LocalDevVPN when needed” in Settings, then tap Install again.")
+            } else {
+                setGuide(Guides.vpn)
+                log("⛔️ No loopback VPN is connected. Turn one on, then tap Install again.")
+            }
+            return
+        }
+        if NetworkStatus.isOwnAddress(deviceHost) {
+            setGuide(Guides.deviceIPMismatch)
+            log("⛔️ Device IP \(deviceHost) is an address this iPhone already holds — that's the tunnel's own end, not the one to connect to. Check Settings › Advanced › Device IP (the default is 10.7.0.1).")
+            return
+        }
+        resetRun()
+        isRunning = true
+        log("=== Starting enterprise-cert install ===")
+
+        pipelineTask = Task { @MainActor in
+            do {
+                try await ensureNetwork()
+                try await pairAndConnect()
+                downloadedIPAPath = entry.url.path
+                downloadedSource = .custom
+                try await signAppWithCert()
+                try await install(prestaged: nil)
+                finishSuccess()
+            } catch is CancellationError {
+                log("Install cancelled.")
+                for s in Step.allCases { stepStates[s] = .pending }
+                installProgress = 0
+                setGuide(nil)
+            } catch {
+                let msg = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                lastError = msg
+                log("⛔️ Stopped: \(msg)")
+                failActiveStep(to: .failed)
+            }
+            stopBackgroundWork()
+            isRunning = false
+            isCancelling = false
+            pairingPIN = nil
+        }
+    }
+
+    private func signAppWithCert() async throws {
+        guard let ipa = downloadedIPAPath else { throw EngineError.message(L("No IPA imported.")) }
+        setStep(.sign, .active)
+        let path = try await onSignQueue { try self.performCertSign(ipa: ipa) }
+        signedAppPath = path
+        signedDisplayName = signedAppName()
+        setStep(.sign, .done)
+    }
+
+    /// 在 Swift 侧用 Security 解开 .p12（证书 + 私钥 DER），交给
+    /// Rust 侧 si_sign_ipa_with_cert 本地签名。
+    private func performCertSign(ipa: String) throws -> String {
+        let (certDER, keyDER) = try EnterpriseCertStore.identityDERs()
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EnterpriseSign-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let certPath = tmp.appendingPathComponent("cert.der")
+        let keyPath = tmp.appendingPathComponent("key.der")
+        try certDER.write(to: certPath)
+        try keyDER.write(to: keyPath)
+        log("Signing \(ipa) with enterprise cert …")
+        var signed: UnsafeMutablePointer<CChar>?
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = si_sign_ipa_with_cert(ipa, certPath.path, keyPath.path,
+                                       EnterpriseCertStore.provisionURL.path, &signed, &error)
+        if rc == 0 {
+            let path = signed.map { String(cString: $0) } ?? ""
+            signed.map { si_string_free($0) }
+            log("Signed bundle at \(path)")
+            return path
+        }
+        let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
+        error.map { si_string_free($0) }
+        throw EngineError.message(L("企业证书签名失败：%@", msg))
+    }
+
     /// True when the IPA at `ipaPath` is Madeira, whichever way it got here: the
     /// download, an import, or a copy kept for refreshing.
     private static func isMadeira(ipaPath: String) -> Bool {

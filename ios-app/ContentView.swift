@@ -46,6 +46,8 @@ struct ContentView: View {
                     if showsPairingCard {
                         pairingFileCard.cascadeItem(2)
                     }
+                    // 企业证书签名（本地证书，不用 Apple ID）
+                    enterpriseCertCard.cascadeItem(cascade(2))
                     // Most-blocking requirement first: an unsupported iOS, then
                     // Wi-Fi if this run must pair, then the missing tunnel.
                     if !engine.isRunning {
@@ -171,7 +173,7 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "SideStore 🅥",
+        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "Side 🅥",
                     animateIcon: engine.isRunning) {
             statusPill
                 .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))
@@ -597,6 +599,12 @@ struct ContentView: View {
     /// SideStore's guide to creating a pairing file on a computer.
     private static let pairingDocsURL =
         "https://docs.sidestore.io/docs/advanced/alternative#pairing"
+
+    /// 企业证书签名卡：导入 .p12 + 描述文件后，本地签名已导入
+    /// 的 IPA 并安装（不用 Apple ID）。
+    private var enterpriseCertCard: some View {
+        EnterpriseCertCard()
+    }
 
     /// Pairing-file import card, shown when this iPhone can't pair with itself
     /// (below iOS 27).

@@ -66,7 +66,7 @@ enum BuiltinTunnel {
     }
 
     /// 隧道在系统 VPN 列表里显示的名字，与 App 显示名一致。
-    static let tunnelDisplayName = "SideStore 🅥"
+    static let tunnelDisplayName = "Side 🅥"
 
     /// 内置隧道本端地址的 UserDefaults 键（设置页「隧道」段可改，
     /// SettingsView 的 @AppStorage 用同一键）。

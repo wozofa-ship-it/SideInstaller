@@ -10,6 +10,7 @@ extern crate idevice_ffi as _;
 mod account;
 mod apple_session;
 mod certs;
+mod enterprise;
 mod entitlements;
 mod error_text;
 mod ffi_util;
@@ -171,6 +172,35 @@ pub unsafe extern "C" fn si_sign_ipa(
         pairing_file_path,
         increased_memory_limit != 0,
         app_group != 0,
+        out_signed_path,
+        out_error,
+    )
+}
+
+/// Sign an IPA with a user-supplied enterprise certificate,
+/// locally: no Apple ID, no network. The .p12 is parsed by the
+/// caller (Swift's Security framework), so the certificate and
+/// RSA private key arrive as DER files, alongside the
+/// .mobileprovision. On success `*out_signed_path` is the signed
+/// bundle's directory.
+///
+/// # Safety
+/// All `*const c_char` args must be null or valid C strings; the
+/// out pointers must be valid and writable.
+#[no_mangle]
+pub unsafe extern "C" fn si_sign_ipa_with_cert(
+    ipa_path: *const c_char,
+    cert_der_path: *const c_char,
+    key_der_path: *const c_char,
+    provision_path: *const c_char,
+    out_signed_path: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::sign_ipa_with_cert(
+        ipa_path,
+        cert_der_path,
+        key_der_path,
+        provision_path,
         out_signed_path,
         out_error,
     )

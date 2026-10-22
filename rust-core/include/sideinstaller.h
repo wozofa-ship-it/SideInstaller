@@ -156,6 +156,18 @@ int32_t si_sign_ipa(SignSession *session,
                     char **out_signed_path,
                     char **out_error);
 
+// Sign an IPA with a user-supplied enterprise certificate, locally:
+// no Apple ID, no network. The .p12 is parsed by the caller, so the
+// certificate and RSA private key arrive as DER files, alongside the
+// .mobileprovision. On success *out_signed_path is the signed
+// bundle's directory. Free strings with si_string_free.
+int32_t si_sign_ipa_with_cert(const char *ipa_path,
+                              const char *cert_der_path,
+                              const char *key_der_path,
+                              const char *provision_path,
+                              char **out_signed_path,
+                              char **out_error);
+
 // The sign-in an app needs to renew its own provisioning profile, for handing
 // to Madeira. BLOCKS, but asks Apple nothing. On success *out_json is a heap
 // JSON object: {team_id, adsid, token, token_expires: <unix seconds, 0 if Apple
