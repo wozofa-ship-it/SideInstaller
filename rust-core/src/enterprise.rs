@@ -65,7 +65,7 @@ fn provision_dict(bytes: &[u8]) -> Result<plist::Dictionary, String> {
     let start = find_subslice(bytes, b"<?xml").ok_or("描述文件里找不到 plist")?;
     let tail = find_subslice(bytes, b"</plist>").ok_or("描述文件里找不到 plist 结尾")?;
     let end = tail + "</plist>".len();
-    let value = plist::Value::from_reader(&bytes[start..end])
+    let value = plist::Value::from_reader(std::io::Cursor::new(&bytes[start..end]))
         .map_err(|e| format!("描述文件解析失败：{e}"))?;
     value
         .as_dictionary()
