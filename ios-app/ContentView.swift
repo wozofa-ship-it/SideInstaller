@@ -171,7 +171,7 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "Side+",
+        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "解剖自我 🅥 修改内置隧道版",
                     animateIcon: engine.isRunning) {
             statusPill
                 .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))
@@ -279,6 +279,26 @@ struct ContentView: View {
                     .fieldBackground()
                     .contentShape(Rectangle())
                 }
+
+                // App sources: AltStore-format feeds whose apps install
+                // through the custom-IPA channel.
+                NavigationLink {
+                    SourcesView()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shippingbox")
+                            .foregroundStyle(.secondary)
+                        Text(L("App Sources"))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .fieldBackground()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
 
                 // A custom IPA has no release, so the importer takes that slot;
                 // a build with no nightly has nothing to pick and no slot.

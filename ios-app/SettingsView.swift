@@ -26,6 +26,9 @@ struct SettingsView: View {
     /// 常驻后台自动续签开关，与 AutoRefreshService 共用同一 UserDefaults 键。
     @AppStorage("SIDAutoRefreshEnabled") private var autoRefreshEnabled = false
 
+    /// 内置隧道本端地址，与 BuiltinTunnel 共用同一 UserDefaults 键。
+    @AppStorage("CZFBuiltinTunnelIfaceIP") private var builtinTunnelIfaceIP = "10.7.1.1/32"
+
     /// 界面外观，与 App 入口共用同一 UserDefaults 键，改完立即生效。
     @AppStorage("SIDAppearance") private var appearance: AppAppearance = .system
 
@@ -207,14 +210,54 @@ struct SettingsView: View {
                 Label(L("Start LocalDevVPN now"), systemImage: "bolt.horizontal.circle")
             }
             .disabled(!engine.localDevVPNInstalled)
+            HStack {
+                Text(L("Built-in tunnel interface"))
+                Spacer()
+                TextField("10.7.1.1/32", text: $builtinTunnelIfaceIP)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+                    .onSubmit {
+                        // 写坏了就回默认，别把非法地址存进隧道配置。
+                        let trimmed = builtinTunnelIfaceIP
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if (try? CIDRValidator.shared.validateCIDR(
+                            trimmed, isRouteDestination: false,
+                            allowIntermediateAddresses: true)) != nil {
+                            builtinTunnelIfaceIP = trimmed
+                        } else {
+                            builtinTunnelIfaceIP = "10.7.1.1/32"
+                        }
+                    }
+            }
+            HStack {
+                Text(L("Tunnel peer (device IP)"))
+                Spacer()
+                TextField("10.7.0.1", text: $engine.deviceIP)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+            }
         } header: {
             Text(L("Tunnel"))
         } footer: {
-            // Explain why the button is disabled.
-            if !engine.localDevVPNInstalled {
-                Text(L("LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you."))
-            }
+            Text(tunnelFooterText)
         }
+    }
+
+    /// 隧道段脚注：LocalDevVPN 未装时先解释按钮为何点不了，
+    /// 再说明内置隧道地址的默认值与生效时机。
+    private var tunnelFooterText: String {
+        var parts: [String] = []
+        if !engine.localDevVPNInstalled {
+            parts.append(L("LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you."))
+        }
+        parts.append(L("Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects."))
+        return parts.joined(separator: "\n")
     }
 
     // MARK: Auto refresh
@@ -226,11 +269,15 @@ struct SettingsView: View {
             Toggle(L("Refresh apps automatically in background"), isOn: $autoRefreshEnabled)
                 .onChange(of: autoRefreshEnabled) { _, _ in
                     AutoRefreshService.shared.applySetting()
+                    // 刚打开时就把下一次系统后台唤醒交上去。
+                    if autoRefreshEnabled {
+                        SIDAutoRefresh.scheduleBackgroundWake()
+                    }
                 }
         } header: {
             Text(L("Auto Refresh"))
         } footer: {
-            Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected."))
+            Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected. The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher."))
         }
     }
 

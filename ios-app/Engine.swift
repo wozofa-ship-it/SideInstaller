@@ -1,3 +1,4 @@
+import BackgroundTasks
 import Foundation
 import Network
 import UIKit
@@ -3454,5 +3455,84 @@ enum TwoFactorPhase: Equatable {
         switch self {
         case .asking(let prompt), .working(let prompt, _): prompt
         }
+    }
+}
+
+// MARK: - 后台唤醒续签（BGAppRefreshTask）
+
+/// BGAppRefreshTask 胶水层：进程不在前台时（甚至被系统回收后），靠系统
+/// 适时把 App 唤醒，再跑一轮自动续签巡检。巡检本体在
+/// AutoRefreshService（tick）；这里只管提交下一次唤醒、被唤醒时先拉
+/// 隧道再巡检、以及保证任务恰好完成一次。实际唤醒时机由系统按使用
+/// 习惯决定，不是定时器。
+enum SIDAutoRefresh {
+
+    /// 与 Info.plist 的 BGTaskSchedulerPermittedIdentifiers 保持一致。
+    static let bgTaskIdentifier = "com.frizzle.sideinstaller.autorefresh"
+
+    /// 自动续签开关是否开着（与 AutoRefreshService 共用同一键）。
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: AutoRefreshService.enabledKey)
+    }
+
+    /// 向系统提交下一次后台唤醒（最早 2 小时后，实际时机系统定）。
+    /// 开关没开就不提交；提交失败只写日志，不打扰用户。
+    static func scheduleBackgroundWake() {
+        guard isEnabled else { return }
+        let request = BGAppRefreshTaskRequest(identifier: bgTaskIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 2 * 3600)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            Engine.shared.log("Auto refresh: background wake scheduling failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 回到前台时调：开关开着就确保常驻巡检在跑
+    /// （已在跑时 AutoRefreshService.start() 无副作用）。
+    static func consider() {
+        Task { @MainActor in
+            AutoRefreshService.shared.start()
+        }
+    }
+
+    /// 系统唤醒时的入口（SideInstallerApp 启动时注册）：先续上下
+    /// 一轮，再拉隧道、跑一轮巡检，最后恰好完成一次。
+    static func handleBackgroundWake(_ task: BGAppRefreshTask) {
+        scheduleBackgroundWake()
+        let completion = BGTaskCompletion(task)
+        task.expirationHandler = {
+            completion.finish(false)
+        }
+        Task {
+            if isEnabled {
+                _ = await Engine.shared.tunnelUp()
+                await AutoRefreshService.shared.runCheck()
+            }
+            completion.finish(true)
+        }
+    }
+}
+
+/// BGTask 要求 setTaskCompleted 恰好调用一次；过期回调与工作 Task
+/// 可能同时到达，用一把锁护住完成标志。
+private final class BGTaskCompletion {
+    private let task: BGAppRefreshTask
+    private let lock = NSLock()
+    private var didFinish = false
+
+    init(_ task: BGAppRefreshTask) {
+        self.task = task
+    }
+
+    func finish(_ success: Bool) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+        didFinish = true
+        lock.unlock()
+        task.setTaskCompleted(success: success)
     }
 }

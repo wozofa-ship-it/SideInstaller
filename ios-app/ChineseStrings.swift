@@ -474,12 +474,16 @@ let chineseStrings: [String: String] = [
     "Start LocalDevVPN now": "立即启动 LocalDevVPN",
     "LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you.":
         "未安装 LocalDevVPN。请从 App Store 获取，SideInstaller 就能为你启动它。",
+    "Built-in tunnel interface": "内置隧道本端",
+    "Tunnel peer (device IP)": "隧道对端（设备 IP）",
+    "Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects.":
+        "内置隧道地址：默认本端 10.7.1.1/32、对端 10.7.0.1/32。改完后下次连接隧道时自动生效。",
 
     // The Auto Refresh section: resident background patrol re-signing.
     "Auto Refresh": "自动续签",
     "Refresh apps automatically in background": "后台自动续签",
-    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected.":
-        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且 LocalDevVPN 需保持连接。",
+    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and LocalDevVPN must stay connected. The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
+        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且 LocalDevVPN 需保持连接。系统也会在后台适时唤醒它巡检，请勿在多任务界面手动划掉。",
 
     "Downloaded IPAs": "已下载的 IPA",
     "%@ used": "已用 %@",
@@ -826,4 +830,16 @@ let chineseStrings: [String: String] = [
         "这个配对文件没有 RPPairing 记录，而 %@ 只读取这一种。",
     "Runs Windows PC games on your iPhone. By Will Faust, GPL-3.0.":
         "在你的 iPhone 上运行 Windows 电脑游戏，由 Will Faust 开发，GPL-3.0 许可证。",
+
+    // MARK: - App sources
+
+    "App Sources": "应用源",
+    "Add Source": "添加源",
+    "Source URL": "源地址",
+    "Add": "添加",
+    "OK": "好",
+    "Loading…": "加载中…",
+    "Import failed": "导入失败",
+    "No sources yet. Tap + to add one.": "还没有源。点 + 添加一个。",
+    "That isn't a usable source link.": "这个源地址用不了。",
 ]

@@ -63,6 +63,12 @@ final class AutoRefreshService {
         }
     }
 
+    /// 立刻单跑一轮巡检（BGAppRefreshTask 把进程唤醒时用：
+    /// 那时没有常驻循环可借，直接调巡检本体）。
+    func runCheck() async {
+        await tick()
+    }
+
     // MARK: - 巡检
 
     private func tick() async {

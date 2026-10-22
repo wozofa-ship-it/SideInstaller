@@ -1,3 +1,4 @@
+import BackgroundTasks
 import SwiftUI
 import UserNotifications
 
@@ -48,6 +49,13 @@ struct SideInstallerApp: App {
             _ = try? await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])
         }
+        // 后台唤醒续签：BGTask 处理入口必须在启动结束前注册，
+        // 系统日后唤醒时才有地方接。
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: SIDAutoRefresh.bgTaskIdentifier, using: nil
+        ) { task in
+            SIDAutoRefresh.handleBackgroundWake(task as! BGAppRefreshTask)
+        }
     }
 
     var body: some Scene {
@@ -97,6 +105,11 @@ struct SideInstallerApp: App {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     SideloadedAppsManager.shared.consumePendingRefresh()
+                    // 回前台时确保自动续签巡检在跑（开关内部自查）。
+                    SIDAutoRefresh.consider()
+                } else if phase == .background {
+                    // 进后台时把下一次系统唤醒交上去（开关开着才提交）。
+                    SIDAutoRefresh.scheduleBackgroundWake()
                 }
             }
             // Files opened in the app (share sheet, "Open with", other apps), as

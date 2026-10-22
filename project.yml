@@ -32,6 +32,9 @@ targets:
       - path: ios-app
       # Tunnel addresses shared with the TunnelProv extension.
       - path: TunnelProv/TunnelConstants.swift
+      # CIDR validation shared with the TunnelProv extension (the
+      # settings UI validates the built-in tunnel's addresses with it).
+      - path: TunnelProv/CIDRValidator.swift
     dependencies:
       - framework: SideInstallerFFI.xcframework
         embed: false

@@ -29,7 +29,7 @@ struct AboutView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "info.circle.fill", image: "AppLogo", title: "Side+",
+        BrandHeader(icon: "info.circle.fill", image: "AppLogo", title: "解剖自我 🅥 修改内置隧道版",
                     subtitle: L("an app by Frizzle")) {
             StatusPill(text: versionText, systemImage: "tag.fill", color: Theme.accent2)
         }
