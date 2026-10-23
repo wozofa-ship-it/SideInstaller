@@ -340,6 +340,10 @@ let chineseStrings: [String: String] = [
         "这里有 %d 个应用在 SideInstaller 中没有对应的 IPA，因此无法从本页续签。请在安装它的应用里续签，或先导入它的 .ipa。",
     "%d apps here have no IPA in SideInstaller, so they can't be refreshed from this page. Refresh them in whatever installed them, or import their .ipa first.":
         "这里有 %d 个应用在 SideInstaller 中没有对应的 IPA，因此无法从本页续签。请在安装它们的应用里续签，或先导入它们的 .ipa。",
+    "%d app here is signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so it is left out.":
+        "这里有 %d 个应用是企业证书或他人团队签的，不是你的 Apple ID。续签只能续自己 ID 签的应用，它已被排除。",
+    "%d apps here are signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so they are left out.":
+        "这里有 %d 个应用是企业证书或他人团队签的，不是你的 Apple ID。续签只能续自己 ID 签的应用，它们已被排除。",
     "%d app": "%d 个应用",
     "%d apps": "%d 个应用",
     "%d app needs refreshing": "%d 个应用需要续签",

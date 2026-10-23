@@ -105,10 +105,14 @@ final class AutoRefreshService {
         let now = Date().timeIntervalSince1970
         let last = UserDefaults.standard.double(forKey: Self.lastRoundKey)
         guard now - last >= Self.minRoundInterval else { return }
-        UserDefaults.standard.set(now, forKey: Self.lastRoundKey)
 
         engine.log("Auto refresh: \(dueIDs.count) app(s) due within 3 days; refreshing.")
         manager.refreshAll(onlyBundleIDs: dueIDs)
+        // 确认这一轮真的开跑了才记冷却时间：refreshAll 若被别的守卫
+        // 静默拦下（没开跑），不白白等 6 小时，下一轮巡检还能重试。
+        if manager.isRefreshing {
+            UserDefaults.standard.set(now, forKey: Self.lastRoundKey)
+        }
     }
 
     /// 隧道没通时没法续签；若已加载的清单显示有 App 今天/明天就过期，
@@ -128,7 +132,7 @@ final class AutoRefreshService {
         UserDefaults.standard.set(now, forKey: Self.lastAlertKey)
         await postNotification(
             title: L("续签提醒"),
-            body: L("有 %d 个应用即将过期，但 LocalDevVPN 未连接。连接后将自动续签。", critical.count))
+            body: L("有 %d 个应用即将过期，但隧道未连接。连接隧道后将自动续签。", critical.count))
     }
 
     private func postNotification(title: String, body: String) async {

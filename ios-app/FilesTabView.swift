@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 /// Documents 里的一个文件（递归，含子文件夹）。
@@ -82,6 +83,8 @@ struct FilesTabView: View {
     // Mach-O 查看 / 局域网传输
     @State private var machoItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
+    /// 局域网地址点按复制后的短暂「已复制」提示。
+    @State private var lanCopied = false
 
     private var ipas: [LocalFileItem] { files.filter { $0.isIPA } }
     private var others: [LocalFileItem] { files.filter { !$0.isIPA } }
@@ -258,9 +261,29 @@ struct FilesTabView: View {
                 Text(L("电脑和手机连同一个 Wi-Fi，浏览器打开这个地址就能上传、下载、删除这里的文件："))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text(lanServer.addressText)
-                    .font(.footnote.monospaced().weight(.semibold))
-                    .textSelection(.enabled)
+                Button {
+                    UIPasteboard.general.string = lanServer.addressText
+                    withAnimation { lanCopied = true }
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        withAnimation { lanCopied = false }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(lanServer.addressText)
+                            .font(.footnote.monospaced().weight(.semibold))
+                        Image(systemName: lanCopied ? "checkmark" : "doc.on.doc")
+                            .font(.footnote)
+                            .foregroundStyle(lanCopied ? Color.green : Color.secondary)
+                        if lanCopied {
+                            Text(L("已复制"))
+                                .font(.footnote)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Button(role: .destructive) {
                     lanServer.stop()
                 } label: {

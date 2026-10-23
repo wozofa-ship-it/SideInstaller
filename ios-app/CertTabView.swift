@@ -227,13 +227,13 @@ struct CertTabView: View {
                 if let url = selectedIPA {
                     selectedIPASummary(url)
                     Divider()
-                    Text(L("修改（留空不改）"))
+                    Text(L("修改（框里是原值，改了才生效）"))
                         .font(.subheadline.weight(.semibold))
-                    modField(L("新名称"), text: $mods.name,
+                    modField(L("名称"), text: $mods.name,
                              placeholder: selectedInfo?.name ?? "")
-                    modField(L("新 Bundle ID"), text: $mods.bundleID,
+                    modField(L("Bundle ID"), text: $mods.bundleID,
                              placeholder: selectedInfo?.bundleID ?? "")
-                    modField(L("新版本号"), text: $mods.version,
+                    modField(L("版本号"), text: $mods.version,
                              placeholder: selectedInfo?.version ?? "")
                     modField(L("最低系统版本"), text: $mods.minOS,
                              placeholder: "如 15.0")
@@ -241,7 +241,7 @@ struct CertTabView: View {
                     pluginSection
                     Divider()
                     Button {
-                        engine.runEnterpriseCertInstall(ipaURL: url, mods: mods)
+                        engine.runEnterpriseCertInstall(ipaURL: url, mods: effectiveMods)
                     } label: {
                         Text(L("签名并安装"))
                             .frame(maxWidth: .infinity)
@@ -459,12 +459,35 @@ struct CertTabView: View {
         resetMods()
         iconItem = nil
         signOnlyMessage = nil
+        // 框里预填这个 IPA 的原值，用户在原值上改。
+        if let info = IPALibrary.appInfo(at: url) {
+            mods.name = info.name
+            mods.bundleID = info.bundleID
+            mods.version = info.version ?? ""
+            mods.minOS = info.minOS ?? ""
+        }
+    }
+
+    /// 签名时真正提交的改动：框里和原值一样（或被清空）的项不提交，
+    /// 免得把原名、原 ID、原版本号原样再写一遍。
+    private var effectiveMods: CertSignMods {
+        guard let info = selectedInfo else { return mods }
+        var result = mods
+        let name = result.name.trimmingCharacters(in: .whitespaces)
+        result.name = (name.isEmpty || name == info.name) ? "" : name
+        let bundleID = result.bundleID.trimmingCharacters(in: .whitespaces)
+        result.bundleID = (bundleID.isEmpty || bundleID == info.bundleID) ? "" : bundleID
+        let version = result.version.trimmingCharacters(in: .whitespaces)
+        result.version = (version.isEmpty || version == (info.version ?? "")) ? "" : version
+        let minOS = result.minOS.trimmingCharacters(in: .whitespaces)
+        result.minOS = (minOS.isEmpty || minOS == (info.minOS ?? "")) ? "" : minOS
+        return result
     }
 
     private func signOnly(url: URL) {
         signOnlyBusy = true
         signOnlyMessage = nil
-        let currentMods = mods
+        let currentMods = effectiveMods
         Task {
             do {
                 _ = try await CertSigner.signToFile(ipa: url, mods: currentMods)

@@ -1210,6 +1210,9 @@ extension IPALibrary {
         let bundleID: String
         let name: String
         let version: String?
+        /// MinimumOSVersion from the same plist; the cert page pre-fills its
+        /// edit fields with the IPA's current values.
+        let minOS: String?
     }
 
     /// IPAs on disk with their app info, newest first, one per bundle ID (the
@@ -1236,7 +1239,8 @@ extension IPALibrary {
         let name = display?.isEmpty == false ? display!
             : (bundleName?.isEmpty == false ? bundleName! : bundleID)
         return AppInfo(bundleID: bundleID, name: name,
-                       version: dict["CFBundleShortVersionString"] as? String)
+                       version: dict["CFBundleShortVersionString"] as? String,
+                       minOS: dict["MinimumOSVersion"] as? String)
     }
 
     /// One file inside an IPA, for copying it out without unpacking the rest.

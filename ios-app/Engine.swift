@@ -381,6 +381,10 @@ final class Engine: ObservableObject {
     /// Team ID of the signed-in account, parsed from the sign-in summary. Only
     /// apps signed by this team can be refreshed in place.
     @Published private(set) var signingTeamID: String?
+    /// UserDefaults key persisting the last signed-in team across launches,
+    /// so the refresh list can leave other teams' apps out from a cold start,
+    /// before any sign-in has happened this run.
+    static let savedTeamKey = "CZFSavedSigningTeamID"
     @Published var downloadedIPAPath: String?
     // Source, channel and picked version (nil: latest) the current download
     // corresponds to.
@@ -416,6 +420,9 @@ final class Engine: ObservableObject {
 
     private init() {
         installLogging()
+        // Restore the last signed-in team so refresh lists can exclude other
+        // teams' apps (enterprise certificates etc.) from a cold start.
+        signingTeamID = UserDefaults.standard.string(forKey: Self.savedTeamKey)
         log("SideInstaller ready.")
         // Self-test of the Rust tracing -> FFI callback -> console path.
         ping()
@@ -979,6 +986,7 @@ final class Engine: ObservableObject {
             self.setMain {
                 self.signInStatus = "signed out"
                 self.signingTeamID = nil
+                UserDefaults.standard.removeObject(forKey: Self.savedTeamKey)
             }
             self.log("Apple ID changed — signed out of the previous account.")
         }
@@ -1170,6 +1178,7 @@ final class Engine: ObservableObject {
             summary.map { si_string_free($0) }
             let team = Self.teamID(inSummary: s)
             setMain { self.signingTeamID = team }
+            if let team { UserDefaults.standard.set(team, forKey: Self.savedTeamKey) }
             log("Sign-in OK. \(s)")
             return s
         } else {

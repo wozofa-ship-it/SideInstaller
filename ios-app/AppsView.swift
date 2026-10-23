@@ -360,6 +360,10 @@ final class SideloadedAppsManager: ObservableObject {
     /// Apps on the page with no IPA to sign again from, for the note that says
     /// why they aren't included.
     @Published private(set) var unrefreshable = 0
+    /// Listed apps dropped from refresh because another team signed them
+    /// (an enterprise certificate, someone else's ID): refreshing re-signs
+    /// with the signed-in Apple ID, so it only ever applies to that ID's apps.
+    @Published private(set) var teamExcluded = 0
     /// The run in progress, or the last one's results until another starts.
     @Published private(set) var jobs: [RefreshJob] = []
     @Published private(set) var isRefreshing = false
@@ -631,12 +635,23 @@ final class SideloadedAppsManager: ObservableObject {
             InstalledRef(bundleID: $0.app.bundleID, name: $0.app.name,
                          teamID: $0.current?.teamIdentifier)
         }
-        let matched = await Task.detached(priority: .userInitiated) {
+        let paired = await Task.detached(priority: .userInitiated) {
             SideloadedAppsManager.pair(installed, with: IPALibrary.installable())
         }.value
-        refreshable = matched
-        unrefreshable = max(0, entries.count - matched.count)
-        engine.log("Sideloaded apps: \(matched.count) of \(entries.count) can be refreshed from an IPA on disk.")
+        // Refresh re-signs with the signed-in Apple ID, so it can only ever
+        // replace apps that ID's team signed. Anything else (enterprise
+        // certificates, another person's ID) is left out up front instead
+        // of being picked up as a job and failing one by one during a run.
+        var kept = paired
+        var excluded = 0
+        if let team = engine.signingTeamID {
+            kept = paired.filter { $0.teamID == nil || $0.teamID == team }
+            excluded = paired.count - kept.count
+        }
+        refreshable = kept
+        teamExcluded = excluded
+        unrefreshable = max(0, entries.count - paired.count)
+        engine.log("Sideloaded apps: \(kept.count) of \(entries.count) can be refreshed from an IPA on disk.\(excluded > 0 ? " \(excluded) left out (signed by another team)." : "")")
     }
 
     /// A page entry cut down to what the matching needs, so that work can be
@@ -933,10 +948,19 @@ struct AppsView: View {
         }
     }
 
-    /// Note explaining that apps without an IPA in SideInstaller can't be
-    /// refreshed.
+    /// Notes explaining why listed apps can't be refreshed from this page.
     @ViewBuilder
     private var refreshNote: some View {
+        if manager.hasLoaded && manager.teamExcluded > 0 {
+            Text(manager.teamExcluded == 1
+                 ? L("%d app here is signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so it is left out.", manager.teamExcluded)
+                 : L("%d apps here are signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so they are left out.", manager.teamExcluded))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cascadeItem(5 + manager.entries.count)
+        }
         if manager.hasLoaded && manager.unrefreshable > 0 && !manager.entries.isEmpty {
             Text(manager.unrefreshable == 1
                  ? L("%d app here has no IPA in SideInstaller, so it can't be refreshed from this page. Refresh it in whatever installed it, or import its .ipa first.",
