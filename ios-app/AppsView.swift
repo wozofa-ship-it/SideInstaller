@@ -190,7 +190,10 @@ enum ExpiryUrgency {
     }
 
     /// Expiry text, e.g. "Expires today", "Expires in 5 days — 23 Aug",
-    /// "Expired 12 Aug". More than 30 days out shows only the date.
+    /// "Expired 12 Aug". Always shows the remaining days, however far
+    /// out the date is (the user asked for the remaining time under
+    /// every app in the resign list — the old 30-day cap left
+    /// long-lived profiles showing only a bare date).
     static func text(for profile: ProvisioningProfile?) -> String {
         guard let profile, let expiration = profile.expirationDate else {
             return L("No matching profile")
@@ -199,10 +202,10 @@ enum ExpiryUrgency {
             Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localizer.locale))
         if profile.isExpired { return L("Expired %@", formatted) }
         switch profile.daysRemaining {
-        case 0:            return L("Expires today")
-        case 1:            return L("Expires tomorrow")
-        case .some(2...30): return L("Expires in %d days — %@", profile.daysRemaining ?? 0, formatted)
-        default:           return L("Expires %@", formatted)
+        case 0:         return L("Expires today")
+        case 1:         return L("Expires tomorrow")
+        case .some(2...): return L("Expires in %d days — %@", profile.daysRemaining ?? 0, formatted)
+        default:        return L("Expires %@", formatted)
         }
     }
 }
