@@ -28,6 +28,8 @@ struct CertTabView: View {
     @State private var mods = CertSignMods()
     @State private var showIPAPicker = false
     @State private var showLibraryPicker = false
+    @State private var showPluginPicker = false
+    @State private var pluginError: String?
     @State private var iconItem: PhotosPickerItem?
     @State private var signOnlyBusy = false
     @State private var signOnlyMessage: String?
@@ -236,6 +238,7 @@ struct CertTabView: View {
                     modField(L("最低系统版本"), text: $mods.minOS,
                              placeholder: "如 15.0")
                     iconRow
+                    pluginSection
                     Divider()
                     Button {
                         engine.runEnterpriseCertInstall(ipaURL: url, mods: mods)
@@ -304,6 +307,69 @@ struct CertTabView: View {
                 showLibraryPicker = false
             }
         }
+        .sheet(isPresented: $showPluginPicker) {
+            FileImporterRepresentableView(
+                allowedContentTypes: [.item]
+            ) { urls in
+                for url in urls {
+                    if let staged = CertPluginStore.stage(url) {
+                        mods.plugins.append(staged)
+                        pluginError = nil
+                    } else {
+                        pluginError = L("插件只支持 .dylib / .deb / .zip")
+                    }
+                }
+            }
+        }
+    }
+
+    /// 插件注入：选好的插件（dylib/deb/zip）在签名之前注进
+    /// App，不选就是不注入。
+    private var pluginSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(L("插件注入"))
+                    .font(.footnote)
+                    .frame(width: 92, alignment: .leading)
+                Button {
+                    showPluginPicker = true
+                } label: {
+                    Text(L("添加插件"))
+                        .font(.footnote)
+                }
+                Spacer()
+            }
+            if mods.plugins.isEmpty {
+                Text(L("可选：.dylib / .deb / .zip，签名前注入"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(mods.plugins, id: \.path) { url in
+                    HStack(spacing: 8) {
+                        Image(systemName: "puzzlepiece.extension")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(url.lastPathComponent)
+                            .font(.footnote)
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            mods.plugins.removeAll { $0 == url }
+                            CertPluginStore.remove(url)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if let pluginError {
+                Text(pluginError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+        }
     }
 
     private func selectedIPASummary(_ url: URL) -> some View {
@@ -329,7 +395,7 @@ struct CertTabView: View {
             Spacer()
             Button {
                 selectedIPA = nil
-                mods = CertSignMods()
+                resetMods()
                 signOnlyMessage = nil
             } label: {
                 Text(L("更换"))
@@ -379,9 +445,18 @@ struct CertTabView: View {
         }
     }
 
+    /// 换一个 IPA 时清掉修改项，并删掉已暂存的插件文件。
+    private func resetMods() {
+        for url in mods.plugins {
+            CertPluginStore.remove(url)
+        }
+        mods = CertSignMods()
+        pluginError = nil
+    }
+
     private func select(_ url: URL) {
         selectedIPA = url
-        mods = CertSignMods()
+        resetMods()
         iconItem = nil
         signOnlyMessage = nil
     }

@@ -185,6 +185,17 @@ int32_t si_extract_ipa(const char *ipa_path,
                        char **out_bundle_path,
                        char **out_error);
 
+// Zip the files/folders listed in a JSON array of absolute paths
+// into out_zip. For the file manager.
+int32_t si_zip_create(const char *paths_json,
+                      const char *out_zip,
+                      char **out_error);
+
+// Extract a zip archive into dest_dir. For the file manager.
+int32_t si_unzip_archive(const char *archive_path,
+                         const char *dest_dir,
+                         char **out_error);
+
 // The sign-in an app needs to renew its own provisioning profile, for handing
 // to Madeira. BLOCKS, but asks Apple nothing. On success *out_json is a heap
 // JSON object: {team_id, adsid, token, token_expires: <unix seconds, 0 if Apple

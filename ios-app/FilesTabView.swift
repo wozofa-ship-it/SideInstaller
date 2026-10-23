@@ -11,6 +11,7 @@ struct LocalFileItem: Identifiable {
     let modified: Date?
     var id: String { url.path }
     var isIPA: Bool { name.lowercased().hasSuffix(".ipa") }
+    var isZip: Bool { name.lowercased().hasSuffix(".zip") }
     var isInSignedDir: Bool { relativeDir == "Signed" }
 }
 
@@ -70,6 +71,14 @@ struct FilesTabView: View {
     @State private var files = AppFileLibrary.scan()
     @State private var showImporter = false
     @State private var importError: String?
+    // 多选 / 重命名 / 压缩解压
+    @State private var selecting = false
+    @State private var selection: Set<String> = []
+    @State private var renameItem: LocalFileItem?
+    @State private var renameText = ""
+    @State private var opBusy = false
+    @State private var opMessage: String?
+    @State private var opFailed = false
 
     private var ipas: [LocalFileItem] { files.filter { $0.isIPA } }
     private var others: [LocalFileItem] { files.filter { !$0.isIPA } }
@@ -81,6 +90,9 @@ struct FilesTabView: View {
                 VStack(spacing: 18) {
                     header.cascadeItem(0)
                     importCard.cascadeItem(1)
+                    if selecting {
+                        selectionBar.cascadeItem(2)
+                    }
                     if files.isEmpty {
                         emptyCard.cascadeItem(2)
                     } else {
@@ -99,6 +111,18 @@ struct FilesTabView: View {
             .background(AppBackground())
         }
         .onAppear { files = AppFileLibrary.scan() }
+        .alert(L("重命名"), isPresented: Binding(
+            get: { renameItem != nil },
+            set: { if !$0 { renameItem = nil } }
+        )) {
+            TextField(L("文件名"), text: $renameText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button(L("取消"), role: .cancel) { renameItem = nil }
+            Button(L("保存")) { performRename() }
+        } message: {
+            Text(L("扩展名别改错，不然文件可能打不开。"))
+        }
         .sheet(isPresented: $showImporter) {
             FileImporterRepresentableView(
                 allowedContentTypes: [.item],
@@ -118,16 +142,59 @@ struct FilesTabView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(L("文件"))
-                .font(.largeTitle.weight(.bold))
-            Text(L("%d 个文件 · %@", files.count,
-                   ByteCountFormatter.string(fromByteCount: Int64(totalSize), countStyle: .file)))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L("文件"))
+                    .font(.largeTitle.weight(.bold))
+                Text(L("%d 个文件 · %@", files.count,
+                       ByteCountFormatter.string(fromByteCount: Int64(totalSize), countStyle: .file)))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !files.isEmpty {
+                Button {
+                    selecting.toggle()
+                    selection = []
+                } label: {
+                    Text(selecting ? L("完成") : L("选择"))
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 8)
+    }
+
+    /// 多选时的操作条：压缩成一个 zip / 批量删除。
+    private var selectionBar: some View {
+        PanelCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("已选 %d 个", selection.count))
+                    .font(.subheadline.weight(.semibold))
+                HStack(spacing: 10) {
+                    Button {
+                        zipSelection()
+                    } label: {
+                        HStack {
+                            if opBusy { ProgressView() }
+                            Text(L("压缩成 ZIP"))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(selection.isEmpty || opBusy)
+                    Button(role: .destructive) {
+                        deleteSelection()
+                    } label: {
+                        Text(L("删除所选"))
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(selection.isEmpty || opBusy)
+                }
+            }
+        }
     }
 
     private var importCard: some View {
@@ -153,6 +220,18 @@ struct FilesTabView: View {
                     Text(importError)
                         .font(.footnote)
                         .foregroundStyle(.red)
+                }
+                if opBusy {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                        Text(L("处理中…"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let opMessage {
+                    Text(opMessage)
+                        .font(.footnote)
+                        .foregroundStyle(opFailed ? .red : .green)
                 }
             }
         }
@@ -191,12 +270,22 @@ struct FilesTabView: View {
 
     private func fileRow(_ item: LocalFileItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(item.name)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(2)
-            Text("\(item.relativeDir.isEmpty ? L("根目录") : item.relativeDir) · \(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))\(item.modified.map { " · " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "")")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                if selecting {
+                    Image(systemName: selection.contains(item.id)
+                          ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                    Text("\(item.relativeDir.isEmpty ? L("根目录") : item.relativeDir) · \(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))\(item.modified.map { " · " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !selecting {
             HStack(spacing: 14) {
                 ShareLink(item: item.url) {
                     Text(L("分享"))
@@ -228,10 +317,38 @@ struct FilesTabView: View {
                         .font(.footnote)
                 }
             }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard selecting else { return }
+            if selection.contains(item.id) {
+                selection.remove(item.id)
+            } else {
+                selection.insert(item.id)
+            }
         }
         .contextMenu {
             ShareLink(item: item.url) {
                 Label(L("分享"), systemImage: "square.and.arrow.up")
+            }
+            Button {
+                renameText = item.name
+                renameItem = item
+            } label: {
+                Label(L("重命名"), systemImage: "pencil")
+            }
+            Button {
+                zipSingle(item)
+            } label: {
+                Label(L("压缩成 ZIP"), systemImage: "archivebox")
+            }
+            if item.isZip {
+                Button {
+                    unzip(item)
+                } label: {
+                    Label(L("解压"), systemImage: "tray.and.arrow.up")
+                }
             }
             if item.isIPA {
                 Button {
@@ -264,5 +381,112 @@ struct FilesTabView: View {
             try? FileManager.default.removeItem(at: item.url)
         }
         files = AppFileLibrary.scan()
+    }
+
+    private func deleteSelection() {
+        for item in files where selection.contains(item.id) {
+            delete(item)
+        }
+        selection = []
+        selecting = false
+    }
+
+    /// 在同目录里找一个不重名的目标 URL。
+    private func uniqueSibling(of item: LocalFileItem, stem: String, ext: String) -> URL {
+        let dir = item.url.deletingLastPathComponent()
+        var candidate = dir.appendingPathComponent(ext.isEmpty ? stem : "\(stem).\(ext)")
+        var counter = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            let name = ext.isEmpty ? "\(stem) \(counter)" : "\(stem) \(counter).\(ext)"
+            candidate = dir.appendingPathComponent(name)
+            counter += 1
+        }
+        return candidate
+    }
+
+    private func performRename() {
+        guard let item = renameItem else { return }
+        renameItem = nil
+        let newName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newName.isEmpty, newName != item.name,
+              !newName.contains("/") else { return }
+        let dest = item.url.deletingLastPathComponent().appendingPathComponent(newName)
+        guard !FileManager.default.fileExists(atPath: dest.path) else {
+            opMessage = L("已有同名文件")
+            opFailed = true
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: item.url, to: dest)
+            if item.isInSignedDir {
+                SignedIPAStore.renameFile(from: item.name, to: newName)
+            }
+            files = AppFileLibrary.scan()
+            opMessage = L("已改名")
+            opFailed = false
+        } catch {
+            opMessage = error.localizedDescription
+            opFailed = true
+        }
+    }
+
+    private func zipSingle(_ item: LocalFileItem) {
+        let out = uniqueSibling(of: item, stem: item.url.deletingPathExtension().lastPathComponent, ext: "zip")
+        runZip(paths: [item.url], out: out)
+    }
+
+    private func zipSelection() {
+        let items = files.filter { selection.contains($0.id) }
+        guard !items.isEmpty else { return }
+        let root = IPALibrary.documentsDir
+        var out = root.appendingPathComponent("打包.zip")
+        var counter = 2
+        while FileManager.default.fileExists(atPath: out.path) {
+            out = root.appendingPathComponent("打包 \(counter).zip")
+            counter += 1
+        }
+        runZip(paths: items.map { $0.url }, out: out)
+        selection = []
+        selecting = false
+    }
+
+    private func runZip(paths: [URL], out: URL) {
+        opBusy = true
+        opMessage = nil
+        Task {
+            let error = await Task.detached {
+                FileZipTool.zip(paths: paths, to: out)
+            }.value
+            opBusy = false
+            files = AppFileLibrary.scan()
+            if let error {
+                opMessage = error
+                opFailed = true
+            } else {
+                opMessage = L("已压缩到 %@", out.lastPathComponent)
+                opFailed = false
+            }
+        }
+    }
+
+    private func unzip(_ item: LocalFileItem) {
+        let stem = item.url.deletingPathExtension().lastPathComponent
+        let dest = uniqueSibling(of: item, stem: "\(stem)-解压", ext: "")
+        opBusy = true
+        opMessage = nil
+        Task {
+            let error = await Task.detached {
+                FileZipTool.unzip(archive: item.url, to: dest)
+            }.value
+            opBusy = false
+            files = AppFileLibrary.scan()
+            if let error {
+                opMessage = error
+                opFailed = true
+            } else {
+                opMessage = L("已解压到 %@", dest.lastPathComponent)
+                opFailed = false
+            }
+        }
     }
 }

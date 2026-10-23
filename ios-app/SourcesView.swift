@@ -217,10 +217,34 @@ struct SourceAppsView: View {
                     .frame(maxWidth: 140)
             }
         case nil:
-            Button(L("Install")) { startInstall(app) }
+            if EnterpriseCertStore.ready {
+                Menu {
+                    Button {
+                        startInstall(app)
+                    } label: {
+                        Label(L("用 Apple ID 安装"), systemImage: "person.crop.circle")
+                    }
+                    Button {
+                        startCertInstall(app)
+                    } label: {
+                        Label(L("企业证书签名安装"), systemImage: "checkmark.seal")
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(L("Install"))
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                    }
+                }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .disabled(activeID != nil || engine.isRunning)
+            } else {
+                Button(L("Install")) { startInstall(app) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(activeID != nil || engine.isRunning)
+            }
         }
     }
 
@@ -264,6 +288,38 @@ struct SourceAppsView: View {
                 activeID = nil
                 states[app.id] = nil
                 engine.runOneClick()
+                dismiss()
+            } catch {
+                activeID = nil
+                states[app.id] = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Download the app's IPA like `startInstall`, but sign and install
+    /// it with the imported enterprise certificate instead of an
+    /// Apple ID. The download lands in the custom-IPA slot first, so
+    /// the file outlives this view.
+    private func startCertInstall(_ app: AltApp) {
+        guard activeID == nil, let url = app.downloadLink else { return }
+        activeID = app.id
+        states[app.id] = .downloading
+        let expectedName = Engine.importFileName(for: url)
+        downloadTask = Task {
+            do {
+                let file = try await downloader.download(from: url)
+                await engine.importCustomIPA(from: file)
+                guard engine.lastError == nil,
+                      let entry = IPALibrary.customImport(),
+                      entry.url.lastPathComponent == expectedName
+                else {
+                    throw NSError(domain: "SourceAppsView", code: 2,
+                                  userInfo: [NSLocalizedDescriptionKey:
+                                                engine.lastError ?? L("Import failed")])
+                }
+                activeID = nil
+                states[app.id] = nil
+                engine.runEnterpriseCertInstall(ipaURL: entry.url, mods: CertSignMods())
                 dismiss()
             } catch {
                 activeID = nil

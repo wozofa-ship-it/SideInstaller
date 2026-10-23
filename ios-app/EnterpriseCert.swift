@@ -88,102 +88,6 @@ enum EnterpriseCertStore {
     }
 }
 
-/// 安装页的企业证书签名卡：导入 .p12 + 描述文件、填密码，
-/// 然后用上面导入的 IPA 本地签名并安装（不走 Apple ID）。
-struct EnterpriseCertCard: View {
-    @EnvironmentObject private var engine: Engine
-    @State private var showP12Picker = false
-    @State private var showProvisionPicker = false
-    @State private var password = EnterpriseCertStore.password
-    @State private var hasP12 = EnterpriseCertStore.hasP12
-    @State private var hasProvision = EnterpriseCertStore.hasProvision
-    @State private var importError: String?
-
-    private var ready: Bool { hasP12 && hasProvision && !password.isEmpty }
-
-    var body: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.secondary)
-                    Text(L("企业证书签名"))
-                        .font(.headline)
-                    Spacer()
-                    if ready {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                }
-                Text(L("用自己的企业证书在本机签名安装，不用 Apple ID、没有 7 天过期。先导入证书和描述文件、填好密码，再用上面导入的 IPA 点签名安装。"))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    Button {
-                        showP12Picker = true
-                    } label: {
-                        Text(hasP12 ? L("证书已导入 ✓") : L("导入 .p12 证书"))
-                    }
-                    Button {
-                        showProvisionPicker = true
-                    } label: {
-                        Text(hasProvision ? L("描述文件已导入 ✓") : L("导入描述文件"))
-                    }
-                }
-                .buttonStyle(.bordered)
-                SecureField(L("证书密码"), text: $password)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: password) { newValue in
-                        EnterpriseCertStore.password = newValue
-                    }
-                if let importError {
-                    Text(importError)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                Button {
-                    engine.runEnterpriseCertInstall()
-                } label: {
-                    Text(L("用企业证书签名并安装"))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(engine.isRunning || !ready)
-            }
-        }
-        .sheet(isPresented: $showP12Picker) {
-            FileImporterRepresentableView(
-                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .data]
-            ) { urls in
-                if let url = urls.first {
-                    do {
-                        try EnterpriseCertStore.importP12(from: url)
-                        hasP12 = true
-                        importError = nil
-                    } catch {
-                        importError = L("证书导入失败：%@", error.localizedDescription)
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showProvisionPicker) {
-            FileImporterRepresentableView(
-                allowedContentTypes: [UTType(filenameExtension: "mobileprovision") ?? .data]
-            ) { urls in
-                if let url = urls.first {
-                    do {
-                        try EnterpriseCertStore.importProvision(from: url)
-                        hasProvision = true
-                        importError = nil
-                    } catch {
-                        importError = L("描述文件导入失败：%@", error.localizedDescription)
-                    }
-                }
-            }
-        }
-    }
-}
-
 // MARK: - 签名前修改项
 
 /// 证书页的签名前修改项：留空的项不改。对应 Rust 侧 SignMods 的
@@ -195,22 +99,62 @@ struct CertSignMods {
     var minOS = ""
     /// 新图标的 PNG 数据（选了才有）。
     var icon: Data? = nil
+    /// 要注入的插件文件（已复制到暂存目录的 .dylib/.deb/.zip）。
+    var plugins: [URL] = []
 
     var isEmpty: Bool {
-        name.isEmpty && bundleID.isEmpty && version.isEmpty && minOS.isEmpty && icon == nil
+        name.isEmpty && bundleID.isEmpty && version.isEmpty && minOS.isEmpty && icon == nil && plugins.isEmpty
     }
 
     func json(iconPath: String?, outIpaPath: String?) -> String {
-        var dict: [String: String] = [:]
+        var dict: [String: Any] = [:]
         if !name.isEmpty { dict["name"] = name }
         if !bundleID.isEmpty { dict["bundleId"] = bundleID }
         if !version.isEmpty { dict["version"] = version }
         if !minOS.isEmpty { dict["minOS"] = minOS }
         if let iconPath { dict["iconPng"] = iconPath }
         if let outIpaPath { dict["outIpa"] = outIpaPath }
+        if !plugins.isEmpty { dict["plugins"] = plugins.map { $0.path } }
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let string = String(data: data, encoding: .utf8) else { return "{}" }
         return string
+    }
+}
+
+/// 插件暂存：从文件 App 选来的插件先复制到 Documents/CertPlugins，
+/// 签名时 Rust 侧按路径读（原文件可能在沙盒外、随时会被收回）。
+enum CertPluginStore {
+    static var dir: URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CertPlugins", isDirectory: true)
+        try? FileManager.default.createDirectory(at: docs, withIntermediateDirectories: true)
+        return docs
+    }
+
+    /// Copy a picked plugin into the staging folder; returns the
+    /// staged URL, or nil when the file type is not supported.
+    static func stage(_ source: URL) -> URL? {
+        let ext = source.pathExtension.lowercased()
+        guard ["dylib", "deb", "zip"].contains(ext) else { return nil }
+        let accessed = source.startAccessingSecurityScopedResource()
+        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
+        var dest = dir.appendingPathComponent(source.lastPathComponent)
+        var counter = 2
+        while FileManager.default.fileExists(atPath: dest.path) {
+            let stem = source.deletingPathExtension().lastPathComponent
+            dest = dir.appendingPathComponent("\(stem) \(counter).\(ext)")
+            counter += 1
+        }
+        do {
+            try FileManager.default.copyItem(at: source, to: dest)
+            return dest
+        } catch {
+            return nil
+        }
+    }
+
+    static func remove(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
     }
 }
 
@@ -266,6 +210,15 @@ enum SignedIPAStore {
     static func remove(_ record: SignedIPARecord) {
         try? FileManager.default.removeItem(at: url(for: record))
         save(load().filter { $0.fileName != record.fileName })
+    }
+
+    /// 文件页改名后同步清单里的文件名。
+    static func renameFile(from oldName: String, to newName: String) {
+        var records = load()
+        for index in records.indices where records[index].fileName == oldName {
+            records[index].fileName = newName
+        }
+        save(records)
     }
 
     /// 给源 IPA 起一个不重名的输出文件（Documents/Signed 内）。
@@ -339,4 +292,44 @@ enum CertSigner {
 /// 文件页点「去签名」时把 IPA 交给证书页。
 final class CertWorkspace: ObservableObject {
     @Published var selectedIPA: URL?
+}
+
+
+// MARK: - 文件页用的压缩 / 解压（Rust 的 zip 实现）
+
+enum FileZipTool {
+    /// 把文件/文件夹压成 zip。成功返回 nil，失败返回错误文本。
+    static func zip(paths: [URL], to out: URL) -> String? {
+        let json = (try? JSONSerialization.data(withJSONObject: paths.map { $0.path }))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = json.withCString { j in
+            out.path.withCString { o in
+                si_zip_create(j, o, &error)
+            }
+        }
+        return takeError(rc, &error)
+    }
+
+    /// 把 zip 解压到指定目录。成功返回 nil，失败返回错误文本。
+    static func unzip(archive: URL, to dir: URL) -> String? {
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = archive.path.withCString { a in
+            dir.path.withCString { d in
+                si_unzip_archive(a, d, &error)
+            }
+        }
+        return takeError(rc, &error)
+    }
+
+    private static func takeError(
+        _ rc: Int32, _ error: inout UnsafeMutablePointer<CChar>?
+    ) -> String? {
+        defer {
+            if let error { si_string_free(error) }
+        }
+        guard rc != 0 else { return nil }
+        if let error { return String(cString: error) }
+        return L("操作失败")
+    }
 }

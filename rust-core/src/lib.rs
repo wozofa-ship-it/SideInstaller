@@ -248,6 +248,34 @@ pub unsafe extern "C" fn si_extract_ipa(
     enterprise::extract_ipa(ipa_path, out_bundle_path, out_error)
 }
 
+/// Zip files/folders (JSON array of absolute paths) into an .ipa-
+/// style archive, for the file manager.
+///
+/// # Safety
+/// All `*const c_char` args must be null or valid C strings; the
+/// out pointers must be valid and writable.
+#[no_mangle]
+pub unsafe extern "C" fn si_zip_create(
+    paths_json: *const c_char,
+    out_zip: *const c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::zip_create_ffi(paths_json, out_zip, out_error)
+}
+
+/// Extract a zip archive into a directory, for the file manager.
+///
+/// # Safety
+/// Same contract as `si_zip_create`.
+#[no_mangle]
+pub unsafe extern "C" fn si_unzip_archive(
+    archive_path: *const c_char,
+    dest_dir: *const c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::unzip_archive_ffi(archive_path, dest_dir, out_error)
+}
+
 /// Set `*out_json` to the sign-in an app needs to renew its own provisioning
 /// profile: `{team_id, adsid, token, token_expires, anisette_identifier,
 /// anisette_adi_pb}`. Blocks, but asks Apple nothing.
