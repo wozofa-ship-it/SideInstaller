@@ -868,7 +868,7 @@ fn zip_create(paths_json: &str, out_zip: &str) -> Result<(), String> {
         zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated)
     };
-    let mut add_file = |zip: &mut zip::ZipWriter<std::fs::File>, path: &Path, name: &str| -> Result<(), String> {
+    let add_file = |zip: &mut zip::ZipWriter<std::fs::File>, path: &Path, name: &str| -> Result<(), String> {
         #[cfg(unix)]
         let mode = {
             use std::os::unix::fs::PermissionsExt;
@@ -879,7 +879,7 @@ fn zip_create(paths_json: &str, out_zip: &str) -> Result<(), String> {
         zip.start_file(name.to_string(), options().unix_permissions(mode))
             .map_err(|e| format!("压缩失败：{e}"))?;
         let mut source = std::fs::File::open(path).map_err(|e| format!("压缩失败：{e}"))?;
-        std::io::copy(&mut source, &mut zip).map_err(|e| format!("压缩失败：{e}"))?;
+        std::io::copy(&mut source, &mut *zip).map_err(|e| format!("压缩失败：{e}"))?;
         Ok(())
     };
     for item in list {
