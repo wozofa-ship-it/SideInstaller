@@ -196,6 +196,18 @@ int32_t si_unzip_archive(const char *archive_path,
                          const char *dest_dir,
                          char **out_error);
 
+// Mach-O dependency info as JSON in *out_json:
+// {fat, slices: [{arch, deps: [{kind, name}], rpaths}]}.
+int32_t si_macho_info(const char *path,
+                      char **out_json,
+                      char **out_error);
+
+// One Mach-O dependency edit: op_json is
+// {action: "remove"|"rename", name, newName}.
+int32_t si_macho_edit(const char *path,
+                      const char *op_json,
+                      char **out_error);
+
 // The sign-in an app needs to renew its own provisioning profile, for handing
 // to Madeira. BLOCKS, but asks Apple nothing. On success *out_json is a heap
 // JSON object: {team_id, adsid, token, token_expires: <unix seconds, 0 if Apple

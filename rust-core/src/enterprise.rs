@@ -1014,3 +1014,296 @@ pub unsafe fn unzip_archive_ffi(
         }
     }
 }
+
+// MARK: - Mach-O dependency viewer / editor
+
+/// Architecture slices of a Mach-O: the whole file when thin,
+/// otherwise each fat slice's offset.
+fn macho_slice_bases(data: &[u8]) -> Result<Vec<usize>, String> {
+    if data.len() < 4 {
+        return Err("不是 Mach-O 文件".into());
+    }
+    if u32be(data, 0) == 0xCAFE_BABE {
+        let n = u32be(data, 4) as usize;
+        let mut bases = Vec::new();
+        for i in 0..n {
+            let entry = 8 + i * 20;
+            if entry + 20 > data.len() {
+                break;
+            }
+            bases.push(u32be(data, entry + 8) as usize);
+        }
+        return Ok(bases);
+    }
+    if u32be(data, 0) == 0xCAFE_BABF {
+        let n = u32be(data, 4) as usize;
+        let mut bases = Vec::new();
+        for i in 0..n {
+            let entry = 8 + i * 32;
+            if entry + 32 > data.len() {
+                break;
+            }
+            bases.push(u64be(data, entry + 8) as usize);
+        }
+        return Ok(bases);
+    }
+    Ok(vec![0])
+}
+
+/// (is64, ncmds, sizeofcmds, cmds_start) for the slice at `base`.
+fn slice_header(data: &[u8], base: usize) -> Result<(bool, usize, usize, usize), String> {
+    if data.len() < base + 28 {
+        return Err("不是 Mach-O 文件".into());
+    }
+    let magic = u32le(data, base);
+    let is64 = match magic {
+        0xFEEDFACF => true,
+        0xFEEDFACE => false,
+        _ => return Err("不是 Mach-O 文件".into()),
+    };
+    let header = if is64 { 32 } else { 28 };
+    Ok((
+        is64,
+        u32le(data, base + 16) as usize,
+        u32le(data, base + 20) as usize,
+        base + header,
+    ))
+}
+
+fn arch_name(data: &[u8], base: usize) -> String {
+    if data.len() < base + 8 {
+        return "unknown".into();
+    }
+    match u32le(data, base + 4) {
+        0x0100_000C => "arm64".into(),
+        0x0100_0007 => "x86_64".into(),
+        0x0C => "armv7".into(),
+        0x07 => "i386".into(),
+        other => format!("cpu 0x{other:x}"),
+    }
+}
+
+/// The name string of a dylib/rpath load command (both keep the
+/// string offset at +8 and the string inside the command).
+fn cmd_string(data: &[u8], off: usize, cmdsize: usize) -> Option<String> {
+    if cmdsize < 12 {
+        return None;
+    }
+    let name_off = u32le(data, off + 8) as usize;
+    if name_off >= cmdsize {
+        return None;
+    }
+    let bytes = &data[off + name_off..off + cmdsize];
+    let end = bytes.iter().position(|&c| c == 0).unwrap_or(bytes.len());
+    Some(String::from_utf8_lossy(&bytes[..end]).to_string())
+}
+
+fn dep_kind(cmd: u32) -> Option<&'static str> {
+    match cmd {
+        0xC => Some("load"),
+        0x18 | 0x8000_0018 => Some("weak"),
+        0x1F => Some("reexport"),
+        0x23 => Some("upward"),
+        0xD => Some("id"),
+        _ => None,
+    }
+}
+
+/// JSON description of every slice's dylib dependencies + rpaths.
+fn macho_info(path: &str) -> Result<String, String> {
+    let data = std::fs::read(path).map_err(|e| format!("读文件失败：{e}"))?;
+    let bases = macho_slice_bases(&data)?;
+    let mut slices = Vec::new();
+    for base in &bases {
+        let (_, ncmds, sizeofcmds, cmds_start) = slice_header(&data, *base)?;
+        let cmds_end = cmds_start + sizeofcmds;
+        let mut deps = Vec::new();
+        let mut rpaths = Vec::new();
+        let mut off = cmds_start;
+        for _ in 0..ncmds {
+            if off + 8 > cmds_end || off + 8 > data.len() {
+                break;
+            }
+            let cmd = u32le(&data, off);
+            let cmdsize = u32le(&data, off + 4) as usize;
+            if cmdsize < 8 || off + cmdsize > data.len() {
+                break;
+            }
+            if let Some(kind) = dep_kind(cmd) {
+                if let Some(name) = cmd_string(&data, off, cmdsize) {
+                    deps.push(serde_json::json!({"kind": kind, "name": name}));
+                }
+            } else if cmd == 0x8000_001C {
+                if let Some(p) = cmd_string(&data, off, cmdsize) {
+                    rpaths.push(p);
+                }
+            }
+            off += cmdsize;
+        }
+        slices.push(serde_json::json!({
+            "arch": arch_name(&data, *base),
+            "deps": deps,
+            "rpaths": rpaths,
+        }));
+    }
+    let out = serde_json::json!({"fat": bases.len() > 1, "slices": slices});
+    Ok(out.to_string())
+}
+
+/// Apply one edit ({action:"remove", name} or
+/// {action:"rename", name, newName}) to every slice of the file.
+/// Removing shifts the remaining load commands down; renaming
+/// must fit the space the existing command already occupies.
+fn macho_edit(path: &str, op_json: &str) -> Result<(), String> {
+    let op: serde_json::Value =
+        serde_json::from_str(op_json).map_err(|e| format!("参数不对：{e}"))?;
+    let action = op.get("action").and_then(|v| v.as_str()).unwrap_or("");
+    let name = op.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let new_name = op.get("newName").and_then(|v| v.as_str()).unwrap_or("");
+    if name.is_empty() || (action != "remove" && action != "rename") {
+        return Err("参数不对".into());
+    }
+    if action == "rename" && new_name.is_empty() {
+        return Err("新名字不能为空".into());
+    }
+    let mut data = std::fs::read(path).map_err(|e| format!("读文件失败：{e}"))?;
+    let bases = macho_slice_bases(&data)?;
+    let mut hits = 0usize;
+    for base in &bases {
+        let base = *base;
+        let (_, ncmds, sizeofcmds, cmds_start) = slice_header(&data, base)?;
+        if action == "rename" {
+            let mut off = cmds_start;
+            let mut remaining = ncmds;
+            let mut left = sizeofcmds;
+            while remaining > 0 && left >= 8 {
+                if off + 8 > data.len() {
+                    break;
+                }
+                let cmd = u32le(&data, off);
+                let cmdsize = u32le(&data, off + 4) as usize;
+                if cmdsize < 8 || off + cmdsize > data.len() {
+                    break;
+                }
+                if dep_kind(cmd).is_some()
+                    && cmd_string(&data, off, cmdsize).as_deref() == Some(name)
+                {
+                    let name_off = u32le(&data, off + 8) as usize;
+                    let needed = name_off + new_name.len() + 1;
+                    if needed > cmdsize {
+                        return Err(format!(
+                            "新名字太长：这个命令只有 {cmdsize} 字节，装不下"
+                        ));
+                    }
+                    let start = off + name_off;
+                    data[start..start + new_name.len()].copy_from_slice(new_name.as_bytes());
+                    for b in &mut data[start + new_name.len()..off + cmdsize] {
+                        *b = 0;
+                    }
+                    hits += 1;
+                }
+                off += cmdsize;
+                left -= cmdsize;
+                remaining -= 1;
+            }
+        } else {
+            // remove: collect the matching commands, then cut them
+            // out from last to first so earlier offsets stay valid.
+            let mut cuts: Vec<(usize, usize)> = Vec::new();
+            let mut off = cmds_start;
+            for _ in 0..ncmds {
+                if off + 8 > data.len() {
+                    break;
+                }
+                let cmd = u32le(&data, off);
+                let cmdsize = u32le(&data, off + 4) as usize;
+                if cmdsize < 8 || off + cmdsize > data.len() {
+                    break;
+                }
+                if dep_kind(cmd).is_some() && cmd != 0xD
+                    && cmd_string(&data, off, cmdsize).as_deref() == Some(name)
+                {
+                    cuts.push((off, cmdsize));
+                }
+                off += cmdsize;
+            }
+            let cmds_end = cmds_start + sizeofcmds;
+            let mut removed_bytes = 0usize;
+            for (off, cmdsize) in cuts.iter().rev() {
+                let (off, cmdsize) = (*off, *cmdsize);
+                data.copy_within(off + cmdsize..cmds_end, off);
+                for b in &mut data[cmds_end - cmdsize..cmds_end] {
+                    *b = 0;
+                }
+                removed_bytes += cmdsize;
+                hits += 1;
+            }
+            if !cuts.is_empty() {
+                let new_ncmds = ncmds - cuts.len();
+                let new_sizeofcmds = sizeofcmds - removed_bytes;
+                data[base + 16..base + 20]
+                    .copy_from_slice(&(new_ncmds as u32).to_le_bytes());
+                data[base + 20..base + 24]
+                    .copy_from_slice(&(new_sizeofcmds as u32).to_le_bytes());
+            }
+        }
+    }
+    if hits == 0 {
+        return Err("没找到这个依赖".into());
+    }
+    std::fs::write(path, &data).map_err(|e| format!("写文件失败：{e}"))?;
+    Ok(())
+}
+
+/// Mach-O dependency info as JSON in `*out_json`.
+///
+/// # Safety
+/// All `*const c_char` args must be null or valid C strings; the
+/// out pointers must be valid and writable.
+pub unsafe fn macho_info_ffi(
+    path: *const c_char,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let p = opt_str(path, "");
+    let result = catch_unwind(AssertUnwindSafe(|| macho_info(&p)));
+    match result {
+        Ok(Ok(json)) => {
+            *out_json = cstr(json);
+            0
+        }
+        Ok(Err(e)) => {
+            *out_error = cstr(e);
+            1
+        }
+        Err(_) => {
+            *out_error = cstr("panic during macho info");
+            2
+        }
+    }
+}
+
+/// One Mach-O dependency edit (see `macho_edit` for the JSON op).
+///
+/// # Safety
+/// Same contract as `macho_info_ffi`.
+pub unsafe fn macho_edit_ffi(
+    path: *const c_char,
+    op_json: *const c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    let p = opt_str(path, "");
+    let j = opt_str(op_json, "");
+    let result = catch_unwind(AssertUnwindSafe(|| macho_edit(&p, &j)));
+    match result {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            *out_error = cstr(e);
+            1
+        }
+        Err(_) => {
+            *out_error = cstr("panic during macho edit");
+            2
+        }
+    }
+}

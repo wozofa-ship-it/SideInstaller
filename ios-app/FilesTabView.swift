@@ -79,6 +79,9 @@ struct FilesTabView: View {
     @State private var opBusy = false
     @State private var opMessage: String?
     @State private var opFailed = false
+    // Mach-O 查看 / 局域网传输
+    @State private var machoItem: LocalFileItem?
+    @StateObject private var lanServer = LANTransferServer()
 
     private var ipas: [LocalFileItem] { files.filter { $0.isIPA } }
     private var others: [LocalFileItem] { files.filter { !$0.isIPA } }
@@ -122,6 +125,9 @@ struct FilesTabView: View {
             Button(L("保存")) { performRename() }
         } message: {
             Text(L("扩展名别改错，不然文件可能打不开。"))
+        }
+        .sheet(item: $machoItem) { item in
+            MachOView(url: item.url, fileName: item.name)
         }
         .sheet(isPresented: $showImporter) {
             FileImporterRepresentableView(
@@ -233,6 +239,49 @@ struct FilesTabView: View {
                         .font(.footnote)
                         .foregroundStyle(opFailed ? .red : .green)
                 }
+                Divider()
+                lanSection
+            }
+        }
+    }
+
+    /// 局域网传输开关：开着时同 Wi-Fi 的浏览器能管理这个目录。
+    private var lanSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "wifi")
+                    .foregroundStyle(.secondary)
+                Text(L("局域网传输"))
+                    .font(.headline)
+            }
+            if lanServer.isRunning {
+                Text(L("电脑和手机连同一个 Wi-Fi，浏览器打开这个地址就能上传、下载、删除这里的文件："))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text(lanServer.addressText)
+                    .font(.footnote.monospaced().weight(.semibold))
+                    .textSelection(.enabled)
+                Button(role: .destructive) {
+                    lanServer.stop()
+                } label: {
+                    Text(L("关闭局域网传输"))
+                        .font(.footnote)
+                }
+            } else {
+                Text(L("开启后，同一 Wi-Fi 下的电脑打开网页就能往这里传文件，不用数据线。关掉就停，只在本机开着时有效。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button {
+                    lanServer.start()
+                } label: {
+                    Text(L("开启局域网传输"))
+                        .font(.footnote)
+                }
+                if let error = lanServer.lastError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
         }
     }
@@ -331,6 +380,11 @@ struct FilesTabView: View {
         .contextMenu {
             ShareLink(item: item.url) {
                 Label(L("分享"), systemImage: "square.and.arrow.up")
+            }
+            Button {
+                machoItem = item
+            } label: {
+                Label(L("Mach-O 依赖"), systemImage: "list.bullet.rectangle")
             }
             Button {
                 renameText = item.name

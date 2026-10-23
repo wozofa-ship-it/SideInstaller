@@ -276,6 +276,33 @@ pub unsafe extern "C" fn si_unzip_archive(
     enterprise::unzip_archive_ffi(archive_path, dest_dir, out_error)
 }
 
+/// Mach-O dependency info (JSON) for the file manager's viewer.
+///
+/// # Safety
+/// All `*const c_char` args must be null or valid C strings; the
+/// out pointers must be valid and writable.
+#[no_mangle]
+pub unsafe extern "C" fn si_macho_info(
+    path: *const c_char,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::macho_info_ffi(path, out_json, out_error)
+}
+
+/// One Mach-O dependency edit: {action: remove|rename, name, newName}.
+///
+/// # Safety
+/// Same contract as `si_macho_info`.
+#[no_mangle]
+pub unsafe extern "C" fn si_macho_edit(
+    path: *const c_char,
+    op_json: *const c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    enterprise::macho_edit_ffi(path, op_json, out_error)
+}
+
 /// Set `*out_json` to the sign-in an app needs to renew its own provisioning
 /// profile: `{team_id, adsid, token, token_expires, anisette_identifier,
 /// anisette_adi_pb}`. Blocks, but asks Apple nothing.
