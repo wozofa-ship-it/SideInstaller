@@ -10,7 +10,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Side 🅥</string>
+	<string>SideInstaller</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
