@@ -171,7 +171,7 @@ final class EntitlementsManager: ObservableObject {
         guard !isBusy else { return }
         let id = engine.normalizedAppleID, pw = engine.applePassword
         guard !id.isEmpty, !pw.isEmpty else {
-            lastError = L("No Apple ID saved. Add one in Settings › Account.")
+            lastError = ErrorHelp.explained(L("No Apple ID saved. Add one in Settings › Account."))
             return
         }
         isWorking = true
@@ -240,45 +240,68 @@ final class EntitlementsManager: ObservableObject {
         let servers = anisetteCandidates()
         let dir = storageDir
         engine.twoFactorWasCancelled = false
-        var lastError = "no anisette servers configured"
+        var failures = AnisetteServer.SignInFailures()
         var appleRefusals = AnisetteServer.AppleRefusals(servers: engine.anisetteServers)
         var appleUnreachable = 0
 
         for (idx, ani) in servers.enumerated() {
             if appleRefusals.rulesOut(ani) {
                 engine.log("Entitlements: skipping anisette \(idx + 1)/\(servers.count): Apple has refused the device sign-in reports through it.")
+                failures.skip()
                 continue
             }
             do {
                 let summary = try await onQueue {
                     try self.performSignIn(id: id, pw: pw, ani: ani, dir: dir)
                 }
-                engine.anisetteURL = ani
+                engine.anisetteSignedIn(ani)
                 teamSummary = summary
                 engine.log("Entitlements: signed in (\(summary)).")
                 return
             } catch let error as EngineError {
-                lastError = error.errorDescription ?? "sign-in failed"
+                let failure = error.errorDescription ?? "sign-in failed"
                 if engine.twoFactorWasCancelled {
                     throw EngineError.message(L("Two-factor verification was cancelled."))
                 }
-                if Engine.isAccountLocked(lastError) {
+                if Engine.isAccountLocked(failure) {
                     throw EngineError.accountLocked
                 }
-                if Engine.isEmailUnverifiedError(lastError) {
+                if Engine.isEmailUnverifiedError(failure) {
                     throw EngineError.emailUnverified
                 }
-                if Engine.isCredentialError(lastError) {
+                if Engine.isCredentialError(failure) {
                     throw EngineError.message(Engine.credentialErrorMessage)
                 }
-                engine.log("Entitlements: anisette \(idx + 1)/\(servers.count) failed: \(lastError)")
-                if Engine.isAppleRateLimit(lastError) {
+                // Not logged in through an Android-ADI server (-80046).
+                if Engine.isAndroidADISkip(failure) {
+                    engine.log("Entitlements: skipping anisette \(idx + 1)/\(servers.count): Apple refuses the sign-in token for anisette from its Android library (-80046).")
+                    appleRefusals.recordTokenRefusal(ani)
+                    failures.skip()
+                    if failures.tried == 0, appleRefusals.rulesOutAll(servers[(idx + 1)...]) {
+                        throw EngineError.message(engine.androidADIRefusalMessage(server: ani))
+                    }
+                    continue
+                }
+                engine.log("Entitlements: anisette \(idx + 1)/\(servers.count) failed: \(failure)")
+                failures.failed(ani, error: failure)
+                engine.anisetteFailed(ani, error: failure)
+                if Engine.isAppleRateLimit(failure) {
                     engine.log("Entitlements: Apple is rate-limiting sign-in (HTTP 429) — stopping.")
                     throw EngineError.message(Engine.appleRateLimitMessage)
                 }
                 // Apple refuses a reported device through every server alike;
                 // see `AnisetteServer.AppleRefusals`.
-                if Engine.isAppleServiceRefusal(lastError) {
+                if Engine.isAppleOutdatedMacRefusal(failure) {
+                    appleRefusals.recordOutdated(ani)
+                }
+                if Engine.isAppleTokenRefusal(failure) {
+                    appleRefusals.recordTokenRefusal(ani)
+                    if appleRefusals.rulesOutAll(servers[(idx + 1)...]) {
+                        engine.log("Entitlements: Apple refused the sign-in token (-80046) — stopping.")
+                        throw EngineError.message(engine.appleTokenRefusalMessage(through: ani))
+                    }
+                }
+                if Engine.isAppleServiceRefusal(failure) {
                     appleRefusals.record(ani)
                     if appleRefusals.endsSignIn(remaining: servers[(idx + 1)...]) {
                         engine.log("Entitlements: Apple's sign-in server refused \(appleRefusals.count) attempts with HTTP 503 — stopping.")
@@ -287,7 +310,7 @@ final class EntitlementsManager: ObservableObject {
                 }
                 // Every anisette server starts with the same request to Apple, so
                 // when that can't even be sent, more of them won't help.
-                if Engine.isAppleUnreachable(lastError) {
+                if Engine.isAppleUnreachable(failure) {
                     appleUnreachable += 1
                     if let message = await engine.appleUnreachableStop(
                         failures: appleUnreachable, logPrefix: "Entitlements: ") {
@@ -298,10 +321,7 @@ final class EntitlementsManager: ObservableObject {
                 }
             }
         }
-        let tried = servers.count == 1
-            ? L("the anisette server")
-            : L("all %d anisette servers", servers.count)
-        throw EngineError.message(L("Apple ID sign-in failed on %@. Last error: %@", tried, lastError))
+        throw EngineError.message(engine.anisetteSignInFailure(failures))
     }
 
     private func performSignIn(id: String, pw: String, ani: String, dir: String) throws -> String {
@@ -418,6 +438,7 @@ struct EntitlementsView: View {
                 appList
             }
             .padding(20)
+            .pageColumn()
             .animation(.smooth(duration: 0.35), value: manager.apps)
             .animation(.smooth(duration: 0.3), value: manager.isWorking)
             .animation(.smooth(duration: 0.35), value: manager.teamSummary)
@@ -557,6 +578,7 @@ private struct EntitlementPicker: View {
                 }
             }
             .padding(20)
+            .pageColumn()
             .animation(.smooth(duration: 0.35), value: manager.outcomes[app.id])
             .animation(.smooth(duration: 0.3), value: manager.applyingID)
         }
@@ -660,6 +682,8 @@ private struct EntitlementPicker: View {
         .buttonStyle(PrimaryButtonStyle())
         .disabled(selected.isEmpty || manager.isBusy)
         .padding(.horizontal, 20)
+        // The button keeps the page's width; the bar under it spans the window.
+        .pageColumn()
         .padding(.bottom, 12)
         .background(.ultraThinMaterial)
     }

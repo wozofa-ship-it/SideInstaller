@@ -12,4 +12,16 @@ xcuserdata/
 *.xcuserstate
 DerivedData/
 .DS_Store
-SideInstaller.ipa
+
+# IPAs are never committed: the unsigned one is a release asset here, the
+# signed ones are release assets of FrizzleM/SideInstaller-Signed.
+*.ipa
+
+# scripts/build-ipa.sh output
+/build/
+
+# Xcode derived data from -derivedDataPath build-dd
+/build-dd/
+
+# Claude Code per-machine settings
+/.claude/settings.local.json

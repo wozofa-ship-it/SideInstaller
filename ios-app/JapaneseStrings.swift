@@ -10,6 +10,7 @@ let japaneseStrings: [String: String] = [
 
     "Cancel": "キャンセル",
     "Copy": "コピー",
+    "Copy logs": "ログをコピー",
     "Email": "メールアドレス",
     "Password": "パスワード",
     "Install": "インストール",
@@ -124,6 +125,10 @@ let japaneseStrings: [String: String] = [
     "SideInstaller %@ is available — you're on %@.":
         "SideInstaller %@ が公開されています（現在お使いのバージョン：%@）。",
     "Get the latest version": "最新バージョンを取得",
+    "From the website": "Web サイトから",
+    "Sign it with your Apple ID": "Apple ID で署名",
+    "Install it in LiveContainer": "LiveContainer にインストール",
+    "LiveContainer isn't installed on this iPhone.": "この iPhone には LiveContainer がインストールされていません。",
     "Release": "チャンネル",
     "Reinstall": "再インストール",
     "Install %@": "%@ をインストール",
@@ -207,6 +212,11 @@ let japaneseStrings: [String: String] = [
     "Pairing file ready. You can export it or install it into an app below.":
         "ペアリングファイルの準備ができました。書き出すか、以下のアプリにインストールできます。",
     "Pairing file installed into %@.": "ペアリングファイルを %@ にインストールしました。",
+    "Install pairing into all apps": "ペアリングをすべてのアプリにインストール",
+    "Installing into all apps": "すべてのアプリにインストール中",
+    "Pairing file installed into all %d apps.": "ペアリングファイルを %d 個のアプリすべてにインストールしました。",
+    "Couldn't write into %@.": "%@ に書き込めませんでした。",
+    "The %@ record isn't a plist dictionary.": "%@ レコードは plist 辞書ではありません。",
 
     // Importing a pairing file (required below iOS 27, under Advanced from 27)
 
@@ -261,6 +271,46 @@ let japaneseStrings: [String: String] = [
     "This certificate has no serial number, so it can't be revoked.":
         "この証明書にはシリアル番号がないため、失効させることができません。",
 
+    // Export: the certificate SideInstaller signs with, as a .p12
+    "This certificate has no serial number, so it can't be exported.":
+        "この証明書にはシリアル番号がないため、書き出せません。",
+    "Only the certificate SideInstaller signs with can be exported: the private key of any other stays on the device that asked Apple for it.":
+        "書き出せるのは SideInstaller が署名に使っている証明書だけです。ほかの証明書の秘密鍵は、それを Apple に要求したデバイスにしかありません。",
+    "Couldn't export the certificate: %@": "証明書を書き出せませんでした: %@",
+    "Export certificate": "証明書を書き出す",
+    "Export": "書き出す",
+    "Exporting": "書き出し中",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
+        "この証明書と秘密鍵を .p12 ファイルとして保存し、ほかの署名アプリやコンピュータで署名に使えるようにします。パスワードを決めてください。ファイルを読み込むときに必要です。ファイルは誰にも渡さないでください。",
+    "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
+        "SideInstaller が書き出せるのは署名に使っている証明書だけですが、この中にはありません。証明書の秘密鍵は、それを Apple に要求したデバイスにしかありません。",
+    "SideInstaller signs with this one": "SideInstaller はこの証明書で署名します",
+
+    // MARK: - SideStore's certificate (sidestore://certificate)
+
+    "Use SideStore's certificate": "SideStore の証明書を使う",
+    "Checking the certificate": "証明書を確認中",
+    "SideStore opens and sends back its certificate. SideInstaller then signs with it too, so on a free Apple ID neither app has to revoke the other's.":
+        "SideStore が開き、証明書を送り返します。その後は SideInstaller もその証明書で署名するので、無料の Apple ID でもどちらのアプリも相手の証明書を失効させる必要がなくなります。",
+    "Apple won't issue a second signing certificate for this Apple ID. If SideStore made the one it has, SideInstaller can sign with that one too, and nothing is revoked. Revoking it lets the install continue as well — but it can't be undone.":
+        "Apple はこの Apple ID に 2 つ目の署名用証明書を発行しません。既存の証明書を SideStore が作成した場合は、SideInstaller もその証明書で署名でき、何も失効しません。失効させてもインストールを続行できますが、この操作は取り消せません。",
+    "If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked.":
+        "SideStore が作成した証明書なら、上の「SideStore の証明書を使う」をタップしてください。SideInstaller もその証明書で署名し、何も失効しません。",
+    "SideInstaller signs with “%@” from now on. Nothing was revoked, so the apps already signed with it keep working.":
+        "今後 SideInstaller は「%@」で署名します。何も失効していないため、この証明書で署名済みのアプリはそのまま使えます。",
+    "SideInstaller already signs with “%@”.": "SideInstaller はすでに「%@」で署名しています。",
+    "That certificate isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID (SideStore may be signed in with a different one). Nothing was changed.":
+        "この証明書はこの Apple ID のものではありません。失効しているか、別の Apple ID のものです（SideStore が別の Apple ID でサインインしている可能性があります）。何も変更されていません。",
+    "Couldn't use that certificate: %@": "その証明書を使用できませんでした：%@",
+    "SideStore isn't installed on this iPhone, so there's no certificate to get from it.":
+        "この iPhone には SideStore がインストールされていないため、証明書を取得できません。",
+    "Sign with this certificate?": "この証明書で署名しますか？",
+    "A link sent SideInstaller a signing certificate. Only use it if you asked for one: SideInstaller will sign apps with it from now on, in place of its own. It's used only if it's one of your Apple ID's certificates.":
+        "リンクから SideInstaller に署名用証明書が送られてきました。自分で要求した場合のみ使ってください。今後 SideInstaller は自身の証明書の代わりにこの証明書でアプリに署名します。あなたの Apple ID の証明書である場合にのみ使用されます。",
+    "Use it": "使う",
+    "That link was meant to carry a signing certificate, but what it holds can't be read.":
+        "このリンクには署名用証明書が含まれているはずですが、内容を読み取れません。",
+
     // MARK: - Location tab
 
     "Location spoofing": "位置情報の偽装",
@@ -278,6 +328,75 @@ let japaneseStrings: [String: String] = [
     "Location session closed — set it up again.": "位置情報のセッションが終了しました。もう一度設定してください。",
     "Downloading %@ failed (HTTP %d).": "%@ のダウンロードに失敗しました（HTTP %d）。",
     "Couldn't build the download URL for %@.": "%@ のダウンロード URL を作成できませんでした。",
+
+    // Location › saved places and GPX routes.
+    "Saved places": "保存した場所",
+    "Save this place": "この場所を保存",
+    "Name": "名前",
+    "Show on map": "地図で表示",
+    "Tap Save under the map to keep the spot under the pin. Tapping a saved place sets it straight away.":
+        "地図の下の「保存」をタップすると、ピンの位置を保存できます。保存した場所をタップすると、すぐにその位置に設定されます。",
+    "Play a GPX route": "GPX ルートを再生",
+    "Import a .gpx file and the device moves along it at the speed you pick, then stays at its last point.":
+        ".gpx ファイルを読み込むと、デバイスが選んだ速度でルートに沿って移動し、最後の地点で止まります。",
+    "Import GPX file": "GPX ファイルを読み込む",
+    "Couldn't read %@ as a GPX file.": "%@ を GPX ファイルとして読み込めませんでした。",
+    "%@ has no track, route or waypoints in it.": "%@ にはトラック、ルート、ウェイポイントがありません。",
+    "As recorded": "記録どおり",
+    "Walk": "徒歩",
+    "Cycle": "自転車",
+    "Drive": "車",
+    "Speed": "速度",
+    "Play route": "ルートを再生",
+    "Playing route · %d%%": "ルートを再生中 · %d%%",
+    "Stop here": "ここで停止",
+    "%@ of %@": "%@ / %@",
+    "Route finished. The device stays at its last point.": "ルートが終了しました。デバイスは最後の地点にとどまります。",
+    "Route stopped. The device stays where it got to.": "ルートを停止しました。デバイスは到達した地点にとどまります。",
+    "Route playback stopped: %@": "ルートの再生が停止しました: %@",
+    // Location › planned routes (OpenStreetMap).
+    "Add stop": "経由地を追加",
+    "Add as stop": "経由地として追加",
+    "Plan a route": "ルートを計画",
+    "Travel by": "移動手段",
+    "Goes along each street at its speed limit, from OpenStreetMap. A street without one mapped gets the usual limit for its kind of road.":
+        "OpenStreetMap の制限速度で各道路を走ります。制限速度が登録されていない道路では、その種類の道路の一般的な制限速度を使います。",
+    "Rides streets and paths a bike can take, at a cycling pace.": "自転車で通れる道路や小道を、自転車のペースで進みます。",
+    "Walks streets and paths at a walking pace.": "道路や小道を、歩くペースで進みます。",
+    "Start where the device is": "デバイスの現在地から出発",
+    "Move the map so the pin is on a place, then tap Add stop. Add as many as you like: the route goes to each in order.":
+        "ピンが場所の上に来るように地図を動かして、「経由地を追加」をタップします。いくつでも追加でき、ルートは順番にそれぞれを通ります。",
+    "The device's location": "デバイスの位置",
+    "Stop %d": "経由地 %d",
+    "Clear stops": "経由地を消去",
+    "Move up": "上へ移動",
+    "Move down": "下へ移動",
+    "Find route": "ルートを検索",
+    "Finding route": "ルートを検索中",
+    "Add one more stop to plan a route.": "ルートを計画するには、経由地をもう 1 つ追加してください。",
+    "Routes from OpenStreetMap, © OpenStreetMap contributors":
+        "ルートは OpenStreetMap から、© OpenStreetMap 協力者",
+    "Speed limits are mapped for all of it.": "全区間で制限速度が登録されています。",
+    "Speed limits are mapped for %d%% of it; the rest is estimated.":
+        "%d%% の区間で制限速度が登録されています。残りは推定です。",
+    "Average %@": "平均 %@",
+    "Speed limit %@": "制限速度 %@",
+    "No speed limit · going %@": "速度無制限 · %@ で走行中",
+    "No limit mapped · going %@": "制限速度の登録なし · %@ で走行中",
+    "Going %@": "%@ で移動中",
+    "No street name": "名前のない道路",
+    "Estimated speed limit %@": "推定制限速度 %@",
+    "No speed limit": "速度無制限",
+    "No route found between these stops. Move them onto roads or paths, or travel another way.":
+        "これらの経由地を結ぶルートが見つかりません。経由地を道路や小道の上に動かすか、別の移動手段を試してください。",
+    "A stop is too far from any road or path. Move it closer and try again.":
+        "経由地のひとつが道路や小道から遠すぎます。近くに動かしてもう一度お試しください。",
+    "Too many stops for the route server. Take some out and try again.":
+        "経由地が多すぎてルートサーバで処理できません。いくつか削除してもう一度お試しください。",
+    "That route is too long for the route server. Make it shorter, or split it up.":
+        "このルートはルートサーバには長すぎます。短くするか、分割してください。",
+    "The route server is busy. Try again in a minute.": "ルートサーバが混み合っています。1 分ほどしてからもう一度お試しください。",
+    "The route server couldn't plan this route (%@).": "ルートサーバがこのルートを計画できませんでした（%@）。",
 
     // MARK: - Entitlements tab
 
@@ -307,8 +426,8 @@ let japaneseStrings: [String: String] = [
     // Refresh all: signing the installed apps again.
     "iOS %@ isn't supported — SideInstaller needs iOS %@ or later.":
         "iOS %@ はサポートされていません。SideInstaller には iOS %@ 以降が必要です。",
-    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Revoke it under Tools › Certificates, then refresh again.":
-        "Apple はこの Apple ID に署名証明書を発行しません。すでに存在すると報告されています（エラー 7460）。「ツール › 証明書」で失効させてから、もう一度更新してください。",
+    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Under Tools › Certificates, use SideStore's certificate or revoke that one, then refresh again.":
+        "Apple はこの Apple ID に署名証明書を発行しません。すでに存在すると報告されています（エラー 7460）。「ツール › 証明書」で SideStore の証明書を使うか、その証明書を失効させてから、もう一度更新してください。",
     "An install is already running. Wait for it to finish, then refresh.":
         "インストールがすでに実行中です。終わるまで待ってから更新してください。",
     "Getting ready": "準備中",
@@ -399,10 +518,40 @@ let japaneseStrings: [String: String] = [
     "Custom…": "カスタム…",
     "Server URL": "サーバー URL",
     "Anisette Server": "Anisette サーバー",
+    "Starts with %@": "%@ から開始",
+    "Auto starts with the server that signed in last, then tries the others, the ones most likely to work first.":
+        "「自動」では、前回サインインできたサーバーから始め、次に他のサーバーを成功しやすい順に試します。",
+    "Only this server is tried. If it fails, so does sign-in: choose Auto to have SideInstaller try the others.":
+        "このサーバーだけを試します。失敗するとサインインも失敗します。「自動」を選ぶと、SideInstaller が他のサーバーも試します。",
+    "Only the server picked in Settings › Anisette Server was tried. Choose Auto there to let SideInstaller try the others when one fails.":
+        "「設定 › Anisette サーバー」で選んだサーバーだけを試しました。そこで「自動」を選ぶと、1 つが失敗したときに SideInstaller が他のサーバーも試します。",
     "Device IP": "デバイス IP",
     "Advanced": "詳細設定",
     "Clear": "消去",
     "Activity Log (%d)": "アクティビティログ（%d）",
+
+    // Settings › Developer Mode: AMFI requests over the device link.
+    "Developer Mode": "デベロッパモード",
+    "Show Developer Mode in Settings": "設定にデベロッパモードを表示",
+    "Turn on Developer Mode": "デベロッパモードをオンにする",
+    "Asking this iPhone…": "この iPhone に問い合わせ中…",
+    "Both need a link to this iPhone that already works: LocalDevVPN plus a pairing file, such as one imported on iOS 17.4 to 26. On iOS 27 the link itself needs Developer Mode, so they can't bring back a missing option there.":
+        "どちらも、この iPhone への接続がすでに使えることが前提です。LocalDevVPN とペアリングファイル（iOS 17.4〜26 でインポートしたものなど）が必要です。iOS 27 では接続そのものにデベロッパモードが必要なため、消えた項目を元に戻すことはできません。",
+    "Turn on Developer Mode?": "デベロッパモードをオンにしますか？",
+    "Turn On and Restart": "オンにして再起動",
+    "This iPhone restarts right away. Once you unlock it, tap Turn On in the alert that appears. iOS allows this only while the iPhone has no passcode.":
+        "この iPhone はすぐに再起動します。ロックを解除したら、表示される通知で「オンにする」をタップしてください。iOS がこれを許可するのは、iPhone にパスコードが設定されていない場合だけです。",
+    "Developer Mode is already on.": "デベロッパモードはすでにオンです。",
+    "Developer Mode now shows under Settings › Privacy & Security, near the bottom. Turn it on there, and iOS restarts to finish.":
+        "デベロッパモードが「設定 › プライバシーとセキュリティ」の下のほうに表示されるようになりました。そこでオンにすると、iOS が再起動して完了します。",
+    "Developer Mode is set to turn on, and this iPhone restarts now. Once you unlock it, tap Turn On.":
+        "デベロッパモードがオンになるよう設定しました。この iPhone は今から再起動します。ロックを解除したら「オンにする」をタップしてください。",
+    "An install is already running. Wait for it to finish, then try again.":
+        "インストールがすでに実行中です。終わるまで待ってから、もう一度お試しください。",
+    "iOS turns Developer Mode on from here only while this iPhone has no passcode. Tap “Show Developer Mode in Settings” and turn it on there instead.":
+        "ここからデベロッパモードをオンにできるのは、この iPhone にパスコードが設定されていない場合だけです。「設定にデベロッパモードを表示」をタップして、そこでオンにしてください。",
+    "This iPhone didn't take the Developer Mode request: %@":
+        "この iPhone はデベロッパモードの要求を受け付けませんでした：%@",
 
     // MARK: - Release channels & downloads
 
@@ -439,10 +588,22 @@ let japaneseStrings: [String: String] = [
     "Two-factor verification was cancelled.": "二段階認証がキャンセルされました。",
     "Incorrect Apple ID or password. Check your Apple Account email and password, then try again.":
         "Apple ID またはパスワードが正しくありません。Apple アカウントのメールアドレスとパスワードを確認してから、再度お試しください。",
-    "Apple ID sign-in failed on %@. Last error: %@":
-        "%@ での Apple ID サインインに失敗しました。直近のエラー：%@",
+    "Apple ID sign-in failed on %@. Error: %@":
+        "%@ での Apple ID サインインに失敗しました。エラー：%@",
+    "Apple ID sign-in failed on %@. Error via %@: %@":
+        "%@ での Apple ID サインインに失敗しました。%@ 経由のエラー：%@",
     "Apple's sign-in server refused the request (HTTP 503). It isn't your password or the anisette server, so trying more servers won't help. Try again later, or update SideInstaller.":
         "Apple のサインインサーバーがリクエストを拒否しました（HTTP 503）。パスワードや anisette サーバーの問題ではないため、別のサーバーを試しても解決しません。しばらくしてから再度お試しいただくか、SideInstaller をアップデートしてください。",
+    "“%@” makes its anisette data with Apple's Android library, and Apple now refuses to finish signing in through those servers (error -80046), after your password and code. In Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "「%@」は Apple の Android ライブラリで anisette データを作成しており、Apple は現在、パスワードとコードの入力後にこれらのサーバー経由のサインインの完了を拒否しています（エラー -80046）。「設定 › Anisette サーバー」で「自動」または「SideStore (New)」などの Mac サーバーを選んでください。",
+    "Apple refused to finish signing in (error -80046), even through a Mac anisette server, the kind it still accepted. Try again later, or check for a SideInstaller update.":
+        "Apple がサインインの完了を拒否しました（エラー -80046）。これまで受け付けていた Mac の anisette サーバーを経由しても同じでした。しばらくしてから再度お試しいただくか、SideInstaller のアップデートを確認してください。",
+    "Apple refused to finish signing in through “%@” (error -80046). It now only accepts sign-ins through anisette servers on its macOS library: in Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "Apple が「%@」経由のサインインの完了を拒否しました（エラー -80046）。現在は macOS ライブラリを使う anisette サーバー経由のサインインしか受け付けません。「設定 › Anisette サーバー」で「自動」または「SideStore (New)」などの Mac サーバーを選んでください。",
+    "Apple won't send a code by text or call to this sign-in, so it was sent to your Apple devices.":
+        "Apple はこのサインインに SMS や電話でコードを送らないため、Apple デバイスに送信しました。",
+    "Apple didn't confirm sending a code to your Apple devices. If one arrived, enter it; if not, try another way.":
+        "Apple は Apple デバイスへのコード送信を確認しませんでした。コードが届いた場合は入力し、届いていない場合は別の方法をお試しください。",
     "SideInstaller can't reach Apple's sign-in server (gsa.apple.com), though this iPhone has an internet connection. Something is blocking it: a firewall, a DNS filter or ad blocker, Screen Time content restrictions, or another VPN app. Turn it off or try another network, then try again.":
         "この iPhone はインターネットに接続されていますが、SideInstaller は Apple のサインインサーバー（gsa.apple.com）に接続できません。ファイアウォール、DNS フィルタや広告ブロッカー、スクリーンタイムのコンテンツ制限、または別の VPN App が接続を妨げています。それをオフにするか別のネットワークを試してから、もう一度お試しください。",
     "SideInstaller can't reach Apple: Cellular Data is turned off for it. Turn SideInstaller on in Settings › Cellular, or join a Wi-Fi network with internet access, then try again.":
@@ -461,6 +622,7 @@ let japaneseStrings: [String: String] = [
         "セキュリティ上の理由により、Apple はこの Apple アカウントをロックしました（エラー -20209）。ロックが解除されるまで、サインインはすべて失敗します。iforgot.apple.com でパスワードをリセットしてから、新しいパスワードでもう一度サインインしてください。",
     "the anisette server": "anisette サーバー",
     "all %d anisette servers": "%d 個すべての anisette サーバー",
+    "%d anisette servers (%d skipped)": "%d 個の anisette サーバー（%d 個はスキップ）",
     "Not signed in.": "サインインしていません。",
     "No SideStore IPA downloaded.": "SideStore の IPA がダウンロードされていません。",
     "Signing failed: %@": "署名に失敗しました：%@",
@@ -540,6 +702,17 @@ let japaneseStrings: [String: String] = [
     "Paired": "ペアリング完了",
     "Tap to return to SideInstaller.": "タップして SideInstaller に戻ります。",
 
+    // The install's progress outside the app
+    "Installing %@": "%@ をインストール中",
+    "Paused": "一時停止中",
+    "Open SideInstaller to finish the install.":
+        "インストールを完了するには SideInstaller を開いてください。",
+    "Check the App IDs it needs, then tap Install.":
+        "必要な App ID を確認してから「インストール」をタップしてください。",
+    "Tap Trust": "「信頼」をタップ",
+    "Unlock this iPhone and tap Trust when it asks.":
+        "この iPhone のロックを解除し、確認されたら「信頼」をタップしてください。",
+
     "A signing certificate already exists": "既に署名用証明書が存在します",
     "Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending.":
         "Apple からエラー 7460 が返されました。この Apple ID には既に iOS 開発用証明書が存在するか、発行のリクエストが処理中です。",
@@ -587,8 +760,8 @@ let japaneseStrings: [String: String] = [
     "Open Apple Account":
         "Apple アカウントを開く",
     "No App IDs left this week": "今週使える App ID がありません",
-    "Every app and app extension SideInstaller signs needs an App ID. A free Apple ID can register 10 a week, and each one counts for 7 days.":
-        "SideInstaller が署名するアプリとアプリ拡張機能には、それぞれ App ID が必要です。無料の Apple ID で登録できるのは週に 10 個までで、それぞれ 7 日間カウントされます。",
+    "Every app SideInstaller signs needs an App ID, which its extensions share. A free Apple ID can register 10 a week, and each one counts for 7 days.":
+        "SideInstaller が署名するアプリには、それぞれ App ID が必要です（拡張機能はアプリの App ID を共有します）。無料の Apple ID で登録できるのは週に 10 個までで、それぞれ 7 日間カウントされます。",
     "They can't be deleted sooner. Wait until some expire, then tap Install again.":
         "期限前に削除することはできません。いくつか期限切れになったら、もう一度「インストール」をタップしてください。",
     "Or sign in with a different (or spare) Apple ID in Settings › Account, then tap Install again.":
@@ -611,6 +784,18 @@ let japaneseStrings: [String: String] = [
     "Come back here, tap “Import pairing file”, and pick it. Everything after that works as it does on iOS %@.":
         "こちらに戻り、「ペアリングファイルをインポート」をタップして選択してください。それ以降の流れは iOS %@ と同じです。",
     "Get jitterbugpair": "jitterbugpair を入手",
+    "From iOS 26.4 on it has to be a remote pairing file: this iPhone hangs up on lockdown ones, like jitterbugpair's, when they come through LocalDevVPN.":
+        "iOS 26.4 以降は「Remote pairing」形式のファイルが必要です。jitterbugpair で作るような lockdown 形式のファイルは、LocalDevVPN を経由するとこの iPhone に切断されます。",
+    "Get idevice_pair": "idevice_pair を入手",
+    "Make a remote pairing file": "「Remote pairing」ファイルを作成",
+    "The pairing file you imported is a lockdown one. Since iOS 26.4, this iPhone hangs up on those when they come through LocalDevVPN, so it can't connect, and a new one of the same kind won't either.":
+        "インポートしたペアリングファイルは lockdown 形式です。iOS 26.4 以降、この iPhone は LocalDevVPN を経由する lockdown 形式のファイルを切断するため、このファイルでは接続できず、同じ形式で作り直しても同じです。",
+    "Come back here, tap “Replace” on the Pairing file card, and pick it.":
+        "こちらに戻り、「ペアリングファイル」カードの「置き換え」をタップして、そのファイルを選択してください。",
+    "On a Mac, Windows PC or Linux box, open idevice_pair, plug this iPhone in, and tap Trust if it asks. Pick it, choose “Remote pairing”, click “Create”, and keep this iPhone unlocked until it's done.":
+        "Mac、Windows パソコン、または Linux マシンで idevice_pair を開き、この iPhone を接続して、求められたら「信頼」をタップしてください。この iPhone を選び、「Remote pairing」を選んで「Create」をクリックし、完了するまで iPhone のロックを解除したままにしてください。",
+    "Click “Save to file…” and send the file to this iPhone, by AirDrop, iCloud Drive or a cable. A pairing file exported from iLoader works too.":
+        "「Save to file…」をクリックし、そのファイルを AirDrop、iCloud Drive、またはケーブルでこの iPhone に転送してください。iLoader から書き出したペアリングファイルも使えます。",
 
     // MARK: - Revoke-and-retry (Apple error 7460)
 
@@ -659,6 +844,16 @@ let japaneseStrings: [String: String] = [
         "初期値の 10.7.0.1 に戻してください。LocalDevVPN では、これは「Settings › Device IP」にある値です。メイン画面に表示されているアドレス（トンネル自身の端点）とは異なります。",
     "If you changed LocalDevVPN's addresses, copy its Device IP here — including the /32, if it shows one.":
         "LocalDevVPN のアドレスを変更している場合は、その Device IP をここにコピーしてください。末尾に /32 が付いていれば、そのまま含めて構いません。",
+    "Device IP is %@, one of this iPhone's own addresses, and iOS won't let an app connect to those. In Settings › Advanced, set Device IP to the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default, not the “Connected to” address on its main screen.":
+        "デバイス IP が %@ になっています。これはこの iPhone 自身のアドレスの一つで、iOS はアプリがそこへ接続することを許可しません。「設定 › 詳細設定 › デバイス IP」を、LocalDevVPN の「Settings › Device IP」にあるアドレス（初期値は 10.7.0.1）にしてください。LocalDevVPN のメイン画面に「… に接続しました」と表示されているアドレスではありません。",
+    "iOS refused the connection to %@ on this iPhone, before anything was sent. It does that for this iPhone's own addresses, like the “Connected to” address on LocalDevVPN's main screen. Device IP, in Settings › Advanced, has to be the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default. If it already is, turn LocalDevVPN off and on again, then try again.":
+        "iOS がこの iPhone 上で %@ への接続を拒否しました（何も送信されていません）。iOS は、LocalDevVPN のメイン画面に「… に接続しました」と表示されるアドレスのような、この iPhone 自身のアドレスへの接続を拒否します。「設定 › 詳細設定 › デバイス IP」は、LocalDevVPN の「Settings › Device IP」にあるアドレス（初期値は 10.7.0.1）でなければなりません。既にそうなっている場合は、LocalDevVPN をオフにしてからオンに戻し、もう一度お試しください。",
+    "This iPhone hung up on the connection as soon as it opened. From iOS 26.4 on it does that to lockdown pairing files, like this one, when they come through LocalDevVPN. Pair this iPhone with itself instead: tap “Regenerate” under Tools › Pairing, or tap Install, which pairs it first.":
+        "この iPhone は、接続が開いた直後に切断しました。iOS 26.4 以降、LocalDevVPN を経由する lockdown 形式のペアリングファイル（このファイルなど）はこのように切断されます。代わりにこの iPhone を自分自身とペアリングしてください。「ツール › ペアリング」で「再生成」をタップするか、「インストール」をタップすると最初にペアリングが行われます。",
+    "This iPhone hung up on the connection as soon as it opened. Since iOS 26.4 it does that to lockdown pairing files, like this one, when they come through LocalDevVPN, so a new one of the same kind won't help. A remote pairing file still works: on a computer, open idevice_pair, choose “Remote pairing”, click “Create”, then “Save to file…”, and import the file under “Pairing file”.":
+        "この iPhone は、接続が開いた直後に切断しました。iOS 26.4 以降、LocalDevVPN を経由する lockdown 形式のペアリングファイル（このファイルなど）はこのように切断されるため、同じ形式のファイルを作り直しても解決しません。「Remote pairing」形式のペアリングファイルなら今でも使えます。パソコンで idevice_pair を開き、「Remote pairing」を選んで「Create」、続けて「Save to file…」をクリックし、そのファイルを「ペアリングファイル」からインポートしてください。",
+    "This iPhone hung up on the connection: from iOS 26.4 on, it does that to lockdown pairing files like this one when they come through LocalDevVPN. See the steps above.":
+        "この iPhone が接続を切断しました。iOS 26.4 以降、LocalDevVPN を経由する lockdown 形式のペアリングファイル（このファイルなど）はこのように切断されます。上記の手順をご覧ください。",
     "Pairing this iPhone needs it: SideInstaller advertises itself on the local network for Settings to find.":
         "この iPhone のペアリングには Wi-Fi が必要です。SideInstaller は「設定」アプリから見つけてもらうために、ローカルネットワーク上で自身をアドバタイズします。",
     "Connect to a Wi-Fi network. Pairing this iPhone needs it — SideInstaller has to be findable on the local network.":
@@ -675,15 +870,17 @@ let japaneseStrings: [String: String] = [
         "相手の iPhone には iOS %@ が必要です。インストール後、SideInstaller は自分でペアリングしますが、それより古いバージョンではできません。",
     "Their iPhone": "相手の iPhone",
     "This iPhone is %@, so theirs will look similar.": "この iPhone は %@ です。相手のアドレスもこれに近い形になります。",
-    "IP address (e.g. 192.168.1.42)": "IP アドレス（例：192.168.1.42）",
-    "Enter the other iPhone's IP address. It's in Settings › Wi-Fi, next to the network it's on.":
-        "相手の iPhone の IP アドレスを入力してください。「設定」>「Wi-Fi」の、接続中のネットワークの横で確認できます。",
+    "IP address (optional)": "IP アドレス（任意）",
+    "Optional: leave it empty, and it fills in when their iPhone pairs.":
+        "任意：空欄のままにすると、相手の iPhone がペアリングしたときに自動で入力されます。",
     "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
         "相手の iPhone で「設定」>「Wi-Fi」>ネットワーク横の ⓘ >「IP アドレス」の順に開きます。",
     "“%@” isn't an IPv4 address. It should look like 192.168.1.42.":
         "「%@」は IPv4 アドレスではありません。192.168.1.42 のような形式で入力してください。",
     "%@ is an address this iPhone already holds. Side by Side installs onto someone else's iPhone — use theirs. To install on this one, use the Install tab.":
         "%@ はこの iPhone 自身のアドレスです。Side by Side は他の人の iPhone にインストールするための機能なので、相手のアドレスを入力してください。この iPhone にインストールするには「インストール」タブを使用してください。",
+    "The iPhone that paired was this one. Pair from their iPhone's Settings instead. To install on this iPhone, use the Install tab.":
+        "ペアリングしたのはこの iPhone でした。相手の iPhone の「設定」からペアリングしてください。この iPhone にインストールするには「インストール」タブを使用してください。",
     "Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work.":
         "Wi-Fi がオフになっています。この機能を使うには、両方の iPhone が同じ Wi-Fi ネットワークに接続されている必要があります。",
     "Pair with their iPhone": "相手の iPhone とペアリング",
@@ -696,6 +893,8 @@ let japaneseStrings: [String: String] = [
         "ヒント：その iPhone/iPad の持ち主の Apple アカウントの認証情報を使ってください",
     "Use my saved Apple ID instead": "保存済みの自分の Apple ID を使用",
     "Clear their details": "入力した情報を消去",
+    "This iPhone is still paired with theirs. Clearing forgets it.":
+        "この iPhone はまだ相手の iPhone とペアリングされています。消去するとこのペアリングも削除されます。",
     "Download SideInstaller": "SideInstaller をダウンロード",
     "Couldn't download the latest SideInstaller release: %@": "SideInstaller の最新リリースをダウンロードできませんでした：%@",
     "The release download wasn't an IPA. GitHub may be returning an error page — try again in a minute.":
@@ -777,6 +976,7 @@ let japaneseStrings: [String: String] = [
     "For the support, and for spotting the bugs that got fixed because of it.":
         "これまでのご支援と、そのおかげで発見・修正できたバグに感謝します。",
     "For the Japanese translation.": "日本語への翻訳に感謝します。",
+    "For the Korean translation.": "韓国語への翻訳に感謝します。",
 
     "Built with": "使用しているオープンソース",
     "The open source work this app is built on:": "このアプリの基盤となっているオープンソースの成果：",
@@ -813,4 +1013,113 @@ let japaneseStrings: [String: String] = [
         "このペアリングファイルには、%@ が読み取れる唯一の形式である RPPairing レコードがありません。",
     "Runs Windows PC games on your iPhone. By Will Faust, GPL-3.0.":
         "Windows 向け PC ゲームを iPhone で動かします。Will Faust 開発、GPL-3.0 ライセンス。",
+
+    // MARK: - App ID cost
+
+    "App IDs for this app": "このアプリの App ID",
+    "Cost": "使用数",
+    "Left now": "現在の残り",
+    "Left after": "インストール後",
+    "New App IDs": "新しい App ID",
+    "This Apple ID doesn't have enough App IDs left: this app needs %d, and %d are left. Each one counts for 7 days, so wait for some to expire or sign in with another Apple ID.":
+        "この Apple ID には App ID が足りません。このアプリには %d 個必要ですが、残りは %d 個です。それぞれ 7 日間カウントされるので、期限切れを待つか、別の Apple ID でサインインしてください。",
+    "The next one frees up on %@.": "次の 1 個は %@ に空きます。",
+    "Your Apple ID already has every App ID this app needs, so installing it uses none.":
+        "このアプリに必要な App ID はすべて Apple ID に登録済みなので、インストールしても消費しません。",
+    "Signing registers one App ID for the app, and its extensions share it. It counts for 7 days.":
+        "署名すると、アプリに App ID が 1 個登録され、拡張機能もそれを共有します。7 日間カウントされます。",
+    "This Apple ID can register %d a week.": "この Apple ID で登録できるのは週に %d 個までです。",
+
+    // MARK: - Links (sideinstaller://install, sideinstaller://pairingFile)
+
+    "Install from a link?": "リンクからインストールしますか？",
+    "Download and install": "ダウンロードしてインストール",
+    "SideInstaller will download this .ipa, then sign it with your Apple ID and install it. Only go ahead if you trust where the link came from.":
+        "SideInstaller はこの .ipa をダウンロードし、あなたの Apple ID で署名してインストールします。リンクの出どころを信頼できる場合のみ続けてください。",
+    "It replaces %@, the custom .ipa you have now.": "現在のカスタム .ipa（%@）は置き換えられます。",
+    "Use SideStore's pairing file?": "SideStore のペアリングファイルを使いますか？",
+    "Import this pairing file?": "このペアリングファイルをインポートしますか？",
+    "Import": "インポート",
+    "SideStore sent back the pairing file it has. SideInstaller will connect to this iPhone with it.":
+        "SideStore が保持しているペアリングファイルを送り返しました。SideInstaller はこれを使ってこの iPhone に接続します。",
+    "A link sent SideInstaller a pairing file. Only import it if you asked for one: SideInstaller will connect to this iPhone with it.":
+        "リンクから SideInstaller にペアリングファイルが送られてきました。自分で要求した場合のみインポートしてください。SideInstaller はこれを使ってこの iPhone に接続します。",
+    "It replaces %@.": "%@ は置き換えられます。",
+    "It replaces the pairing file in use now.": "現在使用中のペアリングファイルは置き換えられます。",
+    "Get it from SideStore": "SideStore から取得",
+    "SideStore opens and sends back the pairing file it has.": "SideStore が開き、保持しているペアリングファイルを送り返します。",
+    "SideStore isn't installed on this iPhone, so there's no pairing file to get from it.":
+        "この iPhone には SideStore がインストールされていないため、ペアリングファイルを取得できません。",
+    "That install link has no .ipa in it. It needs ?url= followed by the https:// address the .ipa downloads from.":
+        "このインストールリンクには .ipa が含まれていません。?url= の後に .ipa のダウンロード元の https:// アドレスが必要です。",
+    "That link was meant to carry a pairing file, but what it holds can't be read.":
+        "このリンクにはペアリングファイルが含まれているはずですが、内容を読み取れません。",
+    "That link carries a file, but it isn't a pairing file.": "このリンクにはファイルが含まれていますが、ペアリングファイルではありません。",
+
+    // MARK: - Report a problem
+
+    "Report a problem": "問題を報告",
+    "Report this problem": "この問題を報告",
+    "Opens a GitHub issue with this app's details, its log and crash logs.":
+        "アプリの情報、ログ、クラッシュログを添えて GitHub に Issue を作成します。",
+    "What happened?": "何が起きましたか？",
+    "What were you doing, and what went wrong?": "何をしていて、何がうまくいきませんでしたか？",
+    "Say what you tapped, what you expected and what happened instead. English is best, but any language is fine.":
+        "何をタップしたか、何が起きると思ったか、実際に何が起きたかを書いてください。英語が望ましいですが、どの言語でも構いません。",
+    "Included": "含まれる内容",
+    "Device": "デバイス",
+    "App": "アプリ",
+    "Stopped at": "停止したステップ",
+    "not connected": "未接続",
+    "none": "なし",
+    "made on this iPhone": "この iPhone で作成",
+    "latest": "最新",
+    "custom server": "カスタムサーバー",
+    "Auto, starts with %@": "自動、%@ から開始",
+    "Error": "エラー",
+    "Activity log": "アクティビティログ",
+    "%d lines": "%d 行",
+    "Your Apple ID, device name, serial numbers and keys are taken out of the log first.":
+        "Apple ID、デバイス名、シリアル番号、キーは先にログから取り除かれます。",
+    "Crash logs": "クラッシュログ",
+    "Looking for crash logs …": "クラッシュログを探しています …",
+    "Look for crash logs on this iPhone": "この iPhone のクラッシュログを探す",
+    "Look again": "もう一度探す",
+    "No crash logs from SideStore, LiveContainer or Madeira in the last %d days.":
+        "過去 %d 日間に SideStore、LiveContainer、Madeira のクラッシュログはありません。",
+    "iOS hands SideInstaller its own crashes the next time it opens. Crash logs from SideStore, LiveContainer and Madeira are read from this iPhone through LocalDevVPN.":
+        "SideInstaller 自身のクラッシュは、次に開いたときに iOS から渡されます。SideStore、LiveContainer、Madeira のクラッシュログは LocalDevVPN 経由でこの iPhone から読み取ります。",
+    "Open a GitHub issue": "GitHub で Issue を作成",
+    "Share the report": "レポートを共有",
+    "Preview the report": "レポートをプレビュー",
+    "Report": "レポート",
+    "The report is saved in Files › On My iPhone › SideInstaller › Reports. On GitHub, attach it with “Paste, drop, or click to add files” below the text, then submit the issue.":
+        "レポートは「ファイル」›「この iPhone 内」› SideInstaller › Reports に保存されます。GitHub ではテキスト欄の下の “Paste, drop, or click to add files” で添付してから Issue を送信してください。",
+    "Describe the problem above first.": "先に上で問題を説明してください。",
+    "Couldn't save the report: %@": "レポートを保存できませんでした：%@",
+
+    // MARK: - Official download check
+
+    "Did you download SideInstaller from sideinstaller.net?":
+        "SideInstaller を sideinstaller.net からダウンロードしましたか？",
+    "SideInstaller is open source, so anyone can publish a modified copy that steals the Apple ID typed into it. Only sideinstaller.net is official.":
+        "SideInstaller はオープンソースのため、入力された Apple ID を盗むように改変したコピーを誰でも公開できます。公式は sideinstaller.net だけです。",
+    "Yes, from sideinstaller.net":
+        "はい、sideinstaller.net から",
+    "No, or I'm not sure":
+        "いいえ、またはわからない",
+    "Don't sign in with this copy":
+        "このコピーではサインインしないでください",
+    "Copies from anywhere other than sideinstaller.net are unofficial and may have been changed to steal your Apple ID. Delete this one and install SideInstaller from sideinstaller.net, then sign in there.":
+        "sideinstaller.net 以外から入手したコピーは非公式で、Apple ID を盗むように改変されている可能性があります。このコピーを削除し、sideinstaller.net から SideInstaller をインストールしてからサインインしてください。",
+    "Open sideinstaller.net":
+        "sideinstaller.net を開く",
+    "Back":
+        "戻る",
+    "I understand the risks":
+        "リスクを理解しました",
+    "Use an unofficial copy?":
+        "非公式のコピーを使用しますか？",
+    "If this copy was changed, it can send your Apple ID and password to someone else. Continue only if you trust where it came from.":
+        "このコピーが改変されている場合、Apple ID とパスワードが第三者に送信される可能性があります。入手元を信頼できる場合のみ続行してください。",
 ]

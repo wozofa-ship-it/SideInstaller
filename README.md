@@ -7,7 +7,7 @@
 **Install SideStore and LiveContainer directly on your iPhone. No PC required.**
 
 [![Install](https://img.shields.io/badge/Install-SideInstaller-2ea44f?style=for-the-badge)](https://sideinstaller.net/)
-[![Version](https://img.shields.io/badge/version-1.5.3-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.6.1-blue?style=for-the-badge)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-iOS-lightgrey?style=for-the-badge&logo=apple)](#requirements)
 [![License](https://img.shields.io/badge/license-Custom-orange?style=for-the-badge)](LICENSE.md)
 
@@ -56,14 +56,15 @@ anyone to read, audit, or contribute to, so you can see exactly what's running o
 
 ## Requirements
 
-- An iPhone or iPad on iOS 27+ (iOS 17.4+ if you have your pairing file)
+- An iPhone (the iPhone Duo too, open or closed) or iPad on iOS 27+ (iOS 17.4+ with a pairing file
+  made on a computer; from iOS 26.4, a [remote pairing one](#ios-264-to-26x-a-remote-pairing-file))
 - Wi-Fi (first time only)
 - Your Apple account credentials (not collected)
 
 
 ## How to use it
 
-1. Open [the official install page](https://frizzlem.github.io/SideInstaller/) and install the app using any
+1. Open [the official install page](https://sideinstaller.net/) and install the app using any
    of the certificates.
 2. Once it's installed, open it.
 3. Connect the device to LocalDevVPN (or any alternative)
@@ -72,14 +73,54 @@ anyone to read, audit, or contribute to, so you can see exactly what's running o
 6. Wait while your selection installs.
 7. That's it. No PC and no extra steps required.
 
+### Links
+
+SideInstaller opens three kinds of `sideinstaller://` link, and asks before acting on any of them:
+
+- `sideinstaller://install?url=<percent-encoded https link to an .ipa>` downloads the IPA as the
+  custom .ipa and installs it, for one-tap installs from a website.
+- `sideinstaller://pairingFile?data=<base64 pairing file>` imports a pairing file. SideStore sends
+  one back when asked with `sidestore://pairing?urlname=sideinstaller`, which is what **Get it from
+  SideStore** on the Pairing file card does.
+- `sideinstaller://certificate?data=<base64 PKCS#12>&password=<password>` makes SideInstaller sign
+  with that certificate from then on, once Apple lists it among your Apple ID's certificates.
+  **Use SideStore's certificate** (on the “A certificate already exists” popup and the Certificates
+  page) asks SideStore for its own with
+  `sidestore://certificate?callback_template=sideinstaller://certificate?data=$(BASE64_CERT)&password=$(PASSWORD)`
+  (percent-encoded), so a free Apple ID's one certificate serves both apps. That reply is the one
+  link that doesn't ask again: SideStore has just asked whether to export it.
+
+Discord and most chat apps only make `https://` links tappable, so to post an install link there use
+`https://sideinstaller.net/open.html?url=<percent-encoded https link to an .ipa>`. That page shows
+where the IPA downloads from and hands it to `sideinstaller://install`, with a button for when iOS
+doesn't open the app on its own.
+
 
 ## Compatibility
 
 | iOS | Is it compatible? |
 | --- | --- |
-| 27 beta 1 - 27.0.1+ | ✅ Yes |
-| 17.4 - 26.7 | ⚠️ Yes, but [a pairing file is needed](https://docs.sidestore.io/docs/advanced/alternative#pairing), and that requires a PC |
-| < iOS 17.4 | ❌ No |
+| 27+ | ✅ Yes |
+| 26.4 - 26.7 | ⚠️ Yes, but [a remote pairing file is needed](#ios-264-to-26x-a-remote-pairing-file), and that requires a PC |
+| 17.4 - 26.3 | ⚠️ Yes, but [a pairing file is needed](https://docs.sidestore.io/docs/advanced/alternative#pairing), and that requires a PC |
+| <17.4 | ❌ No |
+
+### iOS 26.4 to 26.x: a remote pairing file
+
+Since iOS 26.4, the iPhone hangs up on lockdown pairing files (from jitterbugpair,
+`pymobiledevice3 lockdown pair`, or idevice_pair's **Lockdown**) as soon as they connect through
+LocalDevVPN, so they can't be used on the iPhone any more, however new. A remote pairing (RPPairing)
+file still works:
+
+1. On a Mac, Windows PC or Linux computer, open [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases/latest)
+   and plug the iPhone in. Tap **Trust** if it asks.
+2. Pick the iPhone, choose **Remote pairing**, click **Create**, and keep the iPhone unlocked until
+   it's done.
+3. Click **Save to file…** and send the file to the iPhone by AirDrop, iCloud Drive or a cable.
+4. In SideInstaller, tap **Import pairing file** (or **Replace**) and pick it.
+
+A pairing file exported from [iLoader](https://github.com/nab138/iloader) (**Manage Pairing File** ›
+**Export**) holds both kinds and works too.
 
 
 ## Is SideInstaller safe?
@@ -108,8 +149,12 @@ anyone can inspect exactly what it does.
 | `ios-app/` | The SwiftUI app — UI, install engine, certificate handling, translations |
 | `ios-live-activity/` | The widget extension that draws the pairing code in the Dynamic Island and on the Lock Screen |
 | `rust-core/` | Rust core compiled into `SideInstallerFFI.xcframework` |
-| `scripts/` | Build, signing, and install-page generation scripts |
-| `.github/` | Workflows for signing and publishing the install page |
+| `scripts/` | Build and release scripts |
+| `.github/` | Workflows that build the unsigned IPA, publish it as a release and hand it to the signer |
+
+Signed builds and the install page live in [FrizzleM/SideInstaller-Signed](https://github.com/FrizzleM/SideInstaller-Signed):
+it signs each release's IPA with every certificate, attaches the signed IPAs to a release of its own and
+deploys [sideinstaller.net](https://sideinstaller.net/). No IPA is ever committed to either repository.
 
 ## Contributing
 

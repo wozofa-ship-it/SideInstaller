@@ -21,28 +21,23 @@ enum Theme {
         LinearGradient(colors: [color, color.opacity(0.72)],
                        startPoint: .topLeading, endPoint: .bottomTrailing)
     }
+
+    /// The widest a page's column grows, its padding included. A phone is
+    /// narrower than this; a wider window, such as an open iPhone Duo (about
+    /// 950 points across) or an iPad, keeps the column at this width and
+    /// centres it rather than stretching every card across the screen.
+    static let columnWidth: CGFloat = 600
 }
 
-/// 界面外观：跟随系统 / 浅色 / 深色。设置页与 App 入口共用同一
-/// UserDefaults 键（SIDAppearance），入口处统一用 preferredColorScheme 生效。
-enum AppAppearance: String, CaseIterable {
-    case system, light, dark
+// MARK: - Page column
 
-    /// 传给 preferredColorScheme 的值；nil 表示跟随系统。
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: return nil
-        case .light:  return .light
-        case .dark:   return .dark
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .system: return L("Follow System")
-        case .light:  return L("Light")
-        case .dark:   return L("Dark")
-        }
+extension View {
+    /// Holds a page's content to `Theme.columnWidth`, centred. Goes inside the
+    /// page's scroll view, which still spans the window, so the page scrolls
+    /// from anywhere and its backdrop fills the screen.
+    func pageColumn() -> some View {
+        frame(maxWidth: Theme.columnWidth)
+            .frame(maxWidth: .infinity)
     }
 }
 
@@ -104,25 +99,20 @@ enum Backdrop {
 /// whose control points sway on sine waves, and over that the tab's `Backdrop`
 /// wash.
 struct AppBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         // Ticks every frame, with the points derived from the clock so the
         // motion is continuous rather than resetting on a keyframe.
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            let dark = colorScheme == .dark
             ZStack {
-                // 深色是原来的 OLED 黑；浅色用系统背景，让同一套网格透出来。
-                dark ? Color.black : Color(.systemBackground)
+                Color.black
                 mesh(at: t)
                     .blur(radius: 24)
                     // Low enough to read as a deep tint rather than a light.
-                    .opacity(dark ? 0.2 : 0.35)
+                    .opacity(0.2)
                 // Off the same clock as the mesh, so every page's copy of this
                 // backdrop is at the identical point of the transition.
-                // 浅色下压暗层减弱，只留一点层次，不把白底压成灰。
-                Color.black.opacity(Backdrop.wash(at: t) * (dark ? 1 : 0.35))
+                Color.black.opacity(Backdrop.wash(at: t))
             }
             .ignoresSafeArea()
         }
@@ -195,8 +185,6 @@ private struct CardSurface<S: InsettableShape>: ViewModifier {
     /// is a card only some of the time.
     var shown: Bool
 
-    @Environment(\.colorScheme) private var colorScheme
-
     func body(content: Content) -> some View {
         content
             .background(shape.fill(wash))
@@ -204,30 +192,17 @@ private struct CardSurface<S: InsettableShape>: ViewModifier {
     }
 
     /// A sheen that fades out down the pane, so it has a surface at all.
-    /// 深色下是白色微光；浅色下换成白色磨砂面，压住背后的网格。
     private var wash: LinearGradient {
-        if colorScheme == .dark {
-            return LinearGradient(colors: [.white.opacity(shown ? 0.025 : 0), .clear],
-                                  startPoint: .top, endPoint: .bottom)
-        }
-        return LinearGradient(colors: [.white.opacity(shown ? 0.55 : 0), .white.opacity(shown ? 0.22 : 0)],
-                              startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: [.white.opacity(shown ? 0.025 : 0), .clear],
+                       startPoint: .top, endPoint: .bottom)
     }
 
-    /// 深色下描白边；浅色下白边看不见，换成黑色细边。
     private var rim: LinearGradient {
-        if colorScheme == .dark {
-            return LinearGradient(stops: [.init(color: .white.opacity(shown ? 0.38 : 0), location: 0),
-                                           .init(color: .white.opacity(shown ? 0.08 : 0), location: 0.35),
-                                           .init(color: .white.opacity(shown ? 0.05 : 0), location: 0.8),
-                                           .init(color: .white.opacity(shown ? 0.18 : 0), location: 1)],
-                                  startPoint: .top, endPoint: .bottom)
-        }
-        return LinearGradient(stops: [.init(color: .black.opacity(shown ? 0.20 : 0), location: 0),
-                                      .init(color: .black.opacity(shown ? 0.08 : 0), location: 0.35),
-                                      .init(color: .black.opacity(shown ? 0.05 : 0), location: 0.8),
-                                      .init(color: .black.opacity(shown ? 0.12 : 0), location: 1)],
-                              startPoint: .top, endPoint: .bottom)
+        LinearGradient(stops: [.init(color: .white.opacity(shown ? 0.38 : 0), location: 0),
+                               .init(color: .white.opacity(shown ? 0.08 : 0), location: 0.35),
+                               .init(color: .white.opacity(shown ? 0.05 : 0), location: 0.8),
+                               .init(color: .white.opacity(shown ? 0.18 : 0), location: 1)],
+                       startPoint: .top, endPoint: .bottom)
     }
 }
 
@@ -429,15 +404,13 @@ struct PopupGroupCard<Content: View>: View {
 private struct PopupCloseButton: View {
     var action: () -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(.secondary)
                 .padding(8)
-                .background(Circle().fill(colorScheme == .dark ? .white.opacity(0.08) : .black.opacity(0.06)))
+                .background(Circle().fill(.white.opacity(0.08)))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L("Close"))
@@ -562,7 +535,8 @@ extension View {
     }
 }
 
-/// A popup that only reports: what went wrong, or what went right.
+/// A popup that only reports: what went wrong, or what went right. An error
+/// the app can't explain offers Copy logs.
 struct MessagePopup: View {
     var title: String
     var message: String
@@ -574,10 +548,74 @@ struct MessagePopup: View {
                   systemImage: isError ? "exclamationmark.triangle.fill" : "checkmark.seal.fill",
                   tint: isError ? .red : .green,
                   onClose: onClose) {
+            ErrorMessage(message: message, offersLogs: isError)
+        }
+    }
+}
+
+/// An error popup's message, with Copy logs under it unless the message
+/// already says how to fix it.
+struct ErrorMessage: View {
+    var message: String
+    /// False when something else on screen explains the fix.
+    var offersLogs = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
             Text(message)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
+            if offersLogs && !ErrorHelp.isExplained(message) {
+                CopyLogsButton()
+            }
         }
+    }
+}
+
+/// Error messages that tell the user what to do themselves ("pick the .ipa
+/// file itself", "Wi-Fi is off"). Every other error is one the app can't help
+/// with, so its popup offers the activity log to send on.
+enum ErrorHelp {
+    private static let lock = NSLock()
+    private static var explained = Set<String>()
+
+    /// Marks `message` as one that explains its own fix, and returns it.
+    @discardableResult
+    static func explained(_ message: String) -> String {
+        lock.lock(); defer { lock.unlock() }
+        explained.insert(message)
+        return message
+    }
+
+    static func isExplained(_ message: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return explained.contains(message)
+    }
+}
+
+/// Copies the activity log, the same text as Settings › Activity Log › Copy,
+/// and says so for a moment.
+struct CopyLogsButton: View {
+    var tint: Color = .red
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            UIPasteboard.general.string = Engine.shared.logText()
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                copied = false
+            }
+        } label: {
+            Label(copied ? L("Copied") : L("Copy logs"),
+                  systemImage: copied ? "checkmark" : "doc.on.doc")
+                .font(.subheadline.weight(.semibold))
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.bordered)
+        .tint(tint)
+        .animation(.default, value: copied)
     }
 }
 
@@ -668,6 +706,10 @@ struct BetaBadge: View {
 }
 
 /// The hero at the top of each screen: a glyph, the title, and an accessory.
+///
+/// In a short window (an iPhone on its side, or a closed iPhone Duo stood up
+/// like a tent) it takes one row, the glyph beside the title, so it doesn't
+/// fill the screen and push the page's controls out of sight.
 struct BrandHeader<Accessory: View>: View {
     var icon: String
     /// Asset image shown instead of the SF Symbol `icon`.
@@ -680,28 +722,44 @@ struct BrandHeader<Accessory: View>: View {
     var animateIcon: Bool = false
     @ViewBuilder var accessory: () -> Accessory
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    /// True in a short window, where the header takes one row.
+    private var isRow: Bool { verticalSizeClass == .compact }
+    private var glyphSide: CGFloat { isRow ? 56 : 86 }
+    private var alignment: HorizontalAlignment { isRow ? .leading : .center }
+
     var body: some View {
-        VStack(spacing: 14) {
+        // One layout that changes shape, so a rotation moves the pieces
+        // rather than swapping them out.
+        let layout = isRow ? AnyLayout(HStackLayout(spacing: 16))
+                           : AnyLayout(VStackLayout(spacing: 14))
+        layout {
             glyph
-                .frame(width: 86, height: 86)
-                .shadow(color: Theme.glow, radius: 20, x: 0, y: 12)
-            VStack(spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title)
-                        .font(.largeTitle.weight(.bold))
-                    if beta { BetaBadge() }
+                .frame(width: glyphSide, height: glyphSide)
+                .shadow(color: Theme.glow, radius: isRow ? 14 : 20, x: 0, y: isRow ? 8 : 12)
+            VStack(alignment: alignment, spacing: isRow ? 8 : 14) {
+                VStack(alignment: alignment, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(title)
+                            .font((isRow ? Font.title : .largeTitle).weight(.bold))
+                        if beta { BetaBadge() }
+                    }
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
+                accessory()
             }
-            accessory()
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
     }
+
+    /// The icon art's corner radius, at any size.
+    private var cornerRadius: CGFloat { glyphSide * 23 / 86 }
 
     @ViewBuilder
     private var glyph: some View {
@@ -709,7 +767,7 @@ struct BrandHeader<Accessory: View>: View {
             Image(image)
                 .resizable()
                 .scaledToFill()
-                .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 // A breathe while a run is in flight, mirroring `.pulse`.
                 .scaleEffect(animateIcon ? 1.04 : 1)
                 .animation(animateIcon ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
@@ -717,10 +775,10 @@ struct BrandHeader<Accessory: View>: View {
                            value: animateIcon)
         } else {
             ZStack {
-                RoundedRectangle(cornerRadius: 23, style: .continuous)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Theme.brand)
                 Image(systemName: icon)
-                    .font(.system(size: 40, weight: .semibold))
+                    .font(.system(size: glyphSide * 40 / 86, weight: .semibold))
                     .foregroundStyle(.white)
                     .symbolEffect(.pulse, isActive: animateIcon)
             }
@@ -732,15 +790,13 @@ struct BrandHeader<Accessory: View>: View {
 
 /// Inset, filled text-field background, softer than `.roundedBorder`.
 private struct FieldBackground: ViewModifier {
-    @Environment(\.colorScheme) private var colorScheme
-
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(colorScheme == .dark ? .white.opacity(0.07) : .black.opacity(0.05))
+                    .fill(.white.opacity(0.07))
             )
     }
 }

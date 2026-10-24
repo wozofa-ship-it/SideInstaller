@@ -71,11 +71,15 @@ enum InstallSource: String, CaseIterable, Identifiable {
     }
 
     /// GitHub "owner/repo" whose release holds the IPA.
+    ///
+    /// Madeira comes from FrizzleM's fork, whose releases are upstream Madeira
+    /// plus willfaust/Madeira#264 (it renews its own signing), until upstream
+    /// ships that.
     var repo: String? {
         switch self {
         case .sideStore:     return "SideStore/SideStore"
         case .liveContainer: return "LiveContainer/LiveContainer"
-        case .madeira:       return "willfaust/Madeira"
+        case .madeira:       return "FrizzleM/Madeira"
         case .custom:        return nil
         }
     }
@@ -151,21 +155,6 @@ enum InstallSource: String, CaseIterable, Identifiable {
         case .stable:  return URL(string: "\(base)/latest/download/\(assetFileName)")
         // The nightly tag is fixed, so nothing needs resolving.
         case .nightly: return URL(string: "\(base)/download/nightly/\(assetFileName)")
-        }
-    }
-
-    /// A fixed link that stands in for the build's latest release.
-    ///
-    /// Temporary, for Madeira: a build that renews its own signing, until
-    /// upstream publishes one. Remove it to go back to `repo`'s latest release.
-    /// A link that has gone fails the download: no release is tried in its
-    /// place, so another build is never installed instead.
-    var pinnedDownload: (url: URL, name: String)? {
-        switch self {
-        case .madeira:
-            return URL(string: "https://files.catbox.moe/06d9x0.ipa").map { ($0, "Madeira.ipa") }
-        case .sideStore, .liveContainer, .custom:
-            return nil
         }
     }
 
@@ -550,7 +539,7 @@ enum SideStoreDownloader {
                 return current.path
             }
             fetched = try await fetch(asset.url, named: asset.name, from: channel, log: log)
-        } catch let error as DownloadError where error.isRefused && source.pinnedDownload == nil {
+        } catch let error as DownloadError where error.isRefused {
             // Either the asset was renamed, or the repository itself is gone.
             if let mirror = source.mirror, let repo = source.repo, await isGone(repo) {
                 return try await downloadCopy(on: mirror, of: source, standingInFor: repo, log: log)
@@ -625,7 +614,6 @@ enum SideStoreDownloader {
     /// its latest tag looked up first.
     private static func latestAsset(of source: InstallSource,
                                     channel: ReleaseChannel) async throws -> (url: URL, name: String) {
-        if let pinned = source.pinnedDownload { return pinned }
         if let direct = source.downloadURL(channel), let name = source.assetFileName {
             return (direct, name)
         }
@@ -1210,9 +1198,6 @@ extension IPALibrary {
         let bundleID: String
         let name: String
         let version: String?
-        /// MinimumOSVersion from the same plist; the cert page pre-fills its
-        /// edit fields with the IPA's current values.
-        let minOS: String?
     }
 
     /// IPAs on disk with their app info, newest first, one per bundle ID (the
@@ -1239,8 +1224,7 @@ extension IPALibrary {
         let name = display?.isEmpty == false ? display!
             : (bundleName?.isEmpty == false ? bundleName! : bundleID)
         return AppInfo(bundleID: bundleID, name: name,
-                       version: dict["CFBundleShortVersionString"] as? String,
-                       minOS: dict["MinimumOSVersion"] as? String)
+                       version: dict["CFBundleShortVersionString"] as? String)
     }
 
     /// One file inside an IPA, for copying it out without unpacking the rest.
@@ -1444,12 +1428,35 @@ enum PrivateStore {
         peerPairingsFile(prefix: "remote", host: host)
     }
 
+    /// Where Side by Side pairs another device that has no address typed in.
+    /// The pairing reports the address it connected from, and the file then
+    /// moves to `peerRemotePairing(host:)`.
+    static var unaddressedPeerRemotePairing: URL {
+        peerPairingsDirectory.appendingPathComponent("remote-new.plist")
+    }
+
+    /// True while any pair record for another device is saved.
+    static var hasPeerPairings: Bool {
+        let files = try? FileManager.default.contentsOfDirectory(atPath: peerPairingsDirectory.path)
+        return files?.isEmpty == false
+    }
+
+    /// Deletes every pair record saved for another device, so this iPhone keeps
+    /// no working pairing with someone else's.
+    static func forgetPeerPairings() {
+        try? FileManager.default.removeItem(at: peerPairingsDirectory)
+    }
+
     private static func peerPairingsFile(prefix: String, host: String) -> URL {
-        let dir = directory.appendingPathComponent("peer-pairings", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // Keep only digits and dots for a safe filename.
         let key = host.filter { $0.isNumber || $0 == "." }
-        return dir.appendingPathComponent("\(prefix)-\(key.isEmpty ? "unknown" : key).plist")
+        return peerPairingsDirectory.appendingPathComponent("\(prefix)-\(key.isEmpty ? "unknown" : key).plist")
+    }
+
+    private static var peerPairingsDirectory: URL {
+        let dir = directory.appendingPathComponent("peer-pairings", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
     /// isideload's `FsStorage` root, created on demand as isideload expects.

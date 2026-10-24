@@ -10,6 +10,7 @@ let chineseStrings: [String: String] = [
 
     "Cancel": "取消",
     "Copy": "复制",
+    "Copy logs": "复制日志",
     "Email": "电子邮件",
     "Password": "密码",
     "Install": "安装",
@@ -17,7 +18,7 @@ let chineseStrings: [String: String] = [
     "Cancelling": "正在取消",
     "Installed": "已安装",
     "Something went wrong": "出了点问题",
-    "an app by Frizzle": "由 Frizzle 打造的应用 · 解剖自我 🅥修改版",
+    "an app by Frizzle": "由 Frizzle 打造的应用",
     "device": "设备",
 
     // MARK: - Welcome
@@ -124,6 +125,10 @@ let chineseStrings: [String: String] = [
     "SideInstaller %@ is available — you're on %@.":
         "SideInstaller %@ 已发布 —— 你当前使用的是 %@。",
     "Get the latest version": "获取最新版本",
+    "From the website": "从网站安装",
+    "Sign it with your Apple ID": "用你的 Apple ID 签名",
+    "Install it in LiveContainer": "安装到 LiveContainer",
+    "LiveContainer isn't installed on this iPhone.": "这台 iPhone 上没有安装 LiveContainer。",
     "Release": "渠道",
     "Reinstall": "重新安装",
     "Install %@": "安装 %@",
@@ -193,9 +198,6 @@ let chineseStrings: [String: String] = [
     "Regenerate": "重新生成",
     "Generate pairing file": "生成配对文件",
     "Export pairing file": "导出配对文件",
-    "Export certificate (p12)": "导出证书 (p12)",
-    "Certificate password:": "证书密码：",
-    "Exporting": "正在导出",
     "Pair in Settings": "在 设置 中配对",
     "Install into an app": "安装到应用",
     "Scanning": "正在扫描",
@@ -210,6 +212,11 @@ let chineseStrings: [String: String] = [
     "Pairing file ready. You can export it or install it into an app below.":
         "配对文件已就绪。你可以导出，或安装到下面的某个应用中。",
     "Pairing file installed into %@.": "配对文件已安装到 %@。",
+    "Install pairing into all apps": "将配对文件安装到所有应用",
+    "Installing into all apps": "正在安装到所有应用",
+    "Pairing file installed into all %d apps.": "配对文件已安装到全部 %d 个应用。",
+    "Couldn't write into %@.": "无法写入 %@。",
+    "The %@ record isn't a plist dictionary.": "%@ 记录不是 plist 字典。",
 
     // Importing a pairing file (required below iOS 27, under Advanced from 27)
 
@@ -264,6 +271,45 @@ let chineseStrings: [String: String] = [
     "This certificate has no serial number, so it can't be revoked.":
         "此证书没有序列号，因此无法吊销。",
 
+    // Export: the certificate SideInstaller signs with, as a .p12
+    "This certificate has no serial number, so it can't be exported.": "此证书没有序列号，因此无法导出。",
+    "Only the certificate SideInstaller signs with can be exported: the private key of any other stays on the device that asked Apple for it.":
+        "只能导出 SideInstaller 用来签名的证书：其他证书的私钥只保存在向 Apple 申请它的设备上。",
+    "Couldn't export the certificate: %@": "无法导出证书：%@",
+    "Export certificate": "导出证书",
+    "Export": "导出",
+    "Exporting": "正在导出",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
+        "将此证书及其私钥存为 .p12 文件，供其他签名 App 或电脑签名使用。请为它设置密码：导入文件时需要输入。请勿将文件交给他人。",
+    "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
+        "SideInstaller 只能导出它用来签名的证书，而这里没有：证书的私钥只保存在向 Apple 申请它的设备上。",
+    "SideInstaller signs with this one": "SideInstaller 用此证书签名",
+
+    // MARK: - SideStore's certificate (sidestore://certificate)
+
+    "Use SideStore's certificate": "使用 SideStore 的证书",
+    "Checking the certificate": "正在检查证书",
+    "SideStore opens and sends back its certificate. SideInstaller then signs with it too, so on a free Apple ID neither app has to revoke the other's.":
+        "SideStore 会打开并发回它的证书。之后 SideInstaller 也用它签名，这样在免费 Apple ID 上两个 App 都不必吊销对方的证书。",
+    "Apple won't issue a second signing certificate for this Apple ID. If SideStore made the one it has, SideInstaller can sign with that one too, and nothing is revoked. Revoking it lets the install continue as well — but it can't be undone.":
+        "Apple 不会为此 Apple ID 签发第二个签名证书。如果已有的证书是 SideStore 创建的，SideInstaller 也可以用它签名，无需吊销任何证书。吊销它同样可以让安装继续——但此操作无法撤回。",
+    "If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked.":
+        "如果它是 SideStore 创建的，请点按上方的“使用 SideStore 的证书”：SideInstaller 也会用它签名，不会吊销任何证书。",
+    "SideInstaller signs with “%@” from now on. Nothing was revoked, so the apps already signed with it keep working.":
+        "从现在起 SideInstaller 使用“%@”签名。没有吊销任何证书，因此已用它签名的 App 会继续正常运行。",
+    "SideInstaller already signs with “%@”.": "SideInstaller 已经在使用“%@”签名。",
+    "That certificate isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID (SideStore may be signed in with a different one). Nothing was changed.":
+        "该证书不属于此 Apple ID：它已被吊销，或属于另一个 Apple ID（SideStore 可能登录了其他 Apple ID）。未做任何更改。",
+    "Couldn't use that certificate: %@": "无法使用该证书：%@",
+    "SideStore isn't installed on this iPhone, so there's no certificate to get from it.":
+        "这台 iPhone 上没有安装 SideStore，因此无法从中获取证书。",
+    "Sign with this certificate?": "使用此证书签名？",
+    "A link sent SideInstaller a signing certificate. Only use it if you asked for one: SideInstaller will sign apps with it from now on, in place of its own. It's used only if it's one of your Apple ID's certificates.":
+        "某个链接向 SideInstaller 发送了签名证书。只有在你主动请求时才使用：从现在起 SideInstaller 将用它代替自己的证书为 App 签名。只有当它是你 Apple ID 的证书时才会被使用。",
+    "Use it": "使用",
+    "That link was meant to carry a signing certificate, but what it holds can't be read.":
+        "该链接本应包含签名证书，但其内容无法读取。",
+
     // MARK: - Location tab
 
     "Location spoofing": "位置模拟",
@@ -281,6 +327,74 @@ let chineseStrings: [String: String] = [
     "Location session closed — set it up again.": "位置会话已关闭 — 请重新设置。",
     "Downloading %@ failed (HTTP %d).": "下载 %@ 失败（HTTP %d）。",
     "Couldn't build the download URL for %@.": "无法为 %@ 构建下载链接。",
+
+    // Location › saved places and GPX routes.
+    "Saved places": "已存储的地点",
+    "Save this place": "存储此地点",
+    "Name": "名称",
+    "Show on map": "在地图上显示",
+    "Tap Save under the map to keep the spot under the pin. Tapping a saved place sets it straight away.":
+        "轻点地图下方的“存储”即可保留图钉下的位置。轻点已存储的地点会立即设置该位置。",
+    "Play a GPX route": "播放 GPX 路线",
+    "Import a .gpx file and the device moves along it at the speed you pick, then stays at its last point.":
+        "导入 .gpx 文件后，设备会按你选择的速度沿路线移动，结束后停在最后一个点。",
+    "Import GPX file": "导入 GPX 文件",
+    "Couldn't read %@ as a GPX file.": "无法将 %@ 读取为 GPX 文件。",
+    "%@ has no track, route or waypoints in it.": "%@ 中没有轨迹、路线或航点。",
+    "As recorded": "按记录时间",
+    "Walk": "步行",
+    "Cycle": "骑行",
+    "Drive": "驾车",
+    "Speed": "速度",
+    "Play route": "播放路线",
+    "Playing route · %d%%": "正在播放路线 · %d%%",
+    "Stop here": "停在此处",
+    "%@ of %@": "%@ / %@",
+    "Route finished. The device stays at its last point.": "路线已结束。设备停留在最后一个点。",
+    "Route stopped. The device stays where it got to.": "路线已停止。设备停留在当前所到位置。",
+    "Route playback stopped: %@": "路线播放已停止：%@",
+    // Location › planned routes (OpenStreetMap).
+    "Add stop": "添加停靠点",
+    "Add as stop": "添加为停靠点",
+    "Plan a route": "规划路线",
+    "Travel by": "出行方式",
+    "Goes along each street at its speed limit, from OpenStreetMap. A street without one mapped gets the usual limit for its kind of road.":
+        "按 OpenStreetMap 中每条街道的限速行驶。未标注限速的街道采用该类道路的常见限速。",
+    "Rides streets and paths a bike can take, at a cycling pace.": "沿自行车可通行的街道和小路，以骑行速度前进。",
+    "Walks streets and paths at a walking pace.": "沿街道和小路，以步行速度前进。",
+    "Start where the device is": "从设备所在位置出发",
+    "Move the map so the pin is on a place, then tap Add stop. Add as many as you like: the route goes to each in order.":
+        "移动地图，让图钉落在某个地点上，然后轻点“添加停靠点”。想加多少个都可以：路线会按顺序经过每一个。",
+    "The device's location": "设备位置",
+    "Stop %d": "停靠点 %d",
+    "Clear stops": "清除停靠点",
+    "Move up": "上移",
+    "Move down": "下移",
+    "Find route": "查找路线",
+    "Finding route": "正在查找路线",
+    "Add one more stop to plan a route.": "再添加一个停靠点即可规划路线。",
+    "Routes from OpenStreetMap, © OpenStreetMap contributors":
+        "路线来自 OpenStreetMap，© OpenStreetMap 贡献者",
+    "Speed limits are mapped for all of it.": "全程均已标注限速。",
+    "Speed limits are mapped for %d%% of it; the rest is estimated.": "%d%% 的路段已标注限速，其余为估算值。",
+    "Average %@": "平均 %@",
+    "Speed limit %@": "限速 %@",
+    "No speed limit · going %@": "不限速 · 当前 %@",
+    "No limit mapped · going %@": "未标注限速 · 当前 %@",
+    "Going %@": "当前 %@",
+    "No street name": "无名道路",
+    "Estimated speed limit %@": "估算限速 %@",
+    "No speed limit": "不限速",
+    "No route found between these stops. Move them onto roads or paths, or travel another way.":
+        "未找到这些停靠点之间的路线。请将它们移到道路或小路上，或换一种出行方式。",
+    "A stop is too far from any road or path. Move it closer and try again.":
+        "有一个停靠点离道路或小路太远。请将它移近一些后重试。",
+    "Too many stops for the route server. Take some out and try again.":
+        "停靠点太多，路线服务器无法处理。请删除一些后重试。",
+    "That route is too long for the route server. Make it shorter, or split it up.":
+        "这条路线对路线服务器来说太长了。请缩短或分段。",
+    "The route server is busy. Try again in a minute.": "路线服务器繁忙。请一分钟后重试。",
+    "The route server couldn't plan this route (%@).": "路线服务器无法规划这条路线（%@）。",
 
     // MARK: - Entitlements tab
 
@@ -310,8 +424,8 @@ let chineseStrings: [String: String] = [
     // Refresh all: signing the installed apps again.
     "iOS %@ isn't supported — SideInstaller needs iOS %@ or later.":
         "不支持 iOS %@：SideInstaller 需要 iOS %@ 或更高版本。",
-    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Revoke it under Tools › Certificates, then refresh again.":
-        "Apple 不会为此 Apple ID 签发签名证书：它报告已经存在一个（错误 7460）。请在“工具 › 证书”中吊销它，然后重新续签。",
+    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Under Tools › Certificates, use SideStore's certificate or revoke that one, then refresh again.":
+        "Apple 不会为此 Apple ID 签发签名证书：它报告已经存在一个（错误 7460）。请在“工具 › 证书”中使用 SideStore 的证书或吊销该证书，然后重新续签。",
     "An install is already running. Wait for it to finish, then refresh.":
         "已有安装正在进行。请等它完成后再续签。",
     "Getting ready": "正在准备",
@@ -340,10 +454,6 @@ let chineseStrings: [String: String] = [
         "这里有 %d 个应用在 SideInstaller 中没有对应的 IPA，因此无法从本页续签。请在安装它的应用里续签，或先导入它的 .ipa。",
     "%d apps here have no IPA in SideInstaller, so they can't be refreshed from this page. Refresh them in whatever installed them, or import their .ipa first.":
         "这里有 %d 个应用在 SideInstaller 中没有对应的 IPA，因此无法从本页续签。请在安装它们的应用里续签，或先导入它们的 .ipa。",
-    "%d app here is signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so it is left out.":
-        "这里有 %d 个应用是企业证书或他人团队签的，不是你的 Apple ID。续签只能续自己 ID 签的应用，它已被排除。",
-    "%d apps here are signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so they are left out.":
-        "这里有 %d 个应用是企业证书或他人团队签的，不是你的 Apple ID。续签只能续自己 ID 签的应用，它们已被排除。",
     "%d app": "%d 个应用",
     "%d apps": "%d 个应用",
     "%d app needs refreshing": "%d 个应用需要续签",
@@ -382,12 +492,12 @@ let chineseStrings: [String: String] = [
     "Sign in to their Apple ID": "登录对方的 Apple ID",
     "Download SideInstaller": "下载 SideInstaller",
     "Install on their iPhone": "安装到对方的 iPhone",
-    "Enter the other iPhone's IP address. It's in Settings › Wi-Fi, next to the network it's on.":
-        "输入另一台 iPhone 的 IP 地址。在 设置 › 无线局域网 中，所连网络旁边可以找到。",
     "“%@” isn't an IPv4 address. It should look like 192.168.1.42.":
         "“%@”不是 IPv4 地址。它应该形如 192.168.1.42。",
     "%@ is an address this iPhone already holds. Side by Side installs onto someone else's iPhone — use theirs. To install on this one, use the Install tab.":
         "%@ 是这台 iPhone 自己的地址。Side by Side 用于安装到别人的 iPhone 上，请填对方的地址。要安装到这台设备，请使用“安装”标签页。",
+    "The iPhone that paired was this one. Pair from their iPhone's Settings instead. To install on this iPhone, use the Install tab.":
+        "完成配对的是这台 iPhone。请在对方 iPhone 的“设置”中配对。要安装到这台 iPhone，请使用“安装”标签页。",
     "Enter the Apple ID to sign with, and its password.": "请输入用于签名的 Apple ID 及其密码。",
     "Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work.":
         "无线局域网已关闭。两台 iPhone 必须连接同一个 Wi-Fi 网络才能使用。",
@@ -407,7 +517,9 @@ let chineseStrings: [String: String] = [
     "Their iPhone needs iOS %@ — SideInstaller pairs itself once it's installed, and nothing older can.":
         "对方的 iPhone 需要 iOS %@：装好之后 SideInstaller 会自己配对，更早的版本做不到。",
     "Their iPhone": "对方的 iPhone",
-    "IP address (e.g. 192.168.1.42)": "IP 地址（例如 192.168.1.42）",
+    "IP address (optional)": "IP 地址（可选）",
+    "Optional: leave it empty, and it fills in when their iPhone pairs.":
+        "可选：留空即可，对方的 iPhone 配对后会自动填入。",
     "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
         "在对方的 iPhone 上：设置 › 无线局域网 › 网络旁的 ⓘ，然后查看“IP 地址”。",
     "This iPhone is %@, so theirs will look similar.": "这台 iPhone 是 %@，对方的地址会与之相近。",
@@ -452,6 +564,8 @@ let chineseStrings: [String: String] = [
     "Start the install": "开始安装",
     "Install again": "再次安装",
     "Clear their details": "清除对方的信息",
+    "This iPhone is still paired with theirs. Clearing forgets it.":
+        "这台 iPhone 仍与对方的 iPhone 配对。清除后会忘记这次配对。",
     "Last step: they trust %@": "最后一步：让对方信任 %@",
     "On their iPhone: Settings › General › VPN & Device Management.":
         "在对方的 iPhone 上：设置 › 通用 › VPN 与设备管理。",
@@ -466,10 +580,6 @@ let chineseStrings: [String: String] = [
     "Language": "语言",
     "App language": "应用语言",
     "Auto": "自动",
-    "Appearance": "外观",
-    "Follow System": "跟随系统",
-    "Light": "浅色",
-    "Dark": "深色",
     // The Tunnel section: starting LocalDevVPN from here.
     "Tunnel": "隧道",
     "Something at %@:%d refused the connection, so the tunnel is carrying traffic — the device just isn't listening on its pairing port. That port only opens while Developer Mode is on, and iOS asks for it again after every restart: turn it on under Settings › Privacy & Security › Developer Mode, then try again. If it's already on, pair this iPhone again under “Pairing file”.":
@@ -478,16 +588,6 @@ let chineseStrings: [String: String] = [
     "Start LocalDevVPN now": "立即启动 LocalDevVPN",
     "LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you.":
         "未安装 LocalDevVPN。请从 App Store 获取，SideInstaller 就能为你启动它。",
-    "Built-in tunnel interface": "内置隧道本端",
-    "Tunnel peer (device IP)": "隧道对端（设备 IP）",
-    "Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects.":
-        "内置隧道地址：默认本端 10.7.1.1/32、对端 10.7.0.1/32。改完后下次连接隧道时自动生效。",
-
-    // The Auto Refresh section: resident background patrol re-signing.
-    "Auto Refresh": "自动续签",
-    "Refresh apps automatically in background": "后台自动续签",
-    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
-        "SideInstaller 会在后台保持运行（无声音频＋定位），每 30 分钟检查一次；签名将在 3 天内到期的应用会被自动续签。定位权限需设为“始终”，且隧道需保持连接（内置隧道即可）。系统也会在后台适时唤醒它巡检，请勿在多任务界面手动划掉。",
 
     "Downloaded IPAs": "已下载的 IPA",
     "%@ used": "已用 %@",
@@ -505,10 +605,38 @@ let chineseStrings: [String: String] = [
     "Custom…": "自定义…",
     "Server URL": "服务器 URL",
     "Anisette Server": "Anisette 服务器",
+    "Starts with %@": "从 %@ 开始",
+    "Auto starts with the server that signed in last, then tries the others, the ones most likely to work first.":
+        "“自动”会先使用上次成功登录的服务器，然后按成功可能性从高到低尝试其他服务器。",
+    "Only this server is tried. If it fails, so does sign-in: choose Auto to have SideInstaller try the others.":
+        "只会尝试这个服务器。它失败时登录也会失败：选择“自动”，让 SideInstaller 尝试其他服务器。",
+    "Only the server picked in Settings › Anisette Server was tried. Choose Auto there to let SideInstaller try the others when one fails.":
+        "只尝试了在“设置 › Anisette 服务器”中选择的服务器。在那里选择“自动”，SideInstaller 就会在一个服务器失败时尝试其他服务器。",
     "Device IP": "设备 IP",
     "Advanced": "高级",
     "Clear": "清除",
     "Activity Log (%d)": "活动日志（%d）",
+
+    // Settings › Developer Mode: AMFI requests over the device link.
+    "Developer Mode": "开发者模式",
+    "Show Developer Mode in Settings": "在设置中显示开发者模式",
+    "Turn on Developer Mode": "打开开发者模式",
+    "Asking this iPhone…": "正在询问这台 iPhone…",
+    "Both need a link to this iPhone that already works: LocalDevVPN plus a pairing file, such as one imported on iOS 17.4 to 26. On iOS 27 the link itself needs Developer Mode, so they can't bring back a missing option there.":
+        "这两项都需要一条已经可用、通往这台 iPhone 的连接：LocalDevVPN 加上配对文件，例如在 iOS 17.4 至 26 上导入的配对文件。在 iOS 27 上，连接本身就需要开发者模式，因此无法找回已经消失的选项。",
+    "Turn on Developer Mode?": "要打开开发者模式吗？",
+    "Turn On and Restart": "打开并重新启动",
+    "This iPhone restarts right away. Once you unlock it, tap Turn On in the alert that appears. iOS allows this only while the iPhone has no passcode.":
+        "这台 iPhone 会立即重新启动。解锁后，在弹出的提示中点按“打开”。只有在 iPhone 未设置密码时，iOS 才允许这样做。",
+    "Developer Mode is already on.": "开发者模式已经打开。",
+    "Developer Mode now shows under Settings › Privacy & Security, near the bottom. Turn it on there, and iOS restarts to finish.":
+        "开发者模式现在显示在 设置 › 隐私与安全性 的底部附近。在那里打开它，iOS 会重新启动以完成设置。",
+    "Developer Mode is set to turn on, and this iPhone restarts now. Once you unlock it, tap Turn On.":
+        "开发者模式即将打开，这台 iPhone 现在会重新启动。解锁后，点按“打开”。",
+    "An install is already running. Wait for it to finish, then try again.": "已有安装正在进行。请等它完成后再试一次。",
+    "iOS turns Developer Mode on from here only while this iPhone has no passcode. Tap “Show Developer Mode in Settings” and turn it on there instead.":
+        "只有在这台 iPhone 未设置密码时，iOS 才能从这里打开开发者模式。请点按“在设置中显示开发者模式”，然后在设置里打开它。",
+    "This iPhone didn't take the Developer Mode request: %@": "这台 iPhone 没有接受开发者模式请求：%@",
 
     // MARK: - Release channels & downloads
 
@@ -545,10 +673,22 @@ let chineseStrings: [String: String] = [
     "Two-factor verification was cancelled.": "双重认证验证已取消。",
     "Incorrect Apple ID or password. Check your Apple Account email and password, then try again.":
         "Apple ID 或密码不正确。请检查你的 Apple 账户电子邮件和密码，然后重试。",
-    "Apple ID sign-in failed on %@. Last error: %@":
-        "在 %@ 上登录 Apple ID 失败。最后的错误：%@",
+    "Apple ID sign-in failed on %@. Error: %@":
+        "在 %@ 上登录 Apple ID 失败。错误：%@",
+    "Apple ID sign-in failed on %@. Error via %@: %@":
+        "在 %@ 上登录 Apple ID 失败。经由 %@ 的错误：%@",
     "Apple's sign-in server refused the request (HTTP 503). It isn't your password or the anisette server, so trying more servers won't help. Try again later, or update SideInstaller.":
         "Apple 登录服务器拒绝了请求（HTTP 503）。这不是你的密码或 anisette 服务器的问题，换用其他服务器也无济于事。请稍后重试，或更新 SideInstaller。",
+    "“%@” makes its anisette data with Apple's Android library, and Apple now refuses to finish signing in through those servers (error -80046), after your password and code. In Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "“%@”使用 Apple 的 Android 库生成 anisette 数据，而 Apple 现在会在你输入密码和验证码之后，拒绝完成通过这类服务器的登录（错误 -80046）。请在“设置 › Anisette 服务器”中选择“自动”，或选择 Mac 服务器，例如“SideStore (New)”。",
+    "Apple refused to finish signing in (error -80046), even through a Mac anisette server, the kind it still accepted. Try again later, or check for a SideInstaller update.":
+        "Apple 拒绝完成登录（错误 -80046），即使通过的是它此前仍接受的 Mac anisette 服务器。请稍后重试，或检查 SideInstaller 是否有更新。",
+    "Apple refused to finish signing in through “%@” (error -80046). It now only accepts sign-ins through anisette servers on its macOS library: in Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "Apple 拒绝完成通过“%@”的登录（错误 -80046）。它现在只接受通过使用其 macOS 库的 anisette 服务器登录：请在“设置 › Anisette 服务器”中选择“自动”，或选择 Mac 服务器，例如“SideStore (New)”。",
+    "Apple won't send a code by text or call to this sign-in, so it was sent to your Apple devices.":
+        "Apple 不会为此次登录通过短信或电话发送验证码，因此已将验证码发送到你的 Apple 设备。",
+    "Apple didn't confirm sending a code to your Apple devices. If one arrived, enter it; if not, try another way.":
+        "Apple 未确认已向你的 Apple 设备发送验证码。如果收到了，请输入；如果没有，请换一种方式。",
     "SideInstaller can't reach Apple's sign-in server (gsa.apple.com), though this iPhone has an internet connection. Something is blocking it: a firewall, a DNS filter or ad blocker, Screen Time content restrictions, or another VPN app. Turn it off or try another network, then try again.":
         "SideInstaller 无法连接 Apple 登录服务器（gsa.apple.com），但这台 iPhone 已连接互联网。有东西在拦截它：防火墙、DNS 过滤或广告拦截工具、屏幕使用时间的内容限制，或其他 VPN App。请将其关闭或换一个网络，然后重试。",
     "SideInstaller can't reach Apple: Cellular Data is turned off for it. Turn SideInstaller on in Settings › Cellular, or join a Wi-Fi network with internet access, then try again.":
@@ -567,6 +707,7 @@ let chineseStrings: [String: String] = [
         "出于安全原因，Apple 已锁定此 Apple 账户（错误 -20209），在解锁之前每次登录都会失败。请在 iforgot.apple.com 重设其密码，然后用新密码重新登录。",
     "the anisette server": "anisette 服务器",
     "all %d anisette servers": "全部 %d 个 anisette 服务器",
+    "%d anisette servers (%d skipped)": "%d 个 anisette 服务器（跳过 %d 个）",
     "Not signed in.": "尚未登录。",
     "No SideStore IPA downloaded.": "尚未下载 SideStore 的 IPA。",
     "Signing failed: %@": "签名失败：%@",
@@ -646,6 +787,17 @@ let chineseStrings: [String: String] = [
     "Paired": "已配对",
     "Tap to return to SideInstaller.": "轻点以返回 SideInstaller。",
 
+    // The install's progress outside the app
+    "Installing %@": "正在安装 %@",
+    "Paused": "已暂停",
+    "Open SideInstaller to finish the install.":
+        "打开 SideInstaller 以完成安装。",
+    "Check the App IDs it needs, then tap Install.":
+        "查看所需的 App ID，然后轻点“安装”。",
+    "Tap Trust": "轻点“信任”",
+    "Unlock this iPhone and tap Trust when it asks.":
+        "解锁此 iPhone，并在询问时轻点“信任”。",
+
     "A signing certificate already exists": "已存在签名证书",
     "Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending.":
         "Apple 返回错误 7460：此 Apple ID 已有一个 iOS 开发证书，或者有一个申请仍在处理中。",
@@ -693,8 +845,8 @@ let chineseStrings: [String: String] = [
     "Open Apple Account":
         "打开 Apple 账户",
     "No App IDs left this week": "本周已没有可用的 App ID",
-    "Every app and app extension SideInstaller signs needs an App ID. A free Apple ID can register 10 a week, and each one counts for 7 days.":
-        "SideInstaller 签名的每个 App 和 App 扩展都需要一个 App ID。免费 Apple ID 每周可注册 10 个，每个会占用 7 天。",
+    "Every app SideInstaller signs needs an App ID, which its extensions share. A free Apple ID can register 10 a week, and each one counts for 7 days.":
+        "SideInstaller 签名的每个 App 都需要一个 App ID，其扩展共用这个 App ID。免费 Apple ID 每周可注册 10 个，每个会占用 7 天。",
     "They can't be deleted sooner. Wait until some expire, then tap Install again.":
         "它们无法提前删除。等一些过期后，再次轻点“安装”。",
     "Or sign in with a different (or spare) Apple ID in Settings › Account, then tap Install again.":
@@ -717,6 +869,18 @@ let chineseStrings: [String: String] = [
     "Come back here, tap “Import pairing file”, and pick it. Everything after that works as it does on iOS %@.":
         "回到这里，点按“导入配对文件”并选中它。之后的步骤与 iOS %@ 上完全一致。",
     "Get jitterbugpair": "获取 jitterbugpair",
+    "From iOS 26.4 on it has to be a remote pairing file: this iPhone hangs up on lockdown ones, like jitterbugpair's, when they come through LocalDevVPN.":
+        "从 iOS 26.4 起，必须使用“Remote pairing”配对文件：通过 LocalDevVPN 连接时，这台 iPhone 会断开 lockdown 配对文件（例如 jitterbugpair 生成的）的连接。",
+    "Get idevice_pair": "获取 idevice_pair",
+    "Make a remote pairing file": "生成“Remote pairing”配对文件",
+    "The pairing file you imported is a lockdown one. Since iOS 26.4, this iPhone hangs up on those when they come through LocalDevVPN, so it can't connect, and a new one of the same kind won't either.":
+        "你导入的配对文件是 lockdown 类型。从 iOS 26.4 起，这类文件通过 LocalDevVPN 连接时，这台 iPhone 会断开连接，所以它无法连接，重新生成一个同类文件也一样。",
+    "Come back here, tap “Replace” on the Pairing file card, and pick it.":
+        "回到这里，在“配对文件”卡片上轻点“更换”，然后选中它。",
+    "On a Mac, Windows PC or Linux box, open idevice_pair, plug this iPhone in, and tap Trust if it asks. Pick it, choose “Remote pairing”, click “Create”, and keep this iPhone unlocked until it's done.":
+        "在 Mac、Windows 电脑或 Linux 上打开 idevice_pair，插上本机，如有提示就轻点“信任”。选中本机，选择“Remote pairing”，点击“Create”，在完成前保持本机解锁。",
+    "Click “Save to file…” and send the file to this iPhone, by AirDrop, iCloud Drive or a cable. A pairing file exported from iLoader works too.":
+        "点击“Save to file…”，再通过隔空投送、iCloud 云盘或数据线把文件传到本机。从 iLoader 导出的配对文件也可以用。",
 
     // MARK: - Revoke-and-retry (Apple error 7460)
 
@@ -765,6 +929,16 @@ let chineseStrings: [String: String] = [
         "改回默认值 10.7.0.1。在 LocalDevVPN 中，它是“设置 › Device IP”里的值，而不是主界面上显示的地址——那是隧道自己的一端。",
     "If you changed LocalDevVPN's addresses, copy its Device IP here — including the /32, if it shows one.":
         "若你改过 LocalDevVPN 的地址，请把它的 Device IP 复制到这里——如果末尾带 /32，一并保留即可。",
+    "Device IP is %@, one of this iPhone's own addresses, and iOS won't let an app connect to those. In Settings › Advanced, set Device IP to the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default, not the “Connected to” address on its main screen.":
+        "设备 IP 填的是 %@，这是本机自己的地址之一，iOS 不允许 App 连接到这类地址。请在“设置 › 高级”中，把设备 IP 改为 LocalDevVPN“设置 › Device IP”里的地址（默认是 10.7.0.1），而不是它主界面上“Connected to”（或“已連接至”）后面的地址。",
+    "iOS refused the connection to %@ on this iPhone, before anything was sent. It does that for this iPhone's own addresses, like the “Connected to” address on LocalDevVPN's main screen. Device IP, in Settings › Advanced, has to be the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default. If it already is, turn LocalDevVPN off and on again, then try again.":
+        "iOS 在本机上拒绝了到 %@ 的连接，还没有发出任何数据。iOS 会拒绝连接本机自己的地址，比如 LocalDevVPN 主界面上“Connected to”（或“已連接至”）后面的那个地址。“设置 › 高级”中的设备 IP 必须是 LocalDevVPN“设置 › Device IP”里的地址（默认是 10.7.0.1）。如果已经是了，请把 LocalDevVPN 关掉再打开，然后重试。",
+    "This iPhone hung up on the connection as soon as it opened. From iOS 26.4 on it does that to lockdown pairing files, like this one, when they come through LocalDevVPN. Pair this iPhone with itself instead: tap “Regenerate” under Tools › Pairing, or tap Install, which pairs it first.":
+        "这台 iPhone 在连接刚建立时就把它断开了。从 iOS 26.4 起，通过 LocalDevVPN 连接的 lockdown 配对文件（比如这个）都会被这样断开。请改为让这台 iPhone 与自身配对：在 工具 › 配对 中轻点“重新生成”，或者轻点“安装”，它会先完成配对。",
+    "This iPhone hung up on the connection as soon as it opened. Since iOS 26.4 it does that to lockdown pairing files, like this one, when they come through LocalDevVPN, so a new one of the same kind won't help. A remote pairing file still works: on a computer, open idevice_pair, choose “Remote pairing”, click “Create”, then “Save to file…”, and import the file under “Pairing file”.":
+        "这台 iPhone 在连接刚建立时就把它断开了。从 iOS 26.4 起，通过 LocalDevVPN 连接的 lockdown 配对文件（比如这个）都会被这样断开，所以重新生成一个同类文件也没用。“Remote pairing”配对文件仍然可用：在电脑上打开 idevice_pair，选择“Remote pairing”，点击“Create”，再点击“Save to file…”，然后在“配对文件”中导入这个文件。",
+    "This iPhone hung up on the connection: from iOS 26.4 on, it does that to lockdown pairing files like this one when they come through LocalDevVPN. See the steps above.":
+        "这台 iPhone 断开了连接：从 iOS 26.4 起，通过 LocalDevVPN 连接的 lockdown 配对文件（比如这个）都会被这样断开。请参见上面的步骤。",
     "Pairing this iPhone needs it: SideInstaller advertises itself on the local network for Settings to find.":
         "配对这台 iPhone 需要它：SideInstaller 会在本地网络上广播自己，供“设置”发现。",
     "Connect to a Wi-Fi network. Pairing this iPhone needs it — SideInstaller has to be findable on the local network.":
@@ -798,6 +972,7 @@ let chineseStrings: [String: String] = [
     "For the support, and for spotting the bugs that got fixed because of it.":
         "感谢一路以来的支持，以及发现了那些因此得到修复的问题。",
     "For the Japanese translation.": "感谢提供日语翻译。",
+    "For the Korean translation.": "感谢提供韩语翻译。",
 
     "Built with": "基于以下项目",
     "The open source work this app is built on:": "这个应用所依赖的开源成果：",
@@ -835,15 +1010,111 @@ let chineseStrings: [String: String] = [
     "Runs Windows PC games on your iPhone. By Will Faust, GPL-3.0.":
         "在你的 iPhone 上运行 Windows 电脑游戏，由 Will Faust 开发，GPL-3.0 许可证。",
 
-    // MARK: - App sources
+    // MARK: - App ID cost
 
-    "App Sources": "应用源",
-    "Add Source": "添加源",
-    "Source URL": "源地址",
-    "Add": "添加",
-    "OK": "好",
-    "Loading…": "加载中…",
-    "Import failed": "导入失败",
-    "No sources yet. Tap + to add one.": "还没有源。点 + 添加一个。",
-    "That isn't a usable source link.": "这个源地址用不了。",
+    "App IDs for this app": "此 App 所需的 App ID",
+    "Cost": "消耗",
+    "Left now": "当前剩余",
+    "Left after": "安装后剩余",
+    "New App IDs": "新 App ID",
+    "This Apple ID doesn't have enough App IDs left: this app needs %d, and %d are left. Each one counts for 7 days, so wait for some to expire or sign in with another Apple ID.":
+        "此 Apple ID 剩余的 App ID 不够：此 App 需要 %d 个，只剩 %d 个。每个会占用 7 天，请等一些过期，或改用其他 Apple ID 登录。",
+    "The next one frees up on %@.": "下一个将于 %@ 释放。",
+    "Your Apple ID already has every App ID this app needs, so installing it uses none.":
+        "你的 Apple ID 已拥有此 App 需要的所有 App ID，安装它不会消耗任何 App ID。",
+    "Signing registers one App ID for the app, and its extensions share it. It counts for 7 days.":
+        "签名时只为 App 注册一个 App ID，其扩展共用它。它会占用 7 天。",
+    "This Apple ID can register %d a week.": "此 Apple ID 每周可注册 %d 个。",
+
+    // MARK: - Links (sideinstaller://install, sideinstaller://pairingFile)
+
+    "Install from a link?": "从链接安装？",
+    "Download and install": "下载并安装",
+    "SideInstaller will download this .ipa, then sign it with your Apple ID and install it. Only go ahead if you trust where the link came from.":
+        "SideInstaller 将下载此 .ipa，用你的 Apple ID 签名后安装。只有在你信任该链接来源时才继续。",
+    "It replaces %@, the custom .ipa you have now.": "它会替换你当前的自定义 .ipa %@。",
+    "Use SideStore's pairing file?": "使用 SideStore 的配对文件？",
+    "Import this pairing file?": "导入此配对文件？",
+    "Import": "导入",
+    "SideStore sent back the pairing file it has. SideInstaller will connect to this iPhone with it.":
+        "SideStore 已发回它现有的配对文件。SideInstaller 将用它连接这台 iPhone。",
+    "A link sent SideInstaller a pairing file. Only import it if you asked for one: SideInstaller will connect to this iPhone with it.":
+        "某个链接向 SideInstaller 发送了配对文件。只有在你主动请求时才导入：SideInstaller 将用它连接这台 iPhone。",
+    "It replaces %@.": "它会替换 %@。",
+    "It replaces the pairing file in use now.": "它会替换当前使用的配对文件。",
+    "Get it from SideStore": "从 SideStore 获取",
+    "SideStore opens and sends back the pairing file it has.": "SideStore 会打开并发回它现有的配对文件。",
+    "SideStore isn't installed on this iPhone, so there's no pairing file to get from it.":
+        "这台 iPhone 上没有安装 SideStore，因此无法从中获取配对文件。",
+    "That install link has no .ipa in it. It needs ?url= followed by the https:// address the .ipa downloads from.":
+        "该安装链接中没有 .ipa。它需要 ?url= 后跟下载 .ipa 的 https:// 地址。",
+    "That link was meant to carry a pairing file, but what it holds can't be read.": "该链接本应包含配对文件，但其内容无法读取。",
+    "That link carries a file, but it isn't a pairing file.": "该链接包含一个文件，但不是配对文件。",
+
+    // MARK: - Report a problem
+
+    "Report a problem": "报告问题",
+    "Report this problem": "报告此问题",
+    "Opens a GitHub issue with this app's details, its log and crash logs.":
+        "在 GitHub 上新建 Issue，附带本应用的详细信息、日志和崩溃日志。",
+    "What happened?": "发生了什么？",
+    "What were you doing, and what went wrong?": "你当时在做什么，出了什么问题？",
+    "Say what you tapped, what you expected and what happened instead. English is best, but any language is fine.":
+        "请说明你点了什么、预期会发生什么、实际发生了什么。最好用英文，但任何语言都可以。",
+    "Included": "包含内容",
+    "Device": "设备",
+    "App": "应用",
+    "Stopped at": "停止于",
+    "not connected": "未连接",
+    "none": "无",
+    "made on this iPhone": "在此 iPhone 上生成",
+    "latest": "最新",
+    "custom server": "自定义服务器",
+    "Auto, starts with %@": "自动，从 %@ 开始",
+    "Error": "错误",
+    "Activity log": "活动日志",
+    "%d lines": "%d 行",
+    "Your Apple ID, device name, serial numbers and keys are taken out of the log first.":
+        "Apple ID、设备名称、序列号和密钥会先从日志中移除。",
+    "Crash logs": "崩溃日志",
+    "Looking for crash logs …": "正在查找崩溃日志 …",
+    "Look for crash logs on this iPhone": "在此 iPhone 上查找崩溃日志",
+    "Look again": "重新查找",
+    "No crash logs from SideStore, LiveContainer or Madeira in the last %d days.":
+        "最近 %d 天内没有 SideStore、LiveContainer 或 Madeira 的崩溃日志。",
+    "iOS hands SideInstaller its own crashes the next time it opens. Crash logs from SideStore, LiveContainer and Madeira are read from this iPhone through LocalDevVPN.":
+        "SideInstaller 自身的崩溃会在下次打开时由 iOS 交给它。SideStore、LiveContainer 和 Madeira 的崩溃日志通过 LocalDevVPN 从此 iPhone 读取。",
+    "Open a GitHub issue": "在 GitHub 上新建 Issue",
+    "Share the report": "分享报告",
+    "Preview the report": "预览报告",
+    "Report": "报告",
+    "The report is saved in Files › On My iPhone › SideInstaller › Reports. On GitHub, attach it with “Paste, drop, or click to add files” below the text, then submit the issue.":
+        "报告保存在“文件” › 我的 iPhone › SideInstaller › Reports。在 GitHub 上，用文本框下方的“Paste, drop, or click to add files”附上它，然后提交 Issue。",
+    "Describe the problem above first.": "请先在上方描述问题。",
+    "Couldn't save the report: %@": "无法保存报告：%@",
+
+    // MARK: - Official download check
+
+    "Did you download SideInstaller from sideinstaller.net?":
+        "你是从 sideinstaller.net 下载的 SideInstaller 吗？",
+    "SideInstaller is open source, so anyone can publish a modified copy that steals the Apple ID typed into it. Only sideinstaller.net is official.":
+        "SideInstaller 是开源的，任何人都可以发布经过修改、会窃取所输入 Apple ID 的副本。只有 sideinstaller.net 是官方来源。",
+    "Yes, from sideinstaller.net":
+        "是，来自 sideinstaller.net",
+    "No, or I'm not sure":
+        "不是，或不确定",
+    "Don't sign in with this copy":
+        "请勿用此副本登录",
+    "Copies from anywhere other than sideinstaller.net are unofficial and may have been changed to steal your Apple ID. Delete this one and install SideInstaller from sideinstaller.net, then sign in there.":
+        "来自 sideinstaller.net 以外的副本均非官方，可能已被修改以窃取你的 Apple ID。请删除此副本，从 sideinstaller.net 安装 SideInstaller，然后在那里登录。",
+    "Open sideinstaller.net":
+        "打开 sideinstaller.net",
+    "Back":
+        "返回",
+    "I understand the risks":
+        "我了解风险",
+    "Use an unofficial copy?":
+        "使用非官方副本？",
+    "If this copy was changed, it can send your Apple ID and password to someone else. Continue only if you trust where it came from.":
+        "如果此副本被修改过，它可能会把你的 Apple ID 和密码发送给他人。只有在你信任其来源时才继续。",
 ]

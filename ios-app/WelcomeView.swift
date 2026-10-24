@@ -44,9 +44,11 @@ struct WelcomeView: View {
                         .welcomeItem(Engine.deviceCanSelfPair ? 3 : 4)
                 }
                 .padding(.horizontal, 24)
+                .pageColumn()
                 .padding(.bottom, 28)
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     /// Notice for iOS below 27, explaining the extra pairing-file step.
@@ -105,7 +107,7 @@ struct WelcomeView: View {
                        isOn: $accepted.animation(.snappy(duration: 0.25)))
             }
 
-            Link(destination: URL(string: "https://frizzlem.github.io/SideInstaller/terms.html")!) {
+            Link(destination: URL(string: "https://sideinstaller.net/terms.html")!) {
                 Text("TOS")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.accent2)

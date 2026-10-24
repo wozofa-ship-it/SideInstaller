@@ -16,8 +16,8 @@ dependency here.
 
 `sign_app` downloaded a single provisioning profile (for `main_app_id`) and wrote
 it only to the main `.app`. App extensions got nothing, even though
-`register_app_ids` already registers an App ID for each of them and `sign::sign`
-signs every nested bundle with the *main* app's entitlements
+`register_app_ids` registered an App ID for each of them (it no longer does,
+change 12) and `sign::sign` signs every nested bundle with the *main* app's entitlements
 (`SettingsScope::Main`) — AltStore's "use main profile" arrangement. So the
 signature was fine and only the file was missing.
 
@@ -305,6 +305,77 @@ code to the devices (409) and sign-in finished. iLoader 2.3.9's users reported
 the same "SMS 2FA … 403" that day. So the app keeps ani.jkcoxson.com as the
 first server and tries the macOS ones last.
 
+iLoader 2.3.10 (2026-10-18) added ani3.stikstore.app ("StikStore (Mac)") and
+made new.ani.sidestore.io its default, with a note that ani.jkcoxson.com "works
+~50% of the time". Measured 2026-10-19 with made-up accounts through
+`ish/sideinstaller.py`: ani3.stikstore.app names the same `<MacBookPro13,3>`
+Mac, an identity provisioned through it works on mac-ani.jkcoxson.com and gets
+-45061 from the Windows-ADI servers, and `init` reaches -20970. Four `init`s
+each: ani3, mac-ani and ani2.stikstore.app 4/4; ani.jkcoxson.com 3/4 (one
+-22421); new.ani.sidestore.io 2/4 (HTTP 502, no `/v3/client_info`);
+win.ani.sidestore.io 0/4 ("spawn engine worker: Resource temporarily
+unavailable"). iLoader 2.3.10's issues still report the `/auth` 403 (#995),
+also for an account with trusted devices (#994; 2.3.10's new store key puts
+everyone on new.ani.sidestore.io unless they pick again), so the app adds ani3
+to the macOS group and keeps its order.
+
+From 2026-10-21 Apple lets a sign-in through an Android-ADI server take the
+password and the second factor (`validate` ec 0, `complete` hsc 200), then
+answers `apptokens` with ec **-80046**, "This action cannot be completed at
+this time" (hsc 400), whatever client it names: xtool #378, iPASide #10,
+SideStore #1685/#1686, Sideloadly, AltServer 1.8.2 (AltStore #1840), Impactor
+#298. xtool 1.23.0 (PR #380), iPASide 1.2.9 and iLoader (902597564, which also
+comments out its Windows servers as "works ~50% of the time, and doesn't work
+with SMS 2FA") moved to macOS-ADI servers; isideload 065e852 defaults to its own
+`ani.iloader.app`. SideStore's users got past it with on-device anisette
+(Android ADI under Unicorn) and auto-rotation off, a macOS-ADI server picked
+("SideStore (New)" or "jkcoxson"), the default headers and a reset adi.pb.
+SideStore's default headers name a current Mac (AnisetteKit:
+`<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>`,
+user agent `AuthKit/1 (Macintosh; OS X 26.6) (com.apple.akd/1.0)`), not the
+servers' Sierra Mac.
+
+Measured 2026-10-23 with made-up accounts (`ish/sideinstaller.py` and this
+crate): an identity provisioned through new.ani.sidestore.io while reporting
+SideStore's Mac works on mac-ani.jkcoxson.com, ani.iloader.app,
+ani3.stikstore.app, ani.stikstore.app, **ani.jkcoxson.com and
+ani2.stikstore.app** (both Windows-ADI on 2026-10-19, and all of these now hand
+out the Sierra Mac) and gets -45061 from ani.sidestore.io; win.ani.sidestore.io
+answers 502. `init` gives -20970 to SideStore's Mac and to the Sierra Mac alike.
+new.ani.sidestore.io answered 4 of 6 `/v3/get_headers` requests, the other two
+after a minute without an answer, and others with 502; the other macOS servers
+answered 6 of 6 within a few seconds.
+
+- `client_info_to_use` reports `CURRENT_MAC_CLIENT_INFO` (SideStore's Mac)
+  where the server names a Mac older than macOS 10.13, the floor -23782 named.
+- `android_adi` (a stock client or an Android phone, what every Android-ADI
+  server hands out) is kept per provider (`AnisetteProvider::runs_android_adi`),
+  and the app's `apple_session::open` doesn't log in through such a server
+  (`ANDROID_ADI_SKIP`, naming -80046): a saved token is still tried through it.
+- `Slots` records the client each new identity was provisioned while reporting
+  (`provisioned_as`). Before a full login, `open` calls
+  `AnisetteDataGenerator::require_current_mac_identity`: reporting a current
+  Mac, only an identity provisioned as one fits (`Slots::fits`), so 1.6.1's
+  first login through a macOS-ADI server provisions a new one, as SideStore's
+  "Reset adi.pb" after its headers changed; an older identity stays assigned
+  until then, for its saved token.
+- `/v3/get_headers` is asked again on a 5xx (twice, a second apart) and given
+  up on after 20 seconds, so a flaky server ends the attempt sooner and the app
+  moves to another server on the library, which takes the same identity.
+- A bare 403 from `PUT /auth/verify/phone`, even as a Mac (the 2026-10-16
+  route), goes to `NeedsDevice2FA` with `PHONE_CODE_REFUSED` in `last_error`,
+  and a bare 403 from the trusted-device request goes on to ask for the code
+  with `DEVICE_CODE_UNCONFIRMED`: `validateCode` is outside `/auth`, and Apple
+  pushed a code at the proof to the Android and Windows clients.
+
+Tests: `cargo test -p isideload --lib remote_v3`. A throwaway test ran the
+app's `apple_session::open` with a made-up account: new.ani.sidestore.io
+provisioned a SideStore's-Mac identity (then answered 502), mac-ani.jkcoxson.com
+took it and `init` answered -20970, and ani.sidestore.io was skipped with
+`ANDROID_ADI_SKIP`. **Not verified:** a real account through the macOS servers
+as SideStore's Mac (which second factor Apple picks, the token), and the 2FA
+fallbacks.
+
 **3. `src/auth/apple_account.rs`, `builder.rs`, `grandslam.rs` — let the user
 choose how the 2FA code arrives.**
 
@@ -506,11 +577,50 @@ signature made with one. `DeveloperSession::token()` and `adsid()` expose what
 the session is signed in with, for `si_signing_account` to hand to Madeira.
 Local; upstream has neither. Not testable without an Apple ID.
 
+**11. `src/sideload/cert_identity.rs` — use the certificate that has the key,
+whatever its machine name.**
+
+`find_matching` took only a certificate whose machine name was the
+`Sideloader`'s (`SideInstaller`) and whose public key matched the stored key.
+SideInstaller can now put SideStore's key in that file (`si_cert_import` in
+`rust-core/src/certs.rs`), and SideStore names its certificates `SideStore -
+<account>'s <device>`, so the match would miss and `retrieve` would ask Apple
+for a new certificate, which a free account refuses with 7460. The key alone
+decides now: two certificates only share a public key when they were requested
+with the same key. `find_matching` is public, so the import checks a key the
+same way signing will, and `retrieve_existing` no longer takes a machine name.
+Local; upstream still matches on both. Not testable without an Apple ID.
+
+**12. `src/sideload/application.rs`, `sideloader.rs` — register no App IDs for
+app extensions (isideload 0.5.0, iLoader 2.4.0).**
+
+`register_app_ids` registered an App ID for the app and for each `.appex` in its
+`PlugIns`, and `sign_app` then gave every one of them the app group (feature,
+then assignment) and, when asked, the increased memory limit. Only the main
+App ID's profile is ever downloaded, though: change 1 signs every extension
+with it and with the main entitlements. So each extension cost one of a free
+Apple ID's 10 App IDs a week for nothing, plus its registration and group
+feature requests the first time and an app group assignment on every install.
+SideStore and its `AltWidgetExtension` took 2 instead of 1.
+
+Now only the main bundle gets an App ID, which is what upstream's new
+`ExtensionsBehavior::ReuseMain` does (`fc7a81a`), and iLoader 2.4.0 picks it for
+every app (`9f5bddb`, "Use main profile"). Upstream keeps `RegisterAll` as the
+builder's default, with per-extension profiles; the `ExtensionsBehaviorSelection`
+option and its callback type parameter aren't ported, since there is nothing
+else to choose here. `si_appid_quota` (`rust-core/src/account.rs`) counts the
+main App ID alone to match. App IDs registered for extensions before stay on the
+team until they expire.
+
 ## Re-vendoring
 
-Upstream fixed change 1 its own way in `baca89d` (per-extension profiles). A
-re-vendor either keeps the main-profile arrangement in `sign.rs` or takes
-upstream's, which adds a profile download per extension to `sign_app`.
+Upstream fixed change 1 its own way in `baca89d` (per-extension profiles). Since
+isideload 0.5.0 (`fc7a81a`) it can also do what change 1 and change 12 do:
+`.extensions_behavior(ExtensionsBehaviorSelection::Fixed(ExtensionsBehavior::ReuseMain))`
+on the builder gives each extension the main profile and entitlements and
+registers no App ID for it. Its default is still `RegisterAll`, so a re-vendor
+has to set `ReuseMain`, as iLoader 2.4.0 does, or SideStore goes back to costing
+2 App IDs.
 
 Change 7 is upstream on `main` from `5992f00` (isideload 0.4.0), without the
 `_CodeSignature` cleanup.

@@ -12,6 +12,7 @@ let portugueseStrings: [String: String] = [
 
     "Cancel": "Cancelar",
     "Copy": "Copiar",
+    "Copy logs": "Copiar registros",
     "Email": "E-mail",
     "Password": "Senha",
     "Install": "Instalar",
@@ -126,6 +127,10 @@ let portugueseStrings: [String: String] = [
     "SideInstaller %@ is available — you're on %@.":
         "O SideInstaller %@ está disponível — você está no %@.",
     "Get the latest version": "Baixar a versão mais recente",
+    "From the website": "Pelo site",
+    "Sign it with your Apple ID": "Assinar com seu Apple ID",
+    "Install it in LiveContainer": "Instalar no LiveContainer",
+    "LiveContainer isn't installed on this iPhone.": "O LiveContainer não está instalado neste iPhone.",
     "Release": "Versão",
     "Reinstall": "Reinstalar",
     "Install %@": "Instalar %@",
@@ -211,6 +216,11 @@ let portugueseStrings: [String: String] = [
     "Pairing file ready. You can export it or install it into an app below.":
         "Arquivo de pareamento pronto. Você pode exportá-lo ou instalá-lo em um app abaixo.",
     "Pairing file installed into %@.": "Arquivo de pareamento instalado no %@.",
+    "Install pairing into all apps": "Instalar pareamento em todos os apps",
+    "Installing into all apps": "Instalando em todos os apps",
+    "Pairing file installed into all %d apps.": "Arquivo de pareamento instalado nos %d apps.",
+    "Couldn't write into %@.": "Não foi possível gravar em %@.",
+    "The %@ record isn't a plist dictionary.": "O registro %@ não é um dicionário plist.",
 
     "Import pairing file": "Importar arquivo de pareamento",
     "How do I make one?": "Como faço um?",
@@ -265,6 +275,46 @@ let portugueseStrings: [String: String] = [
     "This certificate has no serial number, so it can't be revoked.":
         "Este certificado não tem número de série, então não pode ser revogado.",
 
+    // Export: the certificate SideInstaller signs with, as a .p12
+    "This certificate has no serial number, so it can't be exported.":
+        "Este certificado não tem número de série, então não pode ser exportado.",
+    "Only the certificate SideInstaller signs with can be exported: the private key of any other stays on the device that asked Apple for it.":
+        "Só o certificado com que o SideInstaller assina pode ser exportado: a chave privada de qualquer outro fica no dispositivo que o pediu à Apple.",
+    "Couldn't export the certificate: %@": "Não foi possível exportar o certificado: %@",
+    "Export certificate": "Exportar certificado",
+    "Export": "Exportar",
+    "Exporting": "Exportando",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
+        "Salva este certificado e a chave privada dele em um arquivo .p12, para outro app de assinatura ou um computador assinar com ele. Escolha uma senha: você vai precisar dela para importar o arquivo. Não o passe para ninguém.",
+    "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
+        "O SideInstaller só pode exportar o certificado com que assina, e nenhum destes é ele: a chave privada de um certificado fica no dispositivo que o pediu à Apple.",
+    "SideInstaller signs with this one": "O SideInstaller assina com este",
+
+    // MARK: - SideStore's certificate (sidestore://certificate)
+
+    "Use SideStore's certificate": "Usar o certificado do SideStore",
+    "Checking the certificate": "Verificando o certificado",
+    "SideStore opens and sends back its certificate. SideInstaller then signs with it too, so on a free Apple ID neither app has to revoke the other's.":
+        "O SideStore abre e devolve o certificado dele. Depois o SideInstaller também assina com ele, então com um Apple ID gratuito nenhum dos dois apps precisa revogar o do outro.",
+    "Apple won't issue a second signing certificate for this Apple ID. If SideStore made the one it has, SideInstaller can sign with that one too, and nothing is revoked. Revoking it lets the install continue as well — but it can't be undone.":
+        "A Apple não emite um segundo certificado de assinatura para este Apple ID. Se o que existe foi criado pelo SideStore, o SideInstaller também pode assinar com ele, sem revogar nada. Revogá-lo também deixa a instalação seguir — mas isso não pode ser desfeito.",
+    "If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked.":
+        "Se foi o SideStore que o criou, toque em “Usar o certificado do SideStore” acima: o SideInstaller também assina com ele, e nada é revogado.",
+    "SideInstaller signs with “%@” from now on. Nothing was revoked, so the apps already signed with it keep working.":
+        "A partir de agora o SideInstaller assina com “%@”. Nada foi revogado, então os apps já assinados com ele continuam funcionando.",
+    "SideInstaller already signs with “%@”.": "O SideInstaller já assina com “%@”.",
+    "That certificate isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID (SideStore may be signed in with a different one). Nothing was changed.":
+        "Esse certificado não é deste Apple ID: ele foi revogado ou pertence a outro Apple ID (talvez o SideStore esteja conectado com outro). Nada foi alterado.",
+    "Couldn't use that certificate: %@": "Não foi possível usar esse certificado: %@",
+    "SideStore isn't installed on this iPhone, so there's no certificate to get from it.":
+        "O SideStore não está instalado neste iPhone, então não há certificado para pegar dele.",
+    "Sign with this certificate?": "Assinar com este certificado?",
+    "A link sent SideInstaller a signing certificate. Only use it if you asked for one: SideInstaller will sign apps with it from now on, in place of its own. It's used only if it's one of your Apple ID's certificates.":
+        "Um link enviou ao SideInstaller um certificado de assinatura. Só use se você pediu um: a partir de agora o SideInstaller vai assinar os apps com ele, no lugar do próprio. Ele só é usado se for um dos certificados do seu Apple ID.",
+    "Use it": "Usar",
+    "That link was meant to carry a signing certificate, but what it holds can't be read.":
+        "Esse link deveria trazer um certificado de assinatura, mas o conteúdo não pode ser lido.",
+
     // MARK: - Location tab
 
     "Location spoofing": "Simulação de localização",
@@ -285,6 +335,81 @@ let portugueseStrings: [String: String] = [
     "Downloading %@ failed (HTTP %d).": "Falha ao baixar %@ (HTTP %d).",
     "Couldn't build the download URL for %@.":
         "Não foi possível montar o endereço de download de %@.",
+
+    // Location › saved places and GPX routes.
+    "Saved places": "Lugares salvos",
+    "Save this place": "Salvar este lugar",
+    "Name": "Nome",
+    "Show on map": "Mostrar no mapa",
+    "Tap Save under the map to keep the spot under the pin. Tapping a saved place sets it straight away.":
+        "Toque em Salvar abaixo do mapa para guardar o ponto sob o alfinete. Ao tocar em um lugar salvo, ele é definido na hora.",
+    "Play a GPX route": "Reproduzir uma rota GPX",
+    "Import a .gpx file and the device moves along it at the speed you pick, then stays at its last point.":
+        "Importe um arquivo .gpx e o dispositivo o percorre na velocidade que você escolher; no fim, fica no último ponto.",
+    "Import GPX file": "Importar arquivo GPX",
+    "Couldn't read %@ as a GPX file.": "Não foi possível ler %@ como arquivo GPX.",
+    "%@ has no track, route or waypoints in it.": "%@ não tem trilhas, rotas nem waypoints.",
+    "As recorded": "Como gravado",
+    "Walk": "A pé",
+    "Cycle": "De bicicleta",
+    "Drive": "De carro",
+    "Speed": "Velocidade",
+    "Play route": "Reproduzir rota",
+    "Playing route · %d%%": "Reproduzindo rota · %d%%",
+    "Stop here": "Parar aqui",
+    "%@ of %@": "%@ de %@",
+    "Route finished. The device stays at its last point.":
+        "Rota concluída. O dispositivo fica no último ponto.",
+    "Route stopped. The device stays where it got to.":
+        "Rota interrompida. O dispositivo fica onde chegou.",
+    "Route playback stopped: %@": "A reprodução da rota parou: %@",
+    // Location › planned routes (OpenStreetMap).
+    "Add stop": "Adicionar parada",
+    "Add as stop": "Adicionar como parada",
+    "Plan a route": "Planejar uma rota",
+    "Travel by": "Meio de transporte",
+    "Goes along each street at its speed limit, from OpenStreetMap. A street without one mapped gets the usual limit for its kind of road.":
+        "Percorre cada rua no limite de velocidade dela, segundo o OpenStreetMap. Uma rua sem limite mapeado recebe o limite habitual para o tipo de via.",
+    "Rides streets and paths a bike can take, at a cycling pace.":
+        "Percorre ruas e caminhos por onde passa uma bicicleta, em ritmo de ciclista.",
+    "Walks streets and paths at a walking pace.": "Percorre ruas e caminhos em ritmo de caminhada.",
+    "Start where the device is": "Começar onde o dispositivo está",
+    "Move the map so the pin is on a place, then tap Add stop. Add as many as you like: the route goes to each in order.":
+        "Mova o mapa para que o alfinete fique sobre um lugar e toque em Adicionar parada. Adicione quantas quiser: a rota passa por cada uma na ordem.",
+    "The device's location": "Localização do dispositivo",
+    "Stop %d": "Parada %d",
+    "Clear stops": "Limpar paradas",
+    "Move up": "Mover para cima",
+    "Move down": "Mover para baixo",
+    "Find route": "Encontrar rota",
+    "Finding route": "Procurando rota",
+    "Add one more stop to plan a route.": "Adicione mais uma parada para planejar uma rota.",
+    "Routes from OpenStreetMap, © OpenStreetMap contributors":
+        "Rotas do OpenStreetMap, © colaboradores do OpenStreetMap",
+    "Speed limits are mapped for all of it.":
+        "Os limites de velocidade estão mapeados em todo o percurso.",
+    "Speed limits are mapped for %d%% of it; the rest is estimated.":
+        "Os limites de velocidade estão mapeados em %d%% do percurso; o resto é estimado.",
+    "Average %@": "Média de %@",
+    "Speed limit %@": "Limite de velocidade %@",
+    "No speed limit · going %@": "Sem limite de velocidade · a %@",
+    "No limit mapped · going %@": "Sem limite mapeado · a %@",
+    "Going %@": "A %@",
+    "No street name": "Rua sem nome",
+    "Estimated speed limit %@": "Limite de velocidade estimado %@",
+    "No speed limit": "Sem limite de velocidade",
+    "No route found between these stops. Move them onto roads or paths, or travel another way.":
+        "Nenhuma rota encontrada entre essas paradas. Mova-as para ruas ou caminhos, ou tente outro meio de transporte.",
+    "A stop is too far from any road or path. Move it closer and try again.":
+        "Uma parada está longe demais de qualquer rua ou caminho. Aproxime-a e tente de novo.",
+    "Too many stops for the route server. Take some out and try again.":
+        "Paradas demais para o servidor de rotas. Remova algumas e tente de novo.",
+    "That route is too long for the route server. Make it shorter, or split it up.":
+        "Essa rota é longa demais para o servidor de rotas. Encurte-a ou divida-a.",
+    "The route server is busy. Try again in a minute.":
+        "O servidor de rotas está ocupado. Tente de novo em um minuto.",
+    "The route server couldn't plan this route (%@).":
+        "O servidor de rotas não conseguiu planejar esta rota (%@).",
 
     // MARK: - Entitlements tab
 
@@ -315,8 +440,8 @@ let portugueseStrings: [String: String] = [
     // Refresh all: signing the installed apps again.
     "iOS %@ isn't supported — SideInstaller needs iOS %@ or later.":
         "O iOS %@ não é compatível: o SideInstaller precisa do iOS %@ ou posterior.",
-    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Revoke it under Tools › Certificates, then refresh again.":
-        "A Apple não emite um certificado de assinatura para este Apple ID: ela informa que já existe um (erro 7460). Revogue-o em Ferramentas › Certificados e renove de novo.",
+    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Under Tools › Certificates, use SideStore's certificate or revoke that one, then refresh again.":
+        "A Apple não emite um certificado de assinatura para este Apple ID: ela informa que já existe um (erro 7460). Em Ferramentas › Certificados, use o certificado do SideStore ou revogue esse, e renove de novo.",
     "An install is already running. Wait for it to finish, then refresh.":
         "Já tem uma instalação em andamento. Espere ela terminar e renove depois.",
     "Getting ready": "Preparando",
@@ -383,12 +508,12 @@ let portugueseStrings: [String: String] = [
     "Sign in to their Apple ID": "Entrar no Apple ID dele",
     "Download SideInstaller": "Baixar o SideInstaller",
     "Install on their iPhone": "Instalar no iPhone dele",
-    "Enter the other iPhone's IP address. It's in Settings › Wi-Fi, next to the network it's on.":
-        "Digite o endereço IP do outro iPhone. Ele está em Ajustes › Wi-Fi, ao lado da rede em que o aparelho está.",
     "“%@” isn't an IPv4 address. It should look like 192.168.1.42.":
         "“%@” não é um endereço IPv4. Ele deve ser parecido com 192.168.1.42.",
     "%@ is an address this iPhone already holds. Side by Side installs onto someone else's iPhone — use theirs. To install on this one, use the Install tab.":
         "%@ é um endereço que este iPhone já tem. O Side by Side instala no iPhone de outra pessoa — use o dela. Para instalar neste aqui, use a aba Instalar.",
+    "The iPhone that paired was this one. Pair from their iPhone's Settings instead. To install on this iPhone, use the Install tab.":
+        "O iPhone que pareou foi este. Faça o pareamento pelos Ajustes do iPhone dele. Para instalar neste iPhone, use a aba Instalar.",
     "Enter the Apple ID to sign with, and its password.":
         "Digite o Apple ID que vai assinar o app e a senha dele.",
     "Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work.":
@@ -410,7 +535,9 @@ let portugueseStrings: [String: String] = [
     "Their iPhone needs iOS %@ — SideInstaller pairs itself once it's installed, and nothing older can.":
         "O iPhone dele precisa do iOS %@: depois de instalado, o SideInstaller se pareia sozinho, e versões anteriores não conseguem.",
     "Their iPhone": "O iPhone dele",
-    "IP address (e.g. 192.168.1.42)": "Endereço IP (ex.: 192.168.1.42)",
+    "IP address (optional)": "Endereço IP (opcional)",
+    "Optional: leave it empty, and it fills in when their iPhone pairs.":
+        "Opcional: deixe vazio e ele é preenchido quando o iPhone dele parear.",
     "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
         "No iPhone dele: Ajustes › Wi-Fi › ⓘ ao lado da rede e depois “Endereço IP”.",
     "This iPhone is %@, so theirs will look similar.":
@@ -456,6 +583,8 @@ let portugueseStrings: [String: String] = [
     "Start the install": "Iniciar a instalação",
     "Install again": "Instalar de novo",
     "Clear their details": "Limpar os dados dele",
+    "This iPhone is still paired with theirs. Clearing forgets it.":
+        "Este iPhone ainda está pareado com o dele. Limpar desfaz esse pareamento.",
     "Last step: they trust %@": "Última etapa: ele confia no %@",
     "On their iPhone: Settings › General › VPN & Device Management.":
         "No iPhone dele: Ajustes › Geral › VPN e Gerenciamento de Dispositivo.",
@@ -496,10 +625,40 @@ let portugueseStrings: [String: String] = [
     "Custom…": "Personalizado…",
     "Server URL": "URL do servidor",
     "Anisette Server": "Servidor Anisette",
+    "Starts with %@": "Começa por %@",
+    "Auto starts with the server that signed in last, then tries the others, the ones most likely to work first.":
+        "O modo Automático começa pelo servidor do último login bem-sucedido e depois tenta os outros, primeiro os com mais chance de funcionar.",
+    "Only this server is tried. If it fails, so does sign-in: choose Auto to have SideInstaller try the others.":
+        "Só este servidor é tentado. Se ele falhar, o login também falha: escolha Automático para o SideInstaller tentar os outros.",
+    "Only the server picked in Settings › Anisette Server was tried. Choose Auto there to let SideInstaller try the others when one fails.":
+        "Só o servidor escolhido em Ajustes › Servidor Anisette foi tentado. Escolha Automático lá para o SideInstaller tentar os outros quando um falhar.",
     "Device IP": "IP do dispositivo",
     "Advanced": "Avançado",
     "Clear": "Limpar",
     "Activity Log (%d)": "Registro de atividade (%d)",
+
+    // Settings › Developer Mode: AMFI requests over the device link.
+    "Developer Mode": "Modo de Desenvolvedor",
+    "Show Developer Mode in Settings": "Mostrar o Modo de Desenvolvedor nos Ajustes",
+    "Turn on Developer Mode": "Ativar o Modo de Desenvolvedor",
+    "Asking this iPhone…": "Consultando este iPhone…",
+    "Both need a link to this iPhone that already works: LocalDevVPN plus a pairing file, such as one imported on iOS 17.4 to 26. On iOS 27 the link itself needs Developer Mode, so they can't bring back a missing option there.":
+        "Os dois precisam de uma conexão com este iPhone que já funcione: o LocalDevVPN e um arquivo de pareamento, como um importado no iOS 17.4 a 26. No iOS 27 a própria conexão precisa do Modo de Desenvolvedor, então eles não conseguem trazer de volta a opção que sumiu.",
+    "Turn on Developer Mode?": "Ativar o Modo de Desenvolvedor?",
+    "Turn On and Restart": "Ativar e reiniciar",
+    "This iPhone restarts right away. Once you unlock it, tap Turn On in the alert that appears. iOS allows this only while the iPhone has no passcode.":
+        "Este iPhone reinicia na hora. Depois de desbloquear, toque em Ativar no alerta que aparecer. O iOS só permite isso quando o iPhone não tem código.",
+    "Developer Mode is already on.": "O Modo de Desenvolvedor já está ativado.",
+    "Developer Mode now shows under Settings › Privacy & Security, near the bottom. Turn it on there, and iOS restarts to finish.":
+        "O Modo de Desenvolvedor agora aparece em Ajustes › Privacidade e Segurança, perto do fim. Ative por lá, e o iOS reinicia para concluir.",
+    "Developer Mode is set to turn on, and this iPhone restarts now. Once you unlock it, tap Turn On.":
+        "O Modo de Desenvolvedor vai ser ativado, e este iPhone reinicia agora. Depois de desbloquear, toque em Ativar.",
+    "An install is already running. Wait for it to finish, then try again.":
+        "Já tem uma instalação em andamento. Espere ela terminar e tente de novo.",
+    "iOS turns Developer Mode on from here only while this iPhone has no passcode. Tap “Show Developer Mode in Settings” and turn it on there instead.":
+        "O iOS só ativa o Modo de Desenvolvedor daqui quando este iPhone não tem código. Toque em “Mostrar o Modo de Desenvolvedor nos Ajustes” e ative por lá.",
+    "This iPhone didn't take the Developer Mode request: %@":
+        "Este iPhone não aceitou o pedido do Modo de Desenvolvedor: %@",
 
     // MARK: - Release channels & downloads
 
@@ -536,10 +695,22 @@ let portugueseStrings: [String: String] = [
     "Two-factor verification was cancelled.": "A verificação em duas etapas foi cancelada.",
     "Incorrect Apple ID or password. Check your Apple Account email and password, then try again.":
         "Apple ID ou senha incorretos. Confira o e-mail e a senha da sua conta Apple e tente de novo.",
-    "Apple ID sign-in failed on %@. Last error: %@":
-        "Falha ao entrar no Apple ID em %@. Último erro: %@",
+    "Apple ID sign-in failed on %@. Error: %@":
+        "Falha ao entrar no Apple ID em %@. Erro: %@",
+    "Apple ID sign-in failed on %@. Error via %@: %@":
+        "Falha ao entrar no Apple ID em %@. Erro via %@: %@",
     "Apple's sign-in server refused the request (HTTP 503). It isn't your password or the anisette server, so trying more servers won't help. Try again later, or update SideInstaller.":
         "O servidor de login da Apple recusou a solicitação (HTTP 503). Não é a sua senha nem o servidor anisette, então tentar outros servidores não vai adiantar. Tente de novo mais tarde ou atualize o SideInstaller.",
+    "“%@” makes its anisette data with Apple's Android library, and Apple now refuses to finish signing in through those servers (error -80046), after your password and code. In Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "“%@” gera os dados anisette com a biblioteca Android da Apple, e agora a Apple se recusa a concluir o login por esses servidores (erro -80046), depois da sua senha e do código. Em Ajustes › Servidor Anisette, escolha Automático ou um servidor Mac como “SideStore (New)”.",
+    "Apple refused to finish signing in (error -80046), even through a Mac anisette server, the kind it still accepted. Try again later, or check for a SideInstaller update.":
+        "A Apple se recusou a concluir o login (erro -80046), mesmo por um servidor anisette Mac, o tipo que ela ainda aceitava. Tente de novo mais tarde ou veja se há uma atualização do SideInstaller.",
+    "Apple refused to finish signing in through “%@” (error -80046). It now only accepts sign-ins through anisette servers on its macOS library: in Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.":
+        "A Apple se recusou a concluir o login por “%@” (erro -80046). Agora ela só aceita logins por servidores anisette com a biblioteca macOS dela: em Ajustes › Servidor Anisette, escolha Automático ou um servidor Mac como “SideStore (New)”.",
+    "Apple won't send a code by text or call to this sign-in, so it was sent to your Apple devices.":
+        "A Apple não envia código por SMS nem por ligação para este login, então ele foi enviado para seus dispositivos Apple.",
+    "Apple didn't confirm sending a code to your Apple devices. If one arrived, enter it; if not, try another way.":
+        "A Apple não confirmou o envio de um código para seus dispositivos Apple. Se chegou um, digite-o; se não, tente de outra forma.",
     "SideInstaller can't reach Apple's sign-in server (gsa.apple.com), though this iPhone has an internet connection. Something is blocking it: a firewall, a DNS filter or ad blocker, Screen Time content restrictions, or another VPN app. Turn it off or try another network, then try again.":
         "O SideInstaller não consegue acessar o servidor de login da Apple (gsa.apple.com), embora este iPhone esteja conectado à internet. Algo está bloqueando: um firewall, um filtro de DNS ou bloqueador de anúncios, as restrições de conteúdo do Tempo de Uso ou outro app de VPN. Desative-o ou tente outra rede e tente de novo.",
     "SideInstaller can't reach Apple: Cellular Data is turned off for it. Turn SideInstaller on in Settings › Cellular, or join a Wi-Fi network with internet access, then try again.":
@@ -558,6 +729,7 @@ let portugueseStrings: [String: String] = [
         "A Apple bloqueou esta conta Apple por motivos de segurança (erro -20209), então todo login falha até ela ser desbloqueada. Redefina a senha em iforgot.apple.com e entre de novo com a nova senha.",
     "the anisette server": "o servidor anisette",
     "all %d anisette servers": "todos os %d servidores anisette",
+    "%d anisette servers (%d skipped)": "%d servidores anisette (%d ignorados)",
     "Not signed in.": "Não conectado.",
     "No SideStore IPA downloaded.": "Nenhum IPA do SideStore foi baixado.",
     "Signing failed: %@": "Falha ao assinar: %@",
@@ -637,6 +809,17 @@ let portugueseStrings: [String: String] = [
     "Paired": "Pareado",
     "Tap to return to SideInstaller.": "Toque para voltar ao SideInstaller.",
 
+    // The install's progress outside the app
+    "Installing %@": "Instalando %@",
+    "Paused": "Pausado",
+    "Open SideInstaller to finish the install.":
+        "Abra o SideInstaller para concluir a instalação.",
+    "Check the App IDs it needs, then tap Install.":
+        "Confira os App IDs necessários e depois toque em Instalar.",
+    "Tap Trust": "Toque em Confiar",
+    "Unlock this iPhone and tap Trust when it asks.":
+        "Desbloqueie este iPhone e toque em Confiar quando ele pedir.",
+
     "A signing certificate already exists": "Já existe um certificado de assinatura",
     "Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending.":
         "A Apple devolveu o erro 7460: este Apple ID já tem um certificado de desenvolvimento iOS, ou um pedido continua pendente.",
@@ -685,8 +868,8 @@ let portugueseStrings: [String: String] = [
     "Open Apple Account":
         "Abrir a conta Apple",
     "No App IDs left this week": "Sem App IDs nesta semana",
-    "Every app and app extension SideInstaller signs needs an App ID. A free Apple ID can register 10 a week, and each one counts for 7 days.":
-        "Todo app e extensão de app que o SideInstaller assina precisa de um App ID. Um Apple ID gratuito pode registrar 10 por semana, e cada um conta por 7 dias.",
+    "Every app SideInstaller signs needs an App ID, which its extensions share. A free Apple ID can register 10 a week, and each one counts for 7 days.":
+        "Todo app que o SideInstaller assina precisa de um App ID, compartilhado por suas extensões. Um Apple ID gratuito pode registrar 10 por semana, e cada um conta por 7 dias.",
     "They can't be deleted sooner. Wait until some expire, then tap Install again.":
         "Não dá para apagá-los antes. Espere alguns expirarem e toque em Instalar de novo.",
     "Or sign in with a different (or spare) Apple ID in Settings › Account, then tap Install again.":
@@ -707,6 +890,18 @@ let portugueseStrings: [String: String] = [
     "Come back here, tap “Import pairing file”, and pick it. Everything after that works as it does on iOS %@.":
         "Volte para cá, toque em “Importar arquivo de pareamento” e escolha-o. Daí em diante tudo funciona como no iOS %@.",
     "Get jitterbugpair": "Baixar o jitterbugpair",
+    "From iOS 26.4 on it has to be a remote pairing file: this iPhone hangs up on lockdown ones, like jitterbugpair's, when they come through LocalDevVPN.":
+        "A partir do iOS 26.4, precisa ser um arquivo “Remote pairing”: este iPhone derruba a conexão com arquivos lockdown, como o do jitterbugpair, quando chegam pelo LocalDevVPN.",
+    "Get idevice_pair": "Baixar o idevice_pair",
+    "Make a remote pairing file": "Faça um arquivo “Remote pairing”",
+    "The pairing file you imported is a lockdown one. Since iOS 26.4, this iPhone hangs up on those when they come through LocalDevVPN, so it can't connect, and a new one of the same kind won't either.":
+        "O arquivo de pareamento que você importou é do tipo lockdown. A partir do iOS 26.4, este iPhone derruba a conexão com esses arquivos quando chegam pelo LocalDevVPN, então ele não consegue conectar, e um novo do mesmo tipo também não.",
+    "Come back here, tap “Replace” on the Pairing file card, and pick it.":
+        "Volte para cá, toque em “Substituir” no cartão “Arquivo de pareamento” e escolha-o.",
+    "On a Mac, Windows PC or Linux box, open idevice_pair, plug this iPhone in, and tap Trust if it asks. Pick it, choose “Remote pairing”, click “Create”, and keep this iPhone unlocked until it's done.":
+        "Num Mac, PC com Windows ou máquina Linux, abra o idevice_pair, conecte este iPhone e toque em Confiar se ele pedir. Selecione-o, escolha “Remote pairing”, clique em “Create” e mantenha este iPhone desbloqueado até terminar.",
+    "Click “Save to file…” and send the file to this iPhone, by AirDrop, iCloud Drive or a cable. A pairing file exported from iLoader works too.":
+        "Clique em “Save to file…” e envie o arquivo para este iPhone, por AirDrop, iCloud Drive ou cabo. Um arquivo de pareamento exportado do iLoader também funciona.",
 
     // MARK: - Revoke-and-retry (Apple error 7460)
 
@@ -754,6 +949,16 @@ let portugueseStrings: [String: String] = [
         "Volte para 10.7.0.1, o padrão. No LocalDevVPN esse é o valor em Settings › Device IP — não o endereço da tela principal, que é a ponta do próprio túnel.",
     "If you changed LocalDevVPN's addresses, copy its Device IP here — including the /32, if it shows one.":
         "Se você mudou os endereços do LocalDevVPN, copie o Device IP dele para cá — inclusive o /32, se aparecer um.",
+    "Device IP is %@, one of this iPhone's own addresses, and iOS won't let an app connect to those. In Settings › Advanced, set Device IP to the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default, not the “Connected to” address on its main screen.":
+        "O IP do dispositivo é %@, um dos endereços deste iPhone, e o iOS não deixa apps se conectarem a eles. Em Ajustes › Avançado, coloque como IP do dispositivo o endereço em Settings › Device IP do LocalDevVPN (o padrão é 10.7.0.1), não o que aparece depois de “Connected to” na tela principal dele.",
+    "iOS refused the connection to %@ on this iPhone, before anything was sent. It does that for this iPhone's own addresses, like the “Connected to” address on LocalDevVPN's main screen. Device IP, in Settings › Advanced, has to be the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default. If it already is, turn LocalDevVPN off and on again, then try again.":
+        "O iOS recusou a conexão com %@ neste iPhone, antes de qualquer coisa ser enviada. Ele faz isso com os endereços do próprio iPhone, como o que aparece depois de “Connected to” na tela principal do LocalDevVPN. O IP do dispositivo, em Ajustes › Avançado, precisa ser o endereço em Settings › Device IP do LocalDevVPN (o padrão é 10.7.0.1). Se já for, desligue e ligue o LocalDevVPN de novo e tente outra vez.",
+    "This iPhone hung up on the connection as soon as it opened. From iOS 26.4 on it does that to lockdown pairing files, like this one, when they come through LocalDevVPN. Pair this iPhone with itself instead: tap “Regenerate” under Tools › Pairing, or tap Install, which pairs it first.":
+        "Este iPhone derrubou a conexão assim que ela abriu. A partir do iOS 26.4, ele faz isso com arquivos de pareamento lockdown, como este, quando chegam pelo LocalDevVPN. Em vez disso, pareie este iPhone consigo mesmo: toque em “Gerar de novo” em Ferramentas › Pareamento, ou toque em Instalar, que pareia primeiro.",
+    "This iPhone hung up on the connection as soon as it opened. Since iOS 26.4 it does that to lockdown pairing files, like this one, when they come through LocalDevVPN, so a new one of the same kind won't help. A remote pairing file still works: on a computer, open idevice_pair, choose “Remote pairing”, click “Create”, then “Save to file…”, and import the file under “Pairing file”.":
+        "Este iPhone derrubou a conexão assim que ela abriu. A partir do iOS 26.4, ele faz isso com arquivos de pareamento lockdown, como este, quando chegam pelo LocalDevVPN, então fazer outro do mesmo tipo não vai adiantar. Um arquivo de pareamento “Remote pairing” continua funcionando: num computador, abra o idevice_pair, escolha “Remote pairing”, clique em “Create” e depois em “Save to file…”, e importe o arquivo em “Arquivo de pareamento”.",
+    "This iPhone hung up on the connection: from iOS 26.4 on, it does that to lockdown pairing files like this one when they come through LocalDevVPN. See the steps above.":
+        "Este iPhone derrubou a conexão: a partir do iOS 26.4, ele faz isso com arquivos de pareamento lockdown como este quando chegam pelo LocalDevVPN. Veja as etapas acima.",
     "Pairing this iPhone needs it: SideInstaller advertises itself on the local network for Settings to find.":
         "Parear este iPhone depende disso: o SideInstaller se anuncia na rede local para os Ajustes o encontrarem.",
     "Connect to a Wi-Fi network. Pairing this iPhone needs it — SideInstaller has to be findable on the local network.":
@@ -788,6 +993,7 @@ let portugueseStrings: [String: String] = [
     "For the support, and for spotting the bugs that got fixed because of it.":
         "Pelo apoio e por apontar os erros que foram corrigidos por causa dele.",
     "For the Japanese translation.": "Pela tradução para o japonês.",
+    "For the Korean translation.": "Pela tradução para o coreano.",
 
     "Built with": "Feito com",
     "The open source work this app is built on:":
@@ -825,4 +1031,116 @@ let portugueseStrings: [String: String] = [
         "Este arquivo de pareamento não tem um registro RPPairing, o único tipo que o %@ lê.",
     "Runs Windows PC games on your iPhone. By Will Faust, GPL-3.0.":
         "Roda jogos de PC para Windows no seu iPhone. De Will Faust, GPL-3.0.",
+
+    // MARK: - App ID cost
+
+    "App IDs for this app": "App IDs deste app",
+    "Cost": "Custo",
+    "Left now": "Restam agora",
+    "Left after": "Restarão",
+    "New App IDs": "Novos App IDs",
+    "This Apple ID doesn't have enough App IDs left: this app needs %d, and %d are left. Each one counts for 7 days, so wait for some to expire or sign in with another Apple ID.":
+        "Este Apple ID não tem App IDs suficientes: este app precisa de %d e restam %d. Cada um conta por 7 dias, então espere alguns expirarem ou entre com outro Apple ID.",
+    "The next one frees up on %@.": "O próximo é liberado em %@.",
+    "Your Apple ID already has every App ID this app needs, so installing it uses none.":
+        "Seu Apple ID já tem todos os App IDs de que este app precisa, então instalá-lo não usa nenhum.",
+    "Signing registers one App ID for the app, and its extensions share it. It counts for 7 days.":
+        "A assinatura registra um único App ID para o app, compartilhado por suas extensões. Ele conta por 7 dias.",
+    "This Apple ID can register %d a week.":
+        "Este Apple ID pode registrar %d por semana.",
+
+    // MARK: - Links (sideinstaller://install, sideinstaller://pairingFile)
+
+    "Install from a link?": "Instalar a partir de um link?",
+    "Download and install": "Baixar e instalar",
+    "SideInstaller will download this .ipa, then sign it with your Apple ID and install it. Only go ahead if you trust where the link came from.":
+        "O SideInstaller vai baixar este .ipa, assiná-lo com seu Apple ID e instalá-lo. Só continue se você confia na origem do link.",
+    "It replaces %@, the custom .ipa you have now.": "Ele substitui %@, o .ipa personalizado que você tem agora.",
+    "Use SideStore's pairing file?": "Usar o arquivo de pareamento do SideStore?",
+    "Import this pairing file?": "Importar este arquivo de pareamento?",
+    "Import": "Importar",
+    "SideStore sent back the pairing file it has. SideInstaller will connect to this iPhone with it.":
+        "O SideStore devolveu o arquivo de pareamento que tem. O SideInstaller vai usá-lo para se conectar a este iPhone.",
+    "A link sent SideInstaller a pairing file. Only import it if you asked for one: SideInstaller will connect to this iPhone with it.":
+        "Um link enviou ao SideInstaller um arquivo de pareamento. Só importe se você pediu um: o SideInstaller vai usá-lo para se conectar a este iPhone.",
+    "It replaces %@.": "Ele substitui %@.",
+    "It replaces the pairing file in use now.": "Ele substitui o arquivo de pareamento em uso agora.",
+    "Get it from SideStore": "Pegar do SideStore",
+    "SideStore opens and sends back the pairing file it has.":
+        "O SideStore abre e devolve o arquivo de pareamento que tem.",
+    "SideStore isn't installed on this iPhone, so there's no pairing file to get from it.":
+        "O SideStore não está instalado neste iPhone, então não há arquivo de pareamento para pegar dele.",
+    "That install link has no .ipa in it. It needs ?url= followed by the https:// address the .ipa downloads from.":
+        "Esse link de instalação não tem nenhum .ipa. Ele precisa de ?url= seguido do endereço https:// de onde o .ipa é baixado.",
+    "That link was meant to carry a pairing file, but what it holds can't be read.":
+        "Esse link deveria trazer um arquivo de pareamento, mas o conteúdo não pode ser lido.",
+    "That link carries a file, but it isn't a pairing file.":
+        "Esse link traz um arquivo, mas não é um arquivo de pareamento.",
+
+    // MARK: - Report a problem
+
+    "Report a problem": "Relatar um problema",
+    "Report this problem": "Relatar este problema",
+    "Opens a GitHub issue with this app's details, its log and crash logs.":
+        "Abre uma issue no GitHub com os detalhes do app, o registro e os relatórios de falhas.",
+    "What happened?": "O que aconteceu?",
+    "What were you doing, and what went wrong?": "O que você estava fazendo e o que deu errado?",
+    "Say what you tapped, what you expected and what happened instead. English is best, but any language is fine.":
+        "Diga o que você tocou, o que esperava e o que aconteceu no lugar. Inglês é melhor, mas qualquer idioma serve.",
+    "Included": "Incluído",
+    "Device": "Dispositivo",
+    "App": "App",
+    "Stopped at": "Parou em",
+    "not connected": "não conectado",
+    "none": "nenhum",
+    "made on this iPhone": "criado neste iPhone",
+    "latest": "mais recente",
+    "custom server": "servidor personalizado",
+    "Auto, starts with %@": "Auto, começa por %@",
+    "Error": "Erro",
+    "Activity log": "Registro de atividade",
+    "%d lines": "%d linhas",
+    "Your Apple ID, device name, serial numbers and keys are taken out of the log first.":
+        "O Apple ID, o nome do dispositivo, os números de série e as chaves são removidos do registro antes.",
+    "Crash logs": "Relatórios de falhas",
+    "Looking for crash logs …": "Procurando relatórios de falhas …",
+    "Look for crash logs on this iPhone": "Procurar relatórios de falhas neste iPhone",
+    "Look again": "Procurar de novo",
+    "No crash logs from SideStore, LiveContainer or Madeira in the last %d days.":
+        "Nenhum relatório de falhas do SideStore, LiveContainer ou Madeira nos últimos %d dias.",
+    "iOS hands SideInstaller its own crashes the next time it opens. Crash logs from SideStore, LiveContainer and Madeira are read from this iPhone through LocalDevVPN.":
+        "O iOS entrega ao SideInstaller as próprias falhas na próxima vez que ele abre. Os relatórios de falhas do SideStore, LiveContainer e Madeira são lidos deste iPhone pelo LocalDevVPN.",
+    "Open a GitHub issue": "Abrir uma issue no GitHub",
+    "Share the report": "Compartilhar o relatório",
+    "Preview the report": "Ver o relatório",
+    "Report": "Relatório",
+    "The report is saved in Files › On My iPhone › SideInstaller › Reports. On GitHub, attach it with “Paste, drop, or click to add files” below the text, then submit the issue.":
+        "O relatório fica salvo em Arquivos › No Meu iPhone › SideInstaller › Reports. No GitHub, anexe-o com “Paste, drop, or click to add files” abaixo do texto e envie a issue.",
+    "Describe the problem above first.": "Descreva o problema acima primeiro.",
+    "Couldn't save the report: %@": "Não foi possível salvar o relatório: %@",
+
+    // MARK: - Official download check
+
+    "Did you download SideInstaller from sideinstaller.net?":
+        "Você baixou o SideInstaller de sideinstaller.net?",
+    "SideInstaller is open source, so anyone can publish a modified copy that steals the Apple ID typed into it. Only sideinstaller.net is official.":
+        "O SideInstaller é de código aberto, então qualquer pessoa pode publicar uma cópia modificada que rouba o Apple ID digitado nela. Somente sideinstaller.net é oficial.",
+    "Yes, from sideinstaller.net":
+        "Sim, de sideinstaller.net",
+    "No, or I'm not sure":
+        "Não, ou não tenho certeza",
+    "Don't sign in with this copy":
+        "Não entre com esta cópia",
+    "Copies from anywhere other than sideinstaller.net are unofficial and may have been changed to steal your Apple ID. Delete this one and install SideInstaller from sideinstaller.net, then sign in there.":
+        "Cópias de qualquer lugar que não seja sideinstaller.net não são oficiais e podem ter sido alteradas para roubar seu Apple ID. Apague esta, instale o SideInstaller de sideinstaller.net e entre por lá.",
+    "Open sideinstaller.net":
+        "Abrir sideinstaller.net",
+    "Back":
+        "Voltar",
+    "I understand the risks":
+        "Eu entendo os riscos",
+    "Use an unofficial copy?":
+        "Usar uma cópia não oficial?",
+    "If this copy was changed, it can send your Apple ID and password to someone else. Continue only if you trust where it came from.":
+        "Se esta cópia foi alterada, ela pode enviar seu Apple ID e sua senha para outra pessoa. Continue apenas se você confia na origem dela.",
 ]

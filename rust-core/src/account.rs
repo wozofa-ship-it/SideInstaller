@@ -8,12 +8,14 @@
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use idevice::remote_pairing::RpPairingFile;
 use isideload::{
     anisette::remote_v3::{state::AnisetteState, state_key_for},
     auth::apple_account::{TwoFactorCallbackParams, TwoFactorCallbackResponse},
+    dev::app_ids::{AppIdsApi, ListAppIdsResponse},
     sideload::{
         builder::MaxCertsBehavior, cert_identity::CertificateIdentity, sideloader::Sideloader,
         SideloaderBuilder, TeamSelection,
@@ -121,9 +123,8 @@ impl From<TwoFactorAnswer> for TwoFactorCallbackResponse {
 pub struct SignSession {
     rt: tokio::runtime::Runtime,
     sideloader: Sideloader,
-    /// Stored because `Sideloader` doesn't expose them; `account_config` needs
-    /// both to look up the signing identity the same way `sign_app` does.
-    machine_name: String,
+    /// Stored because `Sideloader` doesn't expose it; `account_config` needs it
+    /// to look up the signing identity the same way `sign_app` does.
     storage_dir: PathBuf,
     /// The anisette server signed in through. Each server family keeps its
     /// own identity, and the hand-offs carry the one this session's token
@@ -289,7 +290,6 @@ pub unsafe fn apple_signin(
             let session = Box::new(SignSession {
                 rt,
                 sideloader,
-                machine_name,
                 storage_dir: PathBuf::from(&storage_dir),
                 anisette_url,
             });
@@ -465,7 +465,6 @@ pub unsafe fn account_config(
     let session = &mut *session;
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let machine_name = session.machine_name.clone();
         let storage = FsStorage::new(session.storage_dir.clone());
 
         // SideStore wants the same two values isideload hands the anisette
@@ -488,9 +487,8 @@ pub unsafe fn account_config(
                 .map_err(|e| format!("get_team: {}", report_text(&e)))?;
             let email = session.sideloader.get_email().to_string();
 
-            tracing::info!("Looking up the '{machine_name}' certificate to hand over");
+            tracing::info!("Looking up the signing certificate to hand over");
             let identity = CertificateIdentity::retrieve_existing(
-                &machine_name,
                 &email,
                 session.sideloader.get_dev_session(),
                 &team,
@@ -499,10 +497,9 @@ pub unsafe fn account_config(
             .await
             .map_err(|e| format!("certificate lookup failed: {}", report_text(&e)))?
             .ok_or_else(|| {
-                format!(
-                    "no '{machine_name}' certificate on this Apple ID yet — install \
-                     an app first, which is what creates it"
-                )
+                "no certificate for SideInstaller's signing key on this Apple ID yet — \
+                 install an app first, which is what creates it"
+                    .to_string()
             })?;
 
             // The machine id is the password AltStore-family apps expect a
@@ -616,6 +613,112 @@ pub unsafe fn signing_account(
         }
         Err(_) => {
             *out_error = cstr("panic while reading the signing account");
+            2
+        }
+    }
+}
+
+/// What signing an app would cost in App IDs, for the confirmation before it.
+#[derive(Serialize, Debug, PartialEq)]
+struct AppIdQuota {
+    /// The identifiers `sign_app` would register: the main app's, unless the
+    /// team has it already. Extensions don't get one.
+    new_ids: Vec<String>,
+    /// How many more Apple says the team can register now. None when Apple
+    /// doesn't say or reports a negative number (`register_app_ids` skips its
+    /// own check then too).
+    available: Option<u64>,
+    /// The team's limit, 10 for a free Apple ID; None when Apple doesn't say.
+    max: Option<u64>,
+    /// Unix seconds when the soonest of the team's App IDs expires, freeing
+    /// its slot.
+    next_expiry: Option<u64>,
+}
+
+/// The quota for signing an app whose main bundle ID is `bundle_id` (as the
+/// IPA has it) against the team's App IDs as listed. `sign_app` registers one
+/// App ID, the bundle ID suffixed by the team ID (`Application::update_bundle_id`);
+/// extensions are signed with the main app's profile and get none.
+fn app_id_quota(bundle_id: &str, team_id: &str, listing: &ListAppIdsResponse) -> AppIdQuota {
+    let main_id = format!("{bundle_id}.{team_id}");
+    let new_ids = if listing.app_ids.iter().any(|a| a.identifier == main_id) {
+        Vec::new()
+    } else {
+        vec![main_id]
+    };
+    let next_expiry = listing
+        .app_ids
+        .iter()
+        .filter_map(|a| a.expiration_date)
+        .filter_map(|d| SystemTime::from(d).duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .min();
+    AppIdQuota {
+        new_ids,
+        available: listing.available_quantity.and_then(|n| u64::try_from(n).ok()),
+        max: listing.max_quantity,
+        next_expiry,
+    }
+}
+
+/// Set `*out_json` to the [`AppIdQuota`] for signing an app whose main bundle
+/// ID is `bundle_id`. Lists the team's App IDs, as signing does first;
+/// registers nothing.
+///
+/// # Safety
+/// `session` must be a valid pointer from `apple_signin`; out pointers valid.
+pub unsafe fn appid_quota(
+    session: *mut SignSession,
+    bundle_id: *const c_char,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    if session.is_null() {
+        *out_error = cstr("null session");
+        return 2;
+    }
+    let session = &mut *session;
+    let bundle_id = opt(bundle_id, "").trim().to_string();
+    if bundle_id.is_empty() {
+        *out_error = cstr("no bundle ID");
+        return 2;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        session.rt.block_on(async {
+            let team = session
+                .sideloader
+                .get_team()
+                .await
+                .map_err(|e| format!("get_team: {}", report_text(&e)))?;
+            let listing = session
+                .sideloader
+                .get_dev_session()
+                .list_app_ids(&team, None)
+                .await
+                .map_err(|e| format!("list app IDs failed: {}", report_text(&e)))?;
+            let quota = app_id_quota(&bundle_id, &team.team_id, &listing);
+            tracing::info!(
+                "App IDs: {} new for this app, {:?} of {:?} available",
+                quota.new_ids.len(),
+                quota.available,
+                quota.max
+            );
+            serde_json::to_string(&quota).map_err(|e| format!("serialize the App ID quota: {e}"))
+        })
+    }));
+
+    match result {
+        Ok(Ok(json)) => {
+            *out_json = cstr(json);
+            0
+        }
+        Ok(Err(e)) => {
+            *out_error = cstr(e);
+            1
+        }
+        Err(_) => {
+            *out_error = cstr("panic while checking App IDs");
             2
         }
     }
@@ -854,5 +957,75 @@ mod signing_account_tests {
                 "anisette_adi_pb": "CQkJ",
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod app_id_quota_tests {
+    use super::*;
+    use isideload::dev::app_ids::AppId;
+    use std::time::Duration;
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn app_id(identifier: &str, expires: Option<u64>) -> AppId {
+        AppId {
+            app_id_id: format!("ID-{identifier}"),
+            identifier: identifier.into(),
+            name: identifier.into(),
+            features: plist::Dictionary::new(),
+            expiration_date: expires
+                .map(|secs| plist::Date::from(UNIX_EPOCH + Duration::from_secs(secs))),
+        }
+    }
+
+    fn listing(app_ids: Vec<AppId>, available: Option<i64>) -> ListAppIdsResponse {
+        ListAppIdsResponse { app_ids, max_quantity: Some(10), available_quantity: available }
+    }
+
+    #[test]
+    fn only_the_main_app_needs_an_app_id() {
+        let quota = app_id_quota(
+            "com.example.App",
+            "TEAM123456",
+            &listing(vec![app_id("com.other.Thing.TEAM123456", Some(1_800_000_100))], Some(8)),
+        );
+        assert_eq!(
+            quota,
+            AppIdQuota {
+                new_ids: ids(&["com.example.App.TEAM123456"]),
+                available: Some(8),
+                max: Some(10),
+                next_expiry: Some(1_800_000_100),
+            }
+        );
+    }
+
+    #[test]
+    fn an_app_id_the_team_has_costs_nothing() {
+        let quota = app_id_quota(
+            "com.example.App",
+            "TEAM123456",
+            &listing(
+                vec![
+                    app_id("com.example.App.TEAM123456", Some(1_800_000_500)),
+                    app_id("com.other.Thing.TEAM123456", Some(1_800_000_100)),
+                ],
+                Some(8),
+            ),
+        );
+        assert!(quota.new_ids.is_empty());
+        assert_eq!(quota.available, Some(8));
+        assert_eq!(quota.next_expiry, Some(1_800_000_100));
+    }
+
+    #[test]
+    fn a_negative_quota_is_unknown() {
+        let quota = app_id_quota("a.b", "T", &listing(vec![], Some(-2)));
+        assert_eq!(quota.available, None);
+        assert_eq!(quota.new_ids, ids(&["a.b.T"]));
+        assert_eq!(quota.next_expiry, None);
     }
 }

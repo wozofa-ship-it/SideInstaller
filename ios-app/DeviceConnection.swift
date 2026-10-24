@@ -39,13 +39,22 @@ final class DeviceConnection {
         let advice: String
         /// The unclassified FFI error, for the debug log — never presented.
         let underlying: FFIError
+        /// True when this iPhone's lockdownd hung up on the lockdown route, as
+        /// it does from iOS 26.4 on (`Engine.lockdownWorksOverLoopback`): no
+        /// lockdown record opens a tunnel through the loopback there, only an
+        /// RPPairing one.
+        var lockdownRouteClosed = false
         var description: String { advice }
         var errorDescription: String? { advice }
 
         /// Whether re-pairing might fix this failure. False for route/network
         /// failures, where the pairing file isn't the problem.
         var repairingCouldHelp: Bool {
-            kind != TunnelFailureHostsRefused
+            // A new lockdown record would be hung up on just the same. Pairing
+            // this iPhone with itself makes an RPPairing record instead, which
+            // only iOS 27 can do.
+            if lockdownRouteClosed { return Engine.deviceCanSelfPair }
+            return kind != TunnelFailureHostsRefused
                 && kind != TunnelFailureTimeout
                 && kind != TunnelFailureRsdUnreachable
         }
@@ -146,8 +155,9 @@ final class DeviceConnection {
             }
             return """
                 Couldn't reach the device at \(deviceIP):\(Self.rsdPort) at all. The \
-                loopback VPN is most likely off, or is handing out a different address \
-                than the one configured here.
+                loopback VPN is most likely off, or Device IP isn't the address it \
+                carries: in LocalDevVPN that's the one under Settings › Device IP \
+                (10.7.0.1 by default), not the “Connected to” address on its main screen.
                 """
         default:
             return """
@@ -164,24 +174,75 @@ final class DeviceConnection {
         return message.contains("connection refused") || message.contains("os error 61")
     }
 
+    /// True when iOS itself refused the connection (EPERM), before anything
+    /// left this iPhone. It does that for the iPhone's own addresses: loopback,
+    /// its Wi-Fi address, and a loopback VPN's own end of the tunnel.
+    static func wasBlockedLocally(_ error: Error) -> Bool {
+        let raw = (error as? FFIError) ?? (error as? TunnelError)?.underlying
+        guard let message = raw?.message.lowercased() else { return false }
+        return message.contains("operation not permitted") || message.contains("os error 1)")
+    }
+
+    /// `error` as a tunnel failure iOS refused itself, with advice instead of
+    /// the raw errno. Reported as unreachable, so nothing tries to pair again:
+    /// a new pairing file would be refused the same way.
+    private func blockedLocally(_ error: Error, deviceIP: String) -> TunnelError {
+        let raw = (error as? FFIError) ?? (error as? TunnelError)?.underlying
+            ?? fail(String(describing: error))
+        return TunnelError(
+            kind: TunnelFailureRsdUnreachable,
+            advice: L("iOS refused the connection to %@ on this iPhone, before anything was sent. It does that for this iPhone's own addresses, like the “Connected to” address on LocalDevVPN's main screen. Device IP, in Settings › Advanced, has to be the address under LocalDevVPN's Settings › Device IP: 10.7.0.1 by default. If it already is, turn LocalDevVPN off and on again, then try again.",
+                      deviceIP),
+            underlying: raw)
+    }
+
+    /// True when lockdownd took the connection and then hung up: reset it,
+    /// closed it, or left the next request to a dead socket. A reset on the
+    /// first request reads `Socket(Os { code: 32, kind: BrokenPipe, … })`: the
+    /// first request is the `GetValue` that `start_session` doesn't check, so
+    /// `StartSession` is the write that fails. A plain close reads
+    /// `Socket(Custom { kind: UnexpectedEof, error: "early eof" })`.
+    static func lockdownHungUp(_ error: Error) -> Bool {
+        let raw = (error as? FFIError) ?? (error as? TunnelError)?.underlying
+        guard let message = raw?.message.lowercased() else { return false }
+        return ["brokenpipe", "broken pipe", "connectionreset", "connection reset",
+                "connectionaborted", "unexpectedeof", "early eof"]
+            .contains { message.contains($0) }
+    }
+
+    /// `error`, this iPhone's lockdownd hanging up on the lockdown route from
+    /// iOS 26.4 on, as a tunnel failure with advice instead of the raw errno.
+    /// It says to use an RPPairing record: made on a computer below iOS 27,
+    /// or by pairing this iPhone with itself from 27 on.
+    private func lockdownClosed(_ error: Error) -> TunnelError {
+        let raw = (error as? FFIError) ?? fail(String(describing: error))
+        let advice = Engine.deviceCanSelfPair
+            ? L("This iPhone hung up on the connection as soon as it opened. From iOS 26.4 on it does that to lockdown pairing files, like this one, when they come through LocalDevVPN. Pair this iPhone with itself instead: tap “Regenerate” under Tools › Pairing, or tap Install, which pairs it first.")
+            : L("This iPhone hung up on the connection as soon as it opened. Since iOS 26.4 it does that to lockdown pairing files, like this one, when they come through LocalDevVPN, so a new one of the same kind won't help. A remote pairing file still works: on a computer, open idevice_pair, choose “Remote pairing”, click “Create”, then “Save to file…”, and import the file under “Pairing file”.")
+        return TunnelError(kind: TunnelFailureOther, advice: ErrorHelp.explained(advice),
+                           underlying: raw, lockdownRouteClosed: true)
+    }
+
     // MARK: Connect / disconnect
 
     /// Opens the loopback tunnel and RSD handshake using the routes the pairing
     /// file supports. Both routes produce the same adapter + handshake:
     ///
     /// - **RPPairing** (`tunnel_create_rppairing`): connects to the device's
-    ///   remote-pairing listener with the Ed25519 record from on-device pairing
-    ///   (iOS 27+).
+    ///   remote-pairing listener with an Ed25519 record, from on-device pairing
+    ///   (iOS 27+) or made on a computer (idevice_pair's “Remote pairing”,
+    ///   iLoader) for iOS 17.4+.
     /// - **CoreDeviceProxy** (`tunnel_create_usb`): opens a lockdown session with
-    ///   a classic pair record and starts CoreDeviceProxy. Works on iOS 17+ and
-    ///   is the only route for pairing files made on a computer.
+    ///   a classic pair record and starts CoreDeviceProxy. Works on iOS 17 to
+    ///   26.3; from 26.4 on, lockdownd hangs up on it through the loopback VPN
+    ///   (`Engine.lockdownWorksOverLoopback`).
     ///
     /// With both records, the route most likely to work on this iOS goes first.
     /// With only an RPPairing record, a lockdown record is created as a last
     /// resort and CoreDeviceProxy is tried — unless `allowLockdownMinting` is
     /// false, as it must be for another iPhone's file (Side by Side): minting
     /// stores this iPhone's own record and falls back to its own lockdownd on
-    /// 127.0.0.1. Never on iOS 27, where lockdownd won't pair
+    /// 127.0.0.1. Never from iOS 26.4 on, where no lockdown record gets through
     /// (`Engine.canMintLockdownRecord`).
     func connect(deviceIP: String, pairingFilePath: String, hostname: String = "SideInstaller",
                  allowLockdownMinting: Bool = true) throws {
@@ -189,18 +250,23 @@ final class DeviceConnection {
         guard kind.isUsable else {
             throw fail("\((pairingFilePath as NSString).lastPathComponent) isn't a pairing file: it carries neither a remote-pairing key pair nor a lockdown pair record.")
         }
-        // Prefer RPPairing on iOS 27+, lockdown otherwise. With one record, use
-        // its route only.
-        let remoteFirst = Engine.deviceCanSelfPair
+        // Prefer RPPairing where lockdownd hangs up on the loopback (iOS 26.4
+        // and later, so every iOS that pairs itself), lockdown otherwise. With
+        // one record, use its route only.
+        let remoteFirst = !Engine.lockdownWorksOverLoopback
         let routes: [Bool] = (kind.hasRemotePairing && kind.hasLockdown)
             ? (remoteFirst ? [true, false] : [false, true])
             : [kind.hasRemotePairing]
 
         var firstFailure: Error?
         // An RPPairing-only file can still fall back to creating a lockdown
-        // record (see below), except on iOS 27, where lockdownd won't pair.
+        // record (see below), except from iOS 26.4 on.
         let canMintLockdownRecord = !kind.hasLockdown && allowLockdownMinting
             && Engine.canMintLockdownRecord
+        // Only this iPhone's own lockdownd is known to hang up on the loopback,
+        // and only from iOS 26.4. Another iPhone's file (Side by Side, the one
+        // caller that can't mint) reaches an iOS this one knows nothing about.
+        let lockdownClosedHere = allowLockdownMinting && !Engine.lockdownWorksOverLoopback
         for (index, useRemotePairing) in routes.enumerated() {
             do {
                 if useRemotePairing {
@@ -215,7 +281,10 @@ final class DeviceConnection {
                 return
             } catch {
                 // Report what the preferred route said, not the fallback's noise.
-                if firstFailure == nil { firstFailure = error }
+                if firstFailure == nil {
+                    firstFailure = !useRemotePairing && lockdownClosedHere && Self.lockdownHungUp(error)
+                        ? lockdownClosed(error) : error
+                }
                 let more = (index + 1 < routes.count || canMintLockdownRecord)
                     ? " Trying the other route…" : ""
                 Engine.shared.log("\(useRemotePairing ? "Remote-pairing" : "Lockdown") tunnel didn't come up (\(error)).\(more)")
@@ -226,7 +295,7 @@ final class DeviceConnection {
         // tunnel listener only binds to the Wi-Fi interface, and the device
         // closes a tunnel to itself right after the TLS handshake.
         // CoreDeviceProxy needs no inbound listener, only a classic pair record,
-        // which lockdownd can create directly on its own port (before iOS 27).
+        // which lockdownd can create directly on its own port (before iOS 26.4).
         if canMintLockdownRecord {
             do {
                 try connectByMintingLockdownRecord(deviceIP: deviceIP, hostname: hostname)
@@ -235,7 +304,11 @@ final class DeviceConnection {
                 Engine.shared.log("Pairing with lockdown didn't open a tunnel either (\(error)).")
             }
         }
-        throw firstFailure ?? fail("no tunnel route available for this pairing file")
+        guard let firstFailure else { throw fail("no tunnel route available for this pairing file") }
+        if Self.wasBlockedLocally(firstFailure) {
+            throw blockedLocally(firstFailure, deviceIP: deviceIP)
+        }
+        throw firstFailure
     }
 
     /// The RPPairing route: straight to the device's remote-pairing listener.
@@ -304,6 +377,28 @@ final class DeviceConnection {
     /// record is needed, so imported pairing files work.
     private func connectCoreDeviceProxy(deviceIP: String, pairingFilePath: String,
                                         hostname: String) throws {
+        let provider = try lockdownProvider(deviceIP: deviceIP,
+                                            pairingFilePath: pairingFilePath,
+                                            hostname: hostname)
+        defer { idevice_provider_free(provider) }
+
+        var newAdapter: OpaquePointer?
+        var newHandshake: OpaquePointer?
+        try check(tunnel_create_usb(provider, &newAdapter, &newHandshake),
+                  "CoreDeviceProxy tunnel failed (is a loopback VPN connected, device IP \(deviceIP), and is this pairing file this iPhone's?)")
+        guard newAdapter != nil, newHandshake != nil else {
+            throw fail("tunnel created without valid handles")
+        }
+        disconnect()
+        adapter = newAdapter
+        handshake = newHandshake
+    }
+
+    /// A provider that reaches lockdownd at `deviceIP` with the classic pair
+    /// record in `pairingFilePath`. The caller frees it with
+    /// `idevice_provider_free`.
+    private func lockdownProvider(deviceIP: String, pairingFilePath: String,
+                                  hostname: String) throws -> OpaquePointer {
         var pf: OpaquePointer?
         try pairingFilePath.withCString { p in
             try check(idevice_pairing_file_read(p, &pf),
@@ -334,18 +429,7 @@ final class DeviceConnection {
         if providerError == nil { pairingFileOwned = false }
         try check(providerError, "idevice_tcp_provider_new failed")
         guard let provider else { throw fail("lockdown provider was null") }
-        defer { idevice_provider_free(provider) }
-
-        var newAdapter: OpaquePointer?
-        var newHandshake: OpaquePointer?
-        try check(tunnel_create_usb(provider, &newAdapter, &newHandshake),
-                  "CoreDeviceProxy tunnel failed (is a loopback VPN connected, device IP \(deviceIP), and is this pairing file this iPhone's?)")
-        guard newAdapter != nil, newHandshake != nil else {
-            throw fail("tunnel created without valid handles")
-        }
-        disconnect()
-        adapter = newAdapter
-        handshake = newHandshake
+        return provider
     }
 
     /// CoreDeviceProxy route for an RPPairing-only file, using a lockdown pair
@@ -1461,6 +1545,126 @@ final class DeviceConnection {
         plist_get_uint_val(value, &chipID)
         guard chipID != 0 else { throw fail("device reported an empty UniqueChipID") }
         return chipID
+    }
+
+    // MARK: Developer Mode (AMFI)
+
+    /// What can be asked of AMFI about Developer Mode.
+    enum DeveloperModeRequest {
+        /// Shows Developer Mode under Settings › Privacy & Security.
+        case reveal
+        /// Turns Developer Mode on. iOS restarts right away, then asks to
+        /// confirm after unlock. Refused while the device has a passcode.
+        case enable
+    }
+
+    /// Whether Developer Mode is on, read from lockdownd's AMFI domain (as
+    /// pymobiledevice3 does). Nil when the device gives no answer.
+    func developerModeEnabled() throws -> Bool? {
+        guard let adapter, let handshake else { throw fail("not connected") }
+        var client: OpaquePointer?
+        try check(lockdownd_connect_rsd(adapter, handshake, &client), "lockdownd_connect_rsd failed")
+        guard let client else { throw fail("lockdownd client was null") }
+        defer { lockdownd_client_free(client) }
+
+        var value: plist_t?
+        try check("DeveloperModeStatus".withCString { key in
+            "com.apple.security.mac.amfi".withCString { domain in
+                lockdownd_get_value(client, key, domain, &value)
+            }
+        }, "lockdownd_get_value(DeveloperModeStatus) failed")
+        guard let value else { return nil }
+        defer { plist_free(value) }
+        guard plist_get_node_type(value) == PLIST_BOOLEAN else { return nil }
+        var enabled: UInt8 = 0
+        plist_get_bool_val(value, &enabled)
+        return enabled != 0
+    }
+
+    /// Sends `request` to AMFI's RSD shim over the open tunnel.
+    func requestDeveloperMode(_ request: DeveloperModeRequest) throws {
+        guard let adapter, let handshake else { throw fail("not connected") }
+        var client: OpaquePointer?
+        try check(amfi_connect_rsd(adapter, handshake, &client), "amfi_connect_rsd failed")
+        guard let client else { throw fail("AMFI client was null") }
+        defer { amfi_client_free(client) }
+        try send(request, to: client)
+    }
+
+    /// Sends `request` through lockdownd with the classic pair record, without
+    /// a tunnel. Xcode and pymobiledevice3 reach AMFI this way, so it may work
+    /// where the tunnel itself won't open without Developer Mode.
+    func requestDeveloperModeOverLockdown(_ request: DeveloperModeRequest, deviceIP: String,
+                                          pairingFilePath: String,
+                                          hostname: String = "SideInstaller") throws {
+        let provider = try lockdownProvider(deviceIP: deviceIP,
+                                            pairingFilePath: pairingFilePath,
+                                            hostname: hostname)
+        defer { idevice_provider_free(provider) }
+        var client: OpaquePointer?
+        try check(amfi_connect(provider, &client), "amfi_connect failed")
+        guard let client else { throw fail("AMFI client was null") }
+        defer { amfi_client_free(client) }
+        try send(request, to: client)
+    }
+
+    private func send(_ request: DeveloperModeRequest, to client: OpaquePointer) throws {
+        switch request {
+        case .reveal:
+            try check(amfi_reveal_developer_mode_option_in_ui(client),
+                      "amfi_reveal_developer_mode_option_in_ui failed")
+        case .enable:
+            try check(amfi_enable_developer_mode(client), "amfi_enable_developer_mode failed")
+        }
+    }
+
+    // MARK: Crash reports
+
+    /// The crash reports iOS keeps for Analytics Data (its CrashReporter folder
+    /// and the Retired folder older ones move to), read through
+    /// crashreportcopymobile's RSD shim. `select` picks which of the listed
+    /// paths to pull. Nothing is removed from the device.
+    func crashReports(select: ([String]) -> [String]) throws -> [(path: String, data: Data)] {
+        guard let adapter, let handshake else { throw fail("not connected") }
+        var client: OpaquePointer?
+        try check(crash_report_client_connect_rsd(adapter, handshake, &client),
+                  "crash_report_client_connect_rsd failed")
+        guard let client else { throw fail("crash report client was null") }
+        defer { crash_report_client_free(client) }
+
+        var paths = try crashReportNames(client, in: nil)
+        // A device with no Retired folder just has nothing retired yet.
+        if let retired = try? crashReportNames(client, in: "Retired") {
+            paths += retired.map { "Retired/\($0)" }
+        }
+        return try select(paths).map { path in
+            var bytes: UnsafeMutablePointer<UInt8>?
+            var length = 0
+            try check(path.withCString { crash_report_client_pull(client, $0, &bytes, &length) },
+                      "crash_report_client_pull(\(path)) failed")
+            defer { if let bytes { idevice_data_free(bytes, UInt(length)) } }
+            return (path, bytes.map { Data(bytes: $0, count: length) } ?? Data())
+        }
+    }
+
+    /// One folder's entries. The array and its strings are freed as idevice's
+    /// own C++ wrapper does: each string through idevice, the array with free.
+    private func crashReportNames(_ client: OpaquePointer, in directory: String?) throws -> [String] {
+        var entries: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+        var count = 0
+        let error = directory.map { dir in
+            dir.withCString { crash_report_client_ls(client, $0, &entries, &count) }
+        } ?? crash_report_client_ls(client, nil, &entries, &count)
+        try check(error, "crash_report_client_ls(\(directory ?? "/")) failed")
+        guard let entries else { return [] }
+        defer { free(entries) }
+        var names: [String] = []
+        for i in 0..<count {
+            guard let entry = entries[i] else { continue }
+            names.append(String(cString: entry))
+            idevice_string_free(entry)
+        }
+        return names.filter { $0 != "." && $0 != ".." }
     }
 
     // MARK: Location simulation (DVT over RSD)

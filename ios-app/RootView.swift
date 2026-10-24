@@ -8,12 +8,10 @@ struct RootView: View {
     /// The tabs and their backdrop level. The selection is tracked so a tab
     /// switch can animate `Backdrop` to the new level.
     private enum Page: Hashable {
-        case cert, files, install, tools, about
+        case install, tools, about
 
         var wash: Backdrop.Level {
             switch self {
-            case .cert:    .bright
-            case .files:   .bright
             case .install: .bright
             case .tools:   .dark
             // Same as Install, so switching between them doesn't change the backdrop.
@@ -69,11 +67,8 @@ struct RootView: View {
     @StateObject private var pairingManager = PairingManager()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var entitlementsManager = EntitlementsManager()
-    /// 与快捷指令共用同一个实例（SideloadedAppsManager.shared），后台续签状态界面可见。
-    @ObservedObject private var appsManager = SideloadedAppsManager.shared
+    @StateObject private var appsManager = SideloadedAppsManager()
     @StateObject private var sideBySideManager = SideBySideManager()
-    /// 证书页与文件页之间传递待签 IPA。
-    @StateObject private var certWorkspace = CertWorkspace()
     /// The last two-factor prompt shown, so the sheet keeps its content while it
     /// slides away after the sign-in clears it.
     @State private var shownTwoFactor: TwoFactorPhase?
@@ -82,12 +77,6 @@ struct RootView: View {
     var body: some View {
         // `.tabItem`/`.tag` rather than iOS 18's `Tab`, to keep iOS 17.
         TabView(selection: $page) {
-            CertTabView()
-                .tabItem { Label(L("证书"), systemImage: "checkmark.seal.fill") }
-                .tag(Page.cert)
-            FilesTabView(onGoCert: { page = .cert })
-                .tabItem { Label(L("文件"), systemImage: "folder.fill") }
-                .tag(Page.files)
             ContentView()
                 .tabItem { Label(L("Install"), systemImage: "square.and.arrow.down") }
                 .tag(Page.install)
@@ -103,9 +92,20 @@ struct RootView: View {
                 .tabItem { Label(L("About"), systemImage: "info.circle") }
                 .tag(Page.about)
         }
-        .environmentObject(certWorkspace)
         // Animate the backdrop to the new tab's level.
         .onChange(of: page) { _, page in Backdrop.settle(on: page.wash) }
+        // A link's install or pairing file ends up on the Install tab, so its
+        // popup comes up over that.
+        .onChange(of: engine.pendingLink) { _, link in
+            if link != nil { page = .install }
+        }
+        // A certificate a link brought is checked and imported by the same
+        // manager as the Certificates page.
+        .onChange(of: engine.certificateToImport) { _, request in
+            guard let request else { return }
+            engine.certificateToImport = nil
+            certManager.importCertificate(request)
+        }
         // Over the tab bar too, so the whole app dims behind the popups.
         .popupStack(entries, onBackdropTap: backdropTap) { entry in
             card(for: entry)
@@ -122,6 +122,7 @@ struct RootView: View {
             sideBySideManager.signOut()
         }
         .tint(Theme.accent)
+        .preferredColorScheme(.dark)
         // A swipe down is a cancel; the sign-in closing it is not.
         .sheet(isPresented: Binding(
             get: { engine.twoFactor != nil },
@@ -201,6 +202,9 @@ struct RootView: View {
             .installStopped
         case .install(.success), .install(.liveContainerImport):
             .installFinished
+        // Up on its own, waiting for the go-ahead to sign, or to act on a link.
+        case .install(.appIDCost), .install(.link):
+            nil
         case .sideBySide(.pairingCode), .sideBySide(.pairInSettings):
             .sideBySidePairing
         case .pairing(.pairingCode), .pairing(.pairInSettings):
@@ -329,7 +333,7 @@ struct TwoFactorSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                if let error = prompt.lastError {
+                if let error = prompt.shownError {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -527,6 +531,7 @@ struct ToolsView: View {
                 // No bottom padding: the tab bar's inset already clears the last
                 // row, and the extra 20pt would make a page that fits scroll.
                 .padding([.horizontal, .top], 20)
+                .pageColumn()
             }
             // Still unless the rows don't all fit on the screen.
             .scrollBounceBehavior(.basedOnSize)

@@ -162,6 +162,25 @@ with no migration, so upgrading users silently land on those defaults. Two thing
   suffix. Untreated, that string failed `ipv4Value`, fell through to the broad
   tunnel-name check — which iOS's own always-up `utun` satisfies — and reported a tunnel
   that wasn't there, before failing much later in `inet_pton`.
+- Its **main screen shows the wrong address to copy**: the status line is
+  `connected_to_ip` filled with `TunnelIfaceIP`, i.e. “Connected to 10.7.1.1/32”, this
+  iPhone's own end. Only its Settings label the peer (“Device IP 10.7.0.1/32”). Users
+  copy the status line into our Device IP, and iOS answers an app's `connect` to any of
+  the iPhone's own addresses with **EPERM** at once (`Socket(Os { code: 1, kind:
+  PermissionDenied })`, as with `127.0.0.1` and the Wi-Fi address in
+  [iOS 27: lockdownd won't pair on-device](#ios-27-lockdownd-wont-pair-on-device-over-any-route)).
+  `Engine.deviceIPIsUsable` runs before every tunnel use (Install,
+  `ensureNetwork`, `ensurePairingConnection`): when the tunnel carries 10.7.0.1 it switches
+  Device IP back to it, otherwise it stops with the address to use.
+  `DeviceConnection.connect` turns any remaining EPERM into a `TunnelError` (kind
+  `RsdUnreachable`, so nothing re-pairs) with plain advice. Device-tested 2026-10-21
+  (iPhone 16, iOS 27, LocalDevVPN up as `utun6` = 10.7.1.1/32): a raw `connect` to
+  10.7.1.1:62078 or 127.0.0.1:62078 fails with EPERM in 0 ms, while 10.7.0.1:62078
+  connects in 1 ms; with Device IP set to 10.7.1.1 the Pairing scan switched to 10.7.0.1
+  and found its apps. The RPPairing route behaves differently on the own address:
+  10.7.1.1:49152 accepts, then resets (ECONNRESET), which the Rust side classifies as
+  `PairVerify` — “The device rejected this pairing file … pair again”, wrong advice that
+  would also make an install re-pair. Another reason the check runs before any dial.
 
 Two further consequences of the shape itself:
 
@@ -407,7 +426,7 @@ arrives in the content state, already translated, since the extension has neithe
 the tables nor the language setting.
 
 An extension needs an application-identifier of its own, under the app's.
-`scripts/sign_with_all_certs.sh` therefore signs it only under a wildcard profile
+`scripts/sign_with_all_certs.sh` (in FrizzleM/SideInstaller-Signed) therefore signs it only under a wildcard profile
 (`TEAM.*`), renamed to sit under the app's new bundle id; under an explicit
 profile, which covers one id, it removes `PlugIns/`. Every certificate in the pool
 on 2026-10-11 had an explicit profile, so none of those builds carry the
@@ -436,6 +455,85 @@ Settings, one delivered notification going to none on return, and no prompt on
 the second run; the build with the extension stayed at "not determined"
 throughout. Not verified: a real pairing on a device, an install of a build
 signed through the wildcard path, and a refused prompt.
+
+#### Install progress outside the app
+
+A one-click run left the app's foreground and was suspended within seconds:
+nothing kept it going, and nothing showed where it was. `InstallActivity` does
+both now, started by `runOneClick` and told how the run ended.
+
+**iOS 26 and later: `BGContinuedProcessingTask`.** The run is submitted as one,
+which keeps the app running in the background and has iOS draw the title,
+subtitle and progress in a Live Activity of its own (with a stop button). The
+title is "Installing <build>", the subtitle the checklist's current step (or, while
+the run needs the user, what it needs and what to do; see below), and the progress
+the Install tab's percentage out of 1000 units. Info.plist permits
+`$(PRODUCT_BUNDLE_IDENTIFIER).install.*` (replacing the `.pairing` entry left
+over from StikPair's port, which nothing registered); each run registers and
+submits `<bundle id>.install.<UUID>`, since registering an identifier twice ends
+the app. The header requires the identifier to start with the bundle ID, so a
+build re-signed under another bundle ID without its Info.plist rewritten can't
+have one, and is told so in the log. `strategy = .fail`: a task iOS only queued
+would start after the user stopped waiting. On iOS 27 the submission goes through
+the async `submitTaskRequest(_:)` (the sync one is deprecated there, and the
+header says not to call the new one on the main thread). If iOS ends the task
+while the app is in the background, that's the stop button or iOS reclaiming the
+time, which can't be told apart, and the run is cancelled; in front, the run just
+carries on.
+
+**Below 26, or when iOS turns the task down: a Live Activity.**
+`InstallActivityAttributes` (shared with the extension like the pairing one) and
+`InstallActivityWidget` draw the same title, step and percentage: a bar and a
+percentage on the Lock Screen card, the Install tab's symbol and the percentage in
+the compact island, a ring in the minimal one. A UIKit background task is held through the whole run, on every iOS: it is
+the ~30 s any app gets, and the time to wind down after a cancel. When it runs
+out the activity turns to "Paused · Open SideInstaller to finish the install"
+before the time is handed back (within a second, whatever is still queued: iOS
+kills an app that keeps it past the end), and back to the step once the app is
+in front again. A run that ends in the background leaves "Installed" on the Lock
+Screen, or "Install stopped" up in the Dynamic Island too, until the app is
+opened; one that ends in front takes it down at once. Builds without the
+extension get the background time without the activity.
+
+**When the run needs the user, or stops.** `currentNeed()` reads it off the
+engine: a 2FA prompt (`twoFactor` asking; the generic instruction, without the
+number Apple masks, since this shows on the Lock Screen), the App ID go-ahead
+(`appIDCost`), a Trust prompt (`AttentionGate`, which now posts `didChange` on
+the main queue, below iOS 27), or the network step waiting on its guide (VPN,
+Wi-Fi). Pairing isn't one: its own activity has that. The activity turns orange
+(`waiting`, and `paused`) or red (`stopped`, with `lastError`): the need's own
+symbol in the badge and the compact island, a mark where the percentage was, a
+tinted glow and outline on the Lock Screen card, and "Tap to return to
+SideInstaller" where the bar was. Coming into a need, or stopping, updates it
+with an `AlertConfiguration` (not while the app is in front, where its popup
+says so), which opens the Dynamic Island or drops a banner, and a relevance score
+of 100, against 50 for progress. A stopped run's activity isn't ended, so it stays
+in the Dynamic Island until the app is opened; iOS ends any after 8 hours, and
+launch takes leftovers down.
+
+On iOS 26 and later the task's UI takes only a title and a subtitle: they say the
+need and the instruction, or "Install stopped" and the reason. A task the run
+stopped on in the background isn't completed at once, since that takes its UI
+down: it says so until the app is in front again, or for at most 3 minutes.
+SideInstaller's own activity can't stand in there whenever it likes: iOS lets an
+app start one only while it's in front. On the iPhone 16 (iOS 27, 2026-10-17)
+with the task running, `Activity.request` worked at `willResignActive` and at
+`didEnterBackground`, and failed with `visibility` 4 s and 12 s into the
+background. So it's started at those two moments when the run needs the user
+right then (the user left with the 2FA sheet up, say), comes down once it doesn't
+or the app is in front, and turns red if the run stops meanwhile. A need that
+comes up later in the background is in the task's title only. Running it for the
+whole background stretch instead would put two activities up for every install.
+
+**Not while pairing.** Both can only be started with the app in front, and
+neither is while this iPhone still has to pair (no pairing file and the pair
+step not done, or the pair step waiting): the pairing Live Activity needs the
+Dynamic Island for its code, `KeepAlive` already keeps the app running, and a
+task stuck at "Get pairing file" for a minute looks stalled, which iOS may
+expire. On a first install the surface goes up when the user comes back from
+Settings; the install doesn't carry on in the background before that. A stale
+pairing file re-paired mid-run is the exception: the surface is already up and
+stays, next to the pairing activity.
 
 
 ### Step 3 — Apple ID + signing — code complete; device/account steps unverified
@@ -771,7 +869,8 @@ lockdownd's own port (`lockdownPairRecordDirect`) is closed too:
   lockdownd resets it on the first request, `QueryType`, which normally needs no
   pairing. `EnableWifiDebugging` and `EnableWifiConnections` were both already
   true (read over RSD from `com.apple.mobile.wireless_lockdown`), so they aren't
-  the cause.
+  the cause. This reset isn't new in iOS 27: it started with 26.4, see
+  [iOS 26.4+: lockdownd hangs up on loopback connections](#ios-264-lockdownd-hangs-up-on-loopback-connections).
 - `127.0.0.1:62078` and the phone's own Wi-Fi address: `connect` fails with EPERM
   (os error 1). iOS doesn't let an app reach them.
 
@@ -781,7 +880,8 @@ minimuxer and Feather reach lockdownd at `10.7.0.1:62078`, and
 exactly this with a complete computer-made record on iOS 27: every connection
 closed within 1–2 ms. Side by Side sees the same reset over Wi-Fi.
 
-**What changed:** `Engine.canMintLockdownRecord` is false on iOS 27 and later.
+**What changed:** `Engine.canMintLockdownRecord` is false on iOS 27 and later
+(since 2026-10-21 from iOS 26.4, see the next section).
 There, `placementPairingFile` no longer attempts `Pair`: it hands over the
 RPPairing record and logs one plain line, with no round trip and no ⚠️. And
 `DeviceConnection.connect` no longer falls back to
@@ -789,18 +889,145 @@ RPPairing record and logs one plain line, with no round trip and no ⚠️. And
 that already carries a lockdown record (imported) still goes over as it is. On
 iOS 27, apps that only read a classic record can't be served: SideStore before
 nightly 0.7.0-20260920, LiveContainer's built-in SideStore (0.7.0-20260918), and
-Feather. They need a build that reads the RPPairing record. Before iOS 27 the
+Feather. They need a build that reads the RPPairing record. Before iOS 26.4 the
 attempt still runs; it is only reachable with an imported RPPairing-only file,
 and whether it works there is unverified (pymobiledevice3's refusal suggests it
 doesn't).
+
+#### iOS 26.4+: lockdownd hangs up on loopback connections
+
+From iOS 26.4 beta 1 (February 2026) on, lockdownd hangs up on a connection that
+reaches it through a loopback VPN, on its first request. A classic lockdown pair
+record (jitterbugpair, `pymobiledevice3 lockdown pair`, idevice_pair's “Lockdown”)
+can't open the CoreDeviceProxy route there, however fresh; re-pairing on a
+computer only makes another one that fails the same way. It's the reset measured
+at `10.7.0.1:62078` on iOS 27 above, which began with 26.4. An RPPairing record
+connects, over `connectRemotePairing`.
+
+**What the lockdown route sees (verified on the Mac, 2026-10-21).**
+`tunnel_create_usb` → `CoreDeviceProxy::connect` → TCP to :62078 → `start_session`,
+whose first request is a `GetValue(ProductVersion)` it doesn't check (`.ok()`),
+then `StartSession`. A scratch probe (not committed) ran exactly that with the
+vendored idevice against a stand-in lockdownd on 127.0.0.1:62078:
+
+| stand-in | FFI message |
+|---|---|
+| RST on the first request (`GetValue`) | `Socket(Os { code: 32, kind: BrokenPipe, message: "Broken pipe" })` |
+| FIN on the first request | `Socket(Custom { kind: UnexpectedEof, error: "early eof" })` |
+| RST or FIN right after accept | `Socket(Os { code: 32, kind: BrokenPipe, … })` |
+
+A reset that lands between a write and its read reads `ConnectionReset` instead,
+as in AirCard's log below. `DeviceConnection.lockdownHungUp` matches all of them.
+
+**Reported, not verified here (no iOS 26.x device; the iPhone 16 runs 27):**
+
+- [StikDebug](https://github.com/StikDebug/StikDebug)'s README from 2026-02-26:
+  on 26.4 beta 1 lockdownd “appears to be dropping connections”, breaking the
+  device's loopback connection to itself. Dropped on 2026-03-30 with
+  3.1.0, after jkcoxson's “Replace lockdown code with rppairing” (StikDebug#354,
+  “tested it on my device”): `rp_pairing_file_read` +
+  `tunnel_create_rppairing(10.7.0.1:49152)`, i.e. our `connectRemotePairing`, whose
+  first candidate is the same address.
+- [LiveContainer#1152](https://github.com/LiveContainer/LiveContainer/issues/1152)
+  (hugeBlack, member, 2026-03-29): nightly LC+SS reads RPPairing files, which
+  “bypasses 26.4 lockdownd connection limits”; users then refresh with LocalDevVPN
+  alone on 26.4.
+- [SideStore#1174](https://github.com/SideStore/SideStore/issues/1174) and
+  [#1222](https://github.com/SideStore/SideStore/issues/1222) (26.4; members: the
+  nightly “should work with no changes to LocalDevVPN”),
+  [#1460](https://github.com/SideStore/SideStore/issues/1460) (26.6.1: a misagent
+  BrokenPipe went away once a lockdown file was swapped for an RPPairing one from
+  idevice_pair 0.1.14),
+  [#1656](https://github.com/SideStore/SideStore/issues/1656) (“On versions iOS 26.4+,
+  Lockdown is not supported”).
+- [AirCard-iOS#67](https://github.com/Mak5er/AirCard-iOS/issues/67) (26.6.2,
+  official LocalDevVPN 1.3.0 at 10.7.1.1/32 ↔ 10.7.0.1/32, fresh jitterbugpair file):
+  `QueryType` gets `Socket(Os { code: 54, kind: ConnectionReset, … })`, then
+  `StartSession` `Socket(Os { code: 32, kind: BrokenPipe, … })`; SideStore on the
+  same phone, “Broken pipe / early eof”.
+
+So the cutoff is 26.4 and it holds through 26.6.2 at least; nothing says why.
+
+**Making an RPPairing record on a computer** (read in each tool's source, not run):
+
+- idevice_pair from v0.1.9-rppairing (2026-03-28); in 1.x, Remote pairing → Create →
+  Save to file… writes `pairingFile.plist` with `RpPairingFile::to_bytes`
+  (`public_key`, `private_key`, `identifier`, `alt_irk`), which is what
+  `rp_pairing_file_read` and `PairingFileKind` read. It pairs over USB through
+  remotepairingdeviced's lockdown channel, for iOS 17.4+.
+- iLoader from PR #360 (2026-04-04): Manage Pairing File › Export (Not Recommended)
+  writes `pairingFile.plist` with its lockdown and RPPairing dicts merged (iOS 17.4+),
+  the same shape as `CompositePairingFile`.
+- pymobiledevice3 `remote pair`: its record holds `public_key`, `private_key` and
+  `remote_unlock_host_key` but no `identifier` (the host id is `generate_host_id()`,
+  never stored), so idevice refuses it (`missing_field("identifier")`). Not suggested.
+- Neither idevice_pair nor iLoader writes into SideInstaller (both look apps up by
+  display name in fixed lists), hence Save/Export and an import.
+- SideStore answers `sidestore://pairing` with its active pairing file
+  (`ExportPairingFileHandler` → `PairingFileManager.fetchPairingFile()`), so a
+  SideStore nightly set up with an RPPairing file hands that over through “Get it
+  from SideStore”.
+
+**Workarounds for a lockdown record, not offered in the app:**
+
+- An IKEv2 “Personal VPN” connected first, then LocalDevVPN (SideStore#1174, #1222,
+  March–April 2026): many confirmations on 26.4 with SideStore stable, some
+  failures, no explanation. It needs a third-party VPN carrying all traffic, and
+  SideStore's members call it “just a workaround”.
+- LocalDevVPN's addresses inside the Wi-Fi subnet: the fork
+  [SiamSadik/LocalDevVPN](https://github.com/SiamSadik/LocalDevVPN) (cdbc3299,
+  1b9ff7a2, 2026-08-15/16, AI-assisted) says 26.4+ lockdownd “resets connections
+  whose source IP is outside the WiFi subnet”, and puts the tunnel's own address and
+  the peer on unused Wi-Fi addresses as /32s, the peer as a /32 included route so it
+  beats the Wi-Fi /24. Its one release (v1.1.6-custom, 234 downloads, built on the
+  pre-rewrite app) has no issues and no confirmations; a blog repeats it as early
+  reports on 26.4 beta 2. Official LocalDevVPN 1.3.0 can make the same layout with no
+  fork: its `PacketTunnelProvider` gives the utun `TunnelIfaceIP` with that address's
+  own prefix and routes only `TunnelPeerIP`, and `CIDRValidator` takes any unicast
+  address with an explicit prefix. In its Settings › Network Configuration, Tunnel IP
+  and Device IP would be two unused Wi-Fi addresses with /32, and our Device IP the
+  second one (`NetworkStatus` accepts it: the routing-table check sees a utun source).
+  The first edit there raises a one-time Warning whose “I Understand” resets both
+  fields to the defaults, so they have to be typed again after it. Not offered: it's
+  unconfirmed, and the addresses would change with every Wi-Fi network.
+
+**What changed:**
+
+- `Engine.lockdownWorksOverLoopback`, false from 26.4.
+- `DeviceConnection.connect`: with both records, RPPairing goes first from 26.4. A
+  lockdown-route failure that `lockdownHungUp` matches becomes a `TunnelError` with
+  `lockdownRouteClosed` and advice (`ErrorHelp.explained`), only for this iPhone's
+  own link: Side by Side (`allowLockdownMinting: false`) reaches another iPhone,
+  whose iOS may be anything, and still falls through to pairing again.
+  `repairingCouldHelp` is `Engine.deviceCanSelfPair` for it: on iOS 27 Install's
+  re-pair makes the RPPairing record that fixes it, and below 27 nothing pairs.
+- `Engine.pairAndConnect`, below 27: `Guides.remotePairingNeeded` (idevice_pair's
+  Remote pairing steps, “Get idevice_pair”) and a short error. On 27, a log line
+  saying why, then the re-pair as before.
+- `Guides.importPairing` from 26.4: the same idevice_pair steps instead of
+  jitterbugpair's.
+- `canMintLockdownRecord` false from 26.4 (was 27): no minting fallback in `connect`
+  (its stored record and `lockdownPairRecordDirect` both go through :62078), and
+  `placementPairingFile` hands over the RPPairing record alone, since other apps
+  read a lockdown record through the loopback too.
+- Developer Mode's lockdownd fallback is skipped from 26.4, and `adoptPairingFile`
+  logs a warning for a lockdown-only import.
+
+None of this has run on a 26.x device, and the new copy hasn't been seen on
+screen.
 
 ## Madeira
 
 [Madeira](https://github.com/willfaust/Madeira) (Windows PC games through Wine and
 FEX) is a fourth `InstallSource`. Four things differ from SideStore.
 
-**The download.** Its release asset is named after the version
-(`Madeira-0.1.3.ipa` on tag `v0.1.3`), so there's no fixed `latest/download` URL.
+**The download.** It comes from the releases of the fork
+[FrizzleM/Madeira](https://github.com/FrizzleM/Madeira), built from its
+`sideinstaller-refresh` branch (willfaust/Madeira#264), since only that build
+renews its own signing; switch `InstallSource.repo` back once upstream ships it.
+Its release asset is named after the version, as upstream names it
+(`Madeira-0.1.3.ipa` on tag `v0.1.3`, `Madeira-0.1.3-self-refresh.1.ipa` on
+`v0.1.3-self-refresh.1`), so there's no fixed `latest/download` URL.
 `SideStoreDownloader.latestTag` reads the tag off where
 `github.com/<repo>/releases/latest` redirects to, which has no rate limit, and the
 URL is built from it; a 404 falls back to the API as before. There's no nightly,
@@ -813,7 +1040,7 @@ needs.
 that has isideload enable that capability on the app's App IDs before the profile
 is requested (`Engine.isMadeira` also catches a Madeira IPA imported as custom, or
 refreshed from Documents, by its bundle id: `com.willfaust.madeora` or any id under
-it, such as the `.test` one the pinned build has). Its `MadeiraJITHelper.appex` is signed like every
+it, such as the `.test` one of a local development build). Its `MadeiraJITHelper.appex` is signed like every
 extension here, with the main app's profile and entitlements, and renamed with the
 app (`<id>.<team>.JITHelper`), which is how Madeira finds it. Madeira picks its
 background task from `BGTaskSchedulerPermittedIdentifiers` by taking the first

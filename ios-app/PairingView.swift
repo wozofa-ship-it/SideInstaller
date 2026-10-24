@@ -23,6 +23,7 @@ struct PairingView: View {
                 targetList
             }
             .padding(20)
+            .pageColumn()
             .animation(.smooth(duration: 0.35), value: manager.pairingFileExists)
             .animation(.smooth(duration: 0.35), value: manager.targets)
             .animation(.smooth(duration: 0.3), value: engine.deviceSummary)
@@ -302,9 +303,7 @@ struct PairingPopup: View {
                       systemImage: "exclamationmark.triangle.fill",
                       tint: .red,
                       onClose: close) {
-                Text(message)
-                    .font(.subheadline)
-                    .fixedSize(horizontal: false, vertical: true)
+                ErrorMessage(message: message)
             }
         case .success(let message):
             // Titled after the page: this covers a new file and a write alike.

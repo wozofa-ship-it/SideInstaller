@@ -111,11 +111,16 @@ pub(crate) fn stated_expiry(expiry: u64) -> Option<u64> {
     }
 }
 
+/// An account's folder in isideload's storage, `<sha256(email)>/`, where
+/// isideload keeps its signing key as `key`.
+pub(crate) fn account_dir(storage_dir: &Path, apple_id: &str) -> PathBuf {
+    storage_dir.join(hex::encode(Sha256::digest(apple_id.as_bytes())))
+}
+
 /// Path of an account's saved session: `<sha256(email)>/developer_session.json`,
 /// next to isideload's `<sha256(email)>/key`.
 fn session_path(storage_dir: &Path, apple_id: &str) -> PathBuf {
-    let hash = hex::encode(Sha256::digest(apple_id.as_bytes()));
-    storage_dir.join(hash).join("developer_session.json")
+    account_dir(storage_dir, apple_id).join("developer_session.json")
 }
 
 fn load(storage_dir: &Path, apple_id: &str) -> Option<SavedSession> {
@@ -139,6 +144,11 @@ fn store(storage_dir: &Path, session: &SavedSession) -> std::io::Result<()> {
 pub(crate) fn forget(storage_dir: &Path, apple_id: &str) -> bool {
     std::fs::remove_file(session_path(storage_dir, apple_id)).is_ok()
 }
+
+/// What a full sign-in through an anisette server on Apple's Android ADI
+/// library returns instead of logging in (see `open`). The app goes by the
+/// "-80046" in it.
+pub(crate) const ANDROID_ADI_SKIP: &str = "login skipped: this anisette server makes its data with Apple's Android ADI library, and Apple refuses the developer token for that (-80046) after the password and the verification code have gone through, so they weren't sent";
 
 /// True for errors unrelated to the token (network, anisette server, Apple
 /// busy); these are returned to the caller as-is. Other errors (portal error,
@@ -262,6 +272,19 @@ where
             forget(storage_dir, apple_id);
         }
     }
+
+    // Apple refuses the developer token for anisette from its Android library
+    // (-80046), but only once the password and the second factor have gone
+    // through, so a full sign-in through such a server isn't started. A saved
+    // token, tried above, may still work there.
+    if account.anisette_generator.runs_android_adi().await {
+        tracing::info!("{label}: {ANDROID_ADI_SKIP}");
+        return Err(ANDROID_ADI_SKIP.to_string());
+    }
+    // A sign-in that reports a current Mac does it with an identity
+    // provisioned as one, as SideStore's "Reset adi.pb" after its client info
+    // has changed; an identity from before is left for its saved token.
+    account.anisette_generator.require_current_mac_identity().await;
 
     tracing::info!("{label}: logging in");
     account
