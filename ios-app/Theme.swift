@@ -879,3 +879,30 @@ extension View {
     /// Give an object its place in the entrance cascade (0 appears first).
     func cascadeItem(_ index: Int) -> some View { modifier(CascadeItem(index: index)) }
 }
+
+// MARK: - Restored from the fork (2026-10-25 merge recovery)
+// 290310a took Theme.swift from the upstream side, dropping the fork's
+// appearance enum below; restored verbatim from the fork @ 3e560dd.
+
+/// 界面外观：跟随系统 / 浅色 / 深色。设置页与 App 入口共用同一
+/// UserDefaults 键（SIDAppearance），入口处统一用 preferredColorScheme 生效。
+enum AppAppearance: String, CaseIterable {
+    case system, light, dark
+
+    /// 传给 preferredColorScheme 的值；nil 表示跟随系统。
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .system: return L("Follow System")
+        case .light:  return L("Light")
+        case .dark:   return L("Dark")
+        }
+    }
+}

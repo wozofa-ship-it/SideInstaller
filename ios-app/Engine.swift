@@ -122,6 +122,29 @@ final class Engine: ObservableObject {
 
     static let anisetteURLKey = "anisetteServerURL"
 
+    // MARK: - Restored from upstream (2026-10-25 merge recovery)
+    // 290310a took this file from the fork side, dropping upstream's members
+    // below; restored verbatim from FrizzleM/SideInstaller @ 7d1cb04.
+
+    @Published var anisetteAuto: Bool =
+        (UserDefaults.standard.object(forKey: Engine.anisetteAutoKey) as? Bool) ?? true {
+        didSet {
+            guard anisetteAuto != oldValue else { return }
+            UserDefaults.standard.set(anisetteAuto, forKey: Engine.anisetteAutoKey)
+        }
+    }
+
+    static let anisetteAutoKey = "anisetteServerAuto"
+
+    @Published private(set) var appIDCost: AppIDCost?
+    /// Resumed with the answer to `appIDCost`: true to sign and install.
+    private var appIDCostReply: CheckedContinuation<Bool, Never>?
+    /// The `sideinstaller://` link waiting for the go-ahead.
+    @Published private(set) var pendingLink: DeepLink?
+    /// A certificate a link brought, for `RootView` to hand to the Certificates
+    /// manager, which checks it against the Apple ID's own before using it.
+    @Published var certificateToImport: CertificateImport?
+
     /// The saved anisette server, or the one to start with, saved.
     ///
     /// Until 1.5.2 the default was `AnisetteServer.legacyDefault`, and a pick
@@ -693,6 +716,10 @@ final class Engine: ObservableObject {
         case success(String, leads: Bool)
         /// LiveContainer still needs SideStore's certificate imported.
         case liveContainerImport
+        /// What signing an imported IPA costs in App IDs, before it's signed.
+        case appIDCost(AppIDCost)
+        /// A `sideinstaller://` link, asking before it's acted on.
+        case link(DeepLink)
     }
 
     /// True while the run is held up on the user — joining Wi-Fi, connecting
@@ -758,6 +785,8 @@ final class Engine: ObservableObject {
         case .error:               lastError = nil
         case .success:             successClosed = true
         case .liveContainerImport: liveContainerImportClosed = true
+        case .appIDCost:             appIDCost = nil
+        case .link:                  pendingLink = nil
         }
     }
 
@@ -3536,20 +3565,41 @@ private let twoFactorCallback: SITwoFactorCb = { ctx, request, outBuf, bufLen in
 /// Counts what currently has the user's attention — a Trust prompt — so a 2FA
 /// sheet can wait for it to finish. Thread-safe.
 final class AttentionGate {
+    /// Posted on the main queue when something starts or stops holding the
+    /// user's attention, for the install's Live Activity (`InstallActivity`).
+    static let didChange = Notification.Name("AttentionGateDidChange")
+
     private let condition = NSCondition()
     private var holders = 0
+
+    /// True while something holds the user's attention.
+    var isHeld: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return holders > 0
+    }
 
     func begin() {
         condition.lock()
         holders += 1
+        let changed = holders == 1
         condition.unlock()
+        if changed { announce() }
     }
 
     func end() {
         condition.lock()
+        let changed = holders == 1
         holders = max(0, holders - 1)
         if holders == 0 { condition.broadcast() }
         condition.unlock()
+        if changed { announce() }
+    }
+
+    private func announce() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Self.didChange, object: self)
+        }
     }
 
     /// Blocks until nothing holds the user's attention. Never on the main thread.
@@ -3591,6 +3641,20 @@ struct TwoFactorPrompt: Decodable, Equatable {
     let selectedNumberId: UInt32?
     let lastError: String?
     let numbers: [Number]
+
+    /// The errors isideload itself writes into `lastError` when Apple turns a
+    /// way of getting the code away (`PHONE_CODE_REFUSED`,
+    /// `DEVICE_CODE_UNCONFIRMED` in `apple_account.rs`); keep them in step.
+    static let isideloadErrors: Set<String> = [
+        "Apple won't send a code by text or call to this sign-in, so it was sent to your Apple devices.",
+        "Apple didn't confirm sending a code to your Apple devices. If one arrived, enter it; if not, try another way.",
+    ]
+
+    /// `lastError` as the sheet shows it: Apple's own as it came, isideload's
+    /// in the app's language.
+    var shownError: String? {
+        lastError.map { Self.isideloadErrors.contains($0) ? L($0) : $0 }
+    }
 
     /// For a request that can't be read: the one prompt that always makes sense.
     static let deviceOnly = TwoFactorPrompt(method: .device, selectedNumberId: nil, lastError: nil, numbers: [])
@@ -3746,5 +3810,139 @@ private final class BGTaskCompletion {
         didFinish = true
         lock.unlock()
         task.setTaskCompleted(success: success)
+    }
+}
+
+// MARK: - Restored from upstream (2026-10-25 merge recovery)
+// 290310a took Engine.swift from the fork side; these upstream members
+// (FrizzleM/SideInstaller @ 7d1cb04) were dropped with it.
+
+struct AppIDCost: Hashable {
+    /// The App IDs signing would register: the app's, if the Apple ID doesn't
+    /// have it yet. Extensions are signed with the app's profile and need none.
+    let newIDs: [String]
+    /// How many more Apple allows now; nil when it doesn't say.
+    let available: Int?
+    /// The limit, 10 a week for a free Apple ID; nil when Apple doesn't say.
+    let limit: Int?
+    /// When the soonest of the Apple ID's App IDs expires, freeing its slot.
+    let nextExpiry: Date?
+
+    var cost: Int { newIDs.count }
+    /// False when Apple says too few are left: signing would stop with 9120.
+    var isAffordable: Bool { available.map { cost <= $0 } ?? true }
+    /// What's left once this install has registered its App IDs.
+    var remainingAfter: Int? { available.map { Swift.max(0, $0 - cost) } }
+}
+
+extension Engine {
+    /// Detects an Apple ID sign-in refused because the Mac anisette server's
+    /// macOS is too old for Apple's current GrandSlam requirements.
+    static func isAppleOutdatedMacRefusal(_ raw: String) -> Bool {
+        let m = raw.lowercased()
+        return m.contains("-23782") || m.contains("a mac with macos version")
+    }
+
+    /// Detects GrandSlam -80046, "This action cannot be completed at this
+    /// time", at the sign-in token request: Apple took the password and the
+    /// code, then turned down the anisette (from its Android library, since
+    /// 2026-10-21).
+    static func isAppleTokenRefusal(_ raw: String) -> Bool {
+        raw.contains("-80046")
+    }
+
+    /// Detects isideload's `ANDROID_ADI_SKIP`: a sign-in through a server on
+    /// Apple's Android ADI library wasn't started, so nothing reached Apple.
+    static func isAndroidADISkip(_ raw: String) -> Bool {
+        raw.hasPrefix("login skipped") && raw.contains("-80046")
+    }
+
+    /// Whether a lockdown pair record still opens a tunnel to this iPhone.
+    /// False from iOS 26.4 on, where lockdownd hangs up on loopback
+    /// connections; see NOTES.md ("iOS 26.4+: lockdownd hangs up on loopback
+    /// connections").
+    static var lockdownWorksOverLoopback: Bool {
+        !ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 26, minorVersion: 4, patchVersion: 0))
+    }
+
+    /// The error when the anisette server picked in Settings, the only one
+    /// tried, runs Apple's Android library.
+    func androidADIRefusalMessage(server: String) -> String {
+        L("“%@” makes its anisette data with Apple's Android library, and Apple now refuses to finish signing in through those servers (error -80046), after your password and code. In Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.",
+          anisetteName(for: server))
+    }
+
+    /// The error when Apple refused the sign-in token through `server` and no
+    /// server of another kind is left.
+    func appleTokenRefusalMessage(through server: String) -> String {
+        if AnisetteServer.library(of: server, in: anisetteServers) == .mac {
+            return L("Apple refused to finish signing in (error -80046), even through a Mac anisette server, the kind it still accepted. Try again later, or check for a SideInstaller update.")
+        }
+        return L("Apple refused to finish signing in through “%@” (error -80046). It now only accepts sign-ins through anisette servers on its macOS library: in Settings › Anisette Server, choose Auto or a Mac server such as “SideStore (New)”.",
+                 anisetteName(for: server))
+    }
+
+    func anisetteSignedIn(_ address: String) {
+        if anisetteAuto { anisetteURL = address }
+        AnisetteServer.RecentFailures.clear(address)
+    }
+
+    /// Notes that a sign-in through `address` failed with `error`, so that
+    /// Auto tries it after the others for a while if the server was at fault.
+    func anisetteFailed(_ address: String, error: String) {
+        AnisetteServer.RecentFailures.record(address, error: error)
+    }
+
+    /// The error for a sign-in that failed on every server it tried. It shows
+    /// the error saying most about why (`AnisetteServer.SignInFailures`), and
+    /// with several servers tried, the one it came through. It counts the
+    /// servers tried, apart from those skipped. With a server picked in
+    /// Settings, the only one tried, it names that server and points to Auto,
+    /// which would have tried the others.
+    func anisetteSignInFailure(_ failures: AnisetteServer.SignInFailures) -> String {
+        let error = failures.shown?.error ?? "no anisette servers configured"
+        guard anisetteAuto else {
+            return L("Apple ID sign-in failed on %@. Error: %@", anisetteName(for: anisetteURL), error)
+                + " " + L("Only the server picked in Settings › Anisette Server was tried. Choose Auto there to let SideInstaller try the others when one fails.")
+        }
+        guard let shown = failures.shown, failures.tried > 1 else {
+            return L("Apple ID sign-in failed on %@. Error: %@", L("the anisette server"), error)
+        }
+        let servers = failures.skipped == 0
+            ? L("all %d anisette servers", failures.tried)
+            : L("%d anisette servers (%d skipped)", failures.tried, failures.skipped)
+        return L("Apple ID sign-in failed on %@. Error via %@: %@", servers, anisetteName(for: shown.server), shown.error)
+    }
+
+    func deviceCrashLogs() async throws -> [DeviceCrashLog] {
+        guard !isRunning else {
+            throw EngineError.message(L("An install is already running. Wait for it to finish, then try again."))
+        }
+        try await ensurePairingConnection()
+        log("Crash logs: looking for SideStore's, LiveContainer's and Madeira's …")
+        let logs = try await onDeviceQueue {
+            try self.connection.crashReports(select: DeviceCrashLog.select)
+                .map { DeviceCrashLog(path: $0.path, data: $0.data) }
+        }
+        log(logs.isEmpty ? "Crash logs: none on this iPhone from the last \(DeviceCrashLog.maxAgeDays) days."
+                         : "Crash logs: \(logs.map(\.name).joined(separator: ", ")).")
+        return logs
+    }
+
+    func answerAppIDCost(_ proceed: Bool) {
+        guard let reply = appIDCostReply else { return }
+        appIDCostReply = nil
+        if proceed {
+            reply.resume(returning: true)
+        } else {
+            // The run ends cancelled, the same as closing the popup.
+            reply.resume(returning: false)
+            cancelOneClick()
+        }
+        // Fork deviation: upstream's ask flow clears this after the resume,
+        // but the fork has no ask flow wired, so clear here to never leave a
+        // stale cost popup behind.
+        appIDCost = nil
     }
 }
