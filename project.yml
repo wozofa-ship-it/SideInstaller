@@ -71,6 +71,7 @@ targets:
       - path: ios-live-activity
       # What the activity shows, shared with the app.
       - path: ios-app/PairingActivityAttributes.swift
+      - path: ios-app/InstallActivityAttributes.swift
     settings:
       base:
         # Has to stay the app's identifier plus a suffix, or iOS refuses to
