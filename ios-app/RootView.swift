@@ -101,10 +101,12 @@ struct RootView: View {
         }
         // A certificate a link brought is checked and imported by the same
         // manager as the Certificates page.
-        // One-arg form: this tree's compiler only accepts the one-arg
-        // onChange for this value (#35 fix); the body only uses the new value.
-        .onChange(of: engine.certificateToImport) { request in
-            guard let request else { return }
+        // Zero-arg form: the two-arg form was rejected in #35 and the
+        // one-arg form in #36 for this value, while the zero-arg overload
+        // is the one this tree's compiler selects here; read the new
+        // value directly, which is behaviorally identical.
+        .onChange(of: engine.certificateToImport) {
+            guard let request = engine.certificateToImport else { return }
             engine.certificateToImport = nil
             certManager.importCertificate(request)
         }
