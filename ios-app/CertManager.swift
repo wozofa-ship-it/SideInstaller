@@ -51,6 +51,18 @@ struct DevCert: Identifiable, Decodable, Equatable {
     }
 }
 
+/// What `si_cert_import` reports: the team's certificate SideInstaller now signs
+/// with, and whether that took a new key.
+private struct CertImportResult: Decodable {
+    let certificate: DevCert
+    let replacedKey: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case certificate
+        case replacedKey = "replaced_key"
+    }
+}
+
 /// Lists and revokes the Apple ID's development certificates, using the engine's
 /// credentials and 2FA prompt. Developer-portal only (no device); blocking FFI
 /// calls run on a background queue.
@@ -64,8 +76,12 @@ final class CertManager: ObservableObject {
     /// `id` of the certificate currently being revoked, if any.
     @Published private(set) var revokingID: String?
     @Published var lastError: String?
+    /// What the last certificate import did.
+    @Published var lastSuccess: String?
     /// True once a list has been fetched (tells "not loaded" apart from "empty").
     @Published private(set) var hasLoaded = false
+    /// True while a certificate SideStore sent is checked and put in place.
+    @Published private(set) var isImporting = false
 
     private var session: OpaquePointer?            // CertSession*
     private let queue = DispatchQueue(label: "sideinstaller.certs")
@@ -159,6 +175,54 @@ final class CertManager: ObservableObject {
             revokingID = nil
             // Run `onSuccess` if the revoke succeeded, even if the refresh failed.
             if revoked { onSuccess?() }
+        }
+    }
+
+    /// Signs with the certificate a link brought from now on, once the Apple
+    /// ID's own certificates include it: its key becomes the one isideload
+    /// signs with, so SideInstaller stops asking Apple for a certificate of its
+    /// own (error 7460 on a free account) and revoking SideStore's.
+    @MainActor
+    func importCertificate(_ request: CertificateImport) {
+        guard !isImporting else { return }
+        let id = engine.normalizedAppleID, pw = engine.applePassword
+        guard !id.isEmpty, !pw.isEmpty else {
+            lastError = ErrorHelp.explained(L("No Apple ID saved. Add one in Settings › Account."))
+            return
+        }
+        let cert = request.certificate
+        let source = cert.fromSideStore ? "SideStore's certificate" : "the certificate from the link"
+        isImporting = true
+        lastError = nil
+        lastSuccess = nil
+        engine.log("=== Certificates: checking \(source) ===")
+        Task { @MainActor in
+            defer { isImporting = false }
+            do {
+                if session == nil { try await signIn(id: id, pw: pw) }
+                let result = try await onQueue {
+                    try self.performImport(p12: cert.data, password: cert.password)
+                }
+                let name = result.certificate.machineLabel ?? result.certificate.displayName
+                engine.log(result.replacedKey
+                    ? "Certificates: signing with \(name) (\(result.certificate.serialNumber)) from now on; nothing was revoked."
+                    : "Certificates: \(name) is the certificate SideInstaller signs with already.")
+                if let list = try? await onQueue({ try self.performList() }) {
+                    certs = list
+                    hasLoaded = true
+                }
+                if request.retryInstall {
+                    engine.log("Retrying the install with \(name).")
+                    engine.runOneClick()
+                } else {
+                    lastSuccess = result.replacedKey
+                        ? L("SideInstaller signs with “%@” from now on. Nothing was revoked, so the apps already signed with it keep working.", name)
+                        : L("SideInstaller already signs with “%@”.", name)
+                }
+            } catch {
+                lastError = short(error)
+                engine.log("⛔️ Certificates: \(lastError ?? "import failed")")
+            }
         }
     }
 
@@ -320,6 +384,34 @@ final class CertManager: ObservableObject {
             error.map { si_string_free($0) }
             throw EngineError.message("Revoke failed: \(msg)")
         }
+    }
+
+    private static let importNotOnTeam: Int32 = 3
+
+    private func performImport(p12: Data, password: String) throws -> CertImportResult {
+        guard let session = self.session else { throw EngineError.message("Not signed in.") }
+        var json: UnsafeMutablePointer<CChar>?
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = p12.withUnsafeBytes { bytes in
+            si_cert_import(session, bytes.bindMemory(to: UInt8.self).baseAddress, bytes.count,
+                           password, &json, &error)
+        }
+        if rc == 0 {
+            let s = json.map { String(cString: $0) } ?? "{}"
+            json.map { si_string_free($0) }
+            do {
+                return try JSONDecoder().decode(CertImportResult.self, from: Data(s.utf8))
+            } catch {
+                throw EngineError.message("Couldn't read what the import did: \(error)")
+            }
+        }
+        let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
+        error.map { si_string_free($0) }
+        engine.log("Certificate import: \(msg)")
+        if rc == Self.importNotOnTeam {
+            throw EngineError.message(L("That certificate isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID (SideStore may be signed in with a different one). Nothing was changed."))
+        }
+        throw EngineError.message(L("Couldn't use that certificate: %@", msg))
     }
 
     /// Export the signing certificate as p12 (base64) + password.

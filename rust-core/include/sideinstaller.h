@@ -278,6 +278,17 @@ int32_t si_cert_revoke(CertSession *session,
                        const char *serial_number,
                        char **out_error);
 
+// Import a PKCS#12 archive's key as the signing key (see certs::cert_import).
+// On success *out_json is a heap JSON string: {certificate, replaced_key}.
+// Free with si_string_free. Returns 0 on success, 3 when no certificate on
+// this team has the key, other non-zero on error (*out_error set).
+int32_t si_cert_import(CertSession *session,
+                       const uint8_t *p12,
+                       size_t p12_len,
+                       const char *password,
+                       char **out_json,
+                       char **out_error);
+
 // Export the signing certificate as PKCS#12 (base64 JSON). BLOCKS.
 // On success *out_b64 is a heap JSON string: {p12_b64, password}.
 // Free with si_string_free. Returns 0 on success, non-zero on error.

@@ -1,11 +1,13 @@
 //! Lists and revokes iOS development certificates via `isideload`'s
 //! `DeveloperSession` (developer portal only, no device). `si_cert_signin` opens
 //! a session on the first team, `si_cert_list` returns its certificates as JSON,
-//! and `si_cert_revoke` revokes one by serial number.
+//! and `si_cert_revoke` revokes one by serial number, and `si_cert_import`
+//! signs with a PKCS#12 archive's key.
 
 use std::ffi::{c_char, c_void};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{prelude::BASE64_STANDARD, Engine as _};
 use isideload::dev::{
@@ -17,6 +19,11 @@ use isideload::dev::{
 use isideload::sideload::cert_identity::CertificateIdentity;
 use isideload::util::fs_storage::FsStorage;
 use serde::Serialize;
+
+use rsa::{
+    pkcs8::{DecodePrivateKey, EncodePrivateKey},
+    RsaPrivateKey,
+};
 
 use crate::account::{make_2fa, TwoFactorCb, TwoFaCtx};
 use crate::apple_session;
@@ -30,6 +37,9 @@ pub struct CertSession {
     pub(crate) rt: tokio::runtime::Runtime,
     pub(crate) dev: DeveloperSession,
     pub(crate) team: DeveloperTeam,
+    /// Where `cert_import` writes the signing key isideload reads.
+    apple_id: String,
+    storage_dir: PathBuf,
 }
 
 // Used only through its own runtime, serialized by Swift on one queue.
@@ -47,6 +57,9 @@ struct CertInfo {
     status: String,
     /// RFC3339 expiry (e.g. `2027-01-01T00:00:00Z`), or "" if Apple omitted it.
     expiration: String,
+    /// True for the certificate SideInstaller signs with: the only one whose
+    /// private key is on this iPhone, so the only one it can export.
+    signing: bool,
 }
 
 impl From<&DevelopmentCertificate> for CertInfo {
@@ -66,7 +79,15 @@ impl From<&DevelopmentCertificate> for CertInfo {
                 .as_ref()
                 .map(|d| d.to_xml_format())
                 .unwrap_or_default(),
+            signing: false,
         }
+    }
+}
+
+impl CertInfo {
+    fn signing(mut self, signing: bool) -> Self {
+        self.signing = signing;
+        self
     }
 }
 
@@ -133,7 +154,13 @@ pub unsafe fn cert_signin(
 
     match result {
         Ok(Ok((rt, dev, team, summary))) => {
-            let session = Box::new(CertSession { rt, dev, team });
+            let session = Box::new(CertSession {
+                rt,
+                dev,
+                team,
+                apple_id,
+                storage_dir: PathBuf::from(storage_dir),
+            });
             *out_session = Box::into_raw(session);
             *out_summary = cstr(summary);
             0
@@ -322,6 +349,143 @@ pub unsafe fn cert_export_p12(
             2
         }
     }
+}
+
+/// What `cert_import` did, as Swift decodes it.
+#[derive(Serialize)]
+struct CertImport {
+    /// The team's certificate the key belongs to.
+    certificate: CertInfo,
+    /// False when SideInstaller signed with this key already, so nothing was
+    /// written.
+    replaced_key: bool,
+}
+
+/// Sign with the certificate in a PKCS#12 archive from now on: SideStore's,
+/// sent back for `sidestore://certificate`.
+///
+/// isideload keeps one RSA key per Apple ID, `<sha256(email)>/key`, and signs
+/// with the team's certificate that carries its public key, asking Apple for a
+/// new one only when none does. A free account gets one certificate (a second
+/// is refused with error 7460), so SideInstaller and SideStore had to revoke
+/// each other's. With SideStore's key in that file, both sign with SideStore's
+/// certificate.
+///
+/// The key is written only once the portal lists a certificate for it on this
+/// session's team, the check signing makes. An archive from another Apple ID,
+/// or one whose certificate was revoked, leaves the current key alone and
+/// returns 3. The key it replaces is kept next to it as `key.replaced-<unix
+/// time>`.
+///
+/// # Safety
+/// `session` must be a valid pointer from `cert_signin`; `p12` must point to
+/// `p12_len` readable bytes; `password` null or a valid C string; out pointers
+/// valid.
+pub unsafe fn cert_import(
+    session: *mut CertSession,
+    p12: *const u8,
+    p12_len: usize,
+    password: *const c_char,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    if session.is_null() || p12.is_null() {
+        *out_error = cstr("null session or certificate");
+        return 2;
+    }
+    let session = &mut *session;
+    let data = std::slice::from_raw_parts(p12, p12_len).to_vec();
+    let password = opt_str(password, "");
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let keys = crate::p12::signing_keys(&data, &password).map_err(|e| (1, e))?;
+        session.rt.block_on(async {
+            for archived in &keys {
+                let found =
+                    CertificateIdentity::find_matching(&archived.key, &mut session.dev, &session.team)
+                        .await
+                        .map_err(|e| (1, format!("list certs failed: {}", report_text(&e))))?;
+                let Some((cert, _)) = found else { continue };
+                let replaced = store_signing_key(&session.storage_dir, &session.apple_id, &archived.key)
+                    .map_err(|e| (1, e))?;
+                tracing::info!(
+                    "Certs: signing with certificate {} ({}) from now on{}",
+                    cert.serial_number.as_deref().unwrap_or("?"),
+                    cert.machine_name.as_deref().unwrap_or("no machine name"),
+                    if replaced { "" } else { "; it was the one in use already" }
+                );
+                let import = CertImport {
+                    certificate: CertInfo::from(&cert).signing(true),
+                    replaced_key: replaced,
+                };
+                return serde_json::to_string(&import)
+                    .map_err(|e| (1, format!("serialize import: {e}")));
+            }
+            let serials: Vec<&str> = keys.iter().filter_map(|k| k.serial.as_deref()).collect();
+            Err((
+                3,
+                format!(
+                    "no certificate on team {} has the key in that archive{} — it was revoked, \
+                     or it belongs to another Apple ID",
+                    session.team.team_id,
+                    if serials.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (certificate {})", serials.join(", "))
+                    }
+                ),
+            ))
+        })
+    }));
+
+    match result {
+        Ok(Ok(json)) => {
+            *out_json = cstr(json);
+            0
+        }
+        Ok(Err((rc, e))) => {
+            *out_error = cstr(e);
+            rc
+        }
+        Err(_) => {
+            *out_error = cstr("panic while importing the certificate");
+            2
+        }
+    }
+}
+
+/// Makes `key` the signing key isideload reads for `apple_id`. Returns false
+/// when it is that already. A different key there is kept beside it first.
+fn store_signing_key(storage_dir: &Path, apple_id: &str, key: &RsaPrivateKey) -> Result<bool, String> {
+    let dir = apple_session::account_dir(storage_dir, apple_id);
+    let path = dir.join("key");
+    match std::fs::read(&path) {
+        Ok(current) => {
+            let same = RsaPrivateKey::from_pkcs8_der(&current)
+                .is_ok_and(|k| k.to_public_key() == key.to_public_key());
+            if same {
+                return Ok(false);
+            }
+            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let kept = dir.join(format!("key.replaced-{stamp}"));
+            std::fs::write(&kept, &current).map_err(|e| format!("couldn't keep the current key: {e}"))?;
+            tracing::info!("Certs: kept the signing key it replaces as {}", file_name(&kept));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+        }
+        Err(e) => return Err(format!("couldn't read the current key: {e}")),
+    }
+    let der = key.to_pkcs8_der().map_err(|e| format!("couldn't encode the key: {e}"))?;
+    // Renamed into place, so signing never reads half a key.
+    let tmp = dir.join("key.tmp");
+    std::fs::write(&tmp, der.as_bytes()).map_err(|e| format!("couldn't write the key: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("couldn't write the key: {e}"))?;
+    Ok(true)
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// Free a `CertSession`.
