@@ -131,7 +131,16 @@ struct SideInstallerApp: App {
                     Task { await engine.importPairingFile(from: url) }
                 } else {
                     engine.installSource = .custom
-                    Task { await engine.importCustomIPA(from: url) }
+                    Task {
+                        await engine.importCustomIPA(from: url)
+                        // 从分享/“打开方式”进来的 IPA 直接装：只有这次导入成功
+                        // 才起管线；导入失败时 importCustomIPA 会写 lastError，
+                        // 管线不启动。管线自己的 guards 会在缺证书/配对/WiFi
+                        // 时停下并给出指引，与点安装按钮同一套。
+                        if engine.lastError == nil, IPALibrary.customImport() != nil {
+                            await engine.runOneClick()
+                        }
+                    }
                 }
             }
         }

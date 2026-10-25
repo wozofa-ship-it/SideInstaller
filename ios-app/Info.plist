@@ -5,6 +5,7 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).pairing</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).install.*</string>
 		<string>com.frizzle.sideinstaller.autorefresh</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
