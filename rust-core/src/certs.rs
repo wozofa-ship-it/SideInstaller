@@ -278,7 +278,6 @@ pub unsafe fn cert_export_p12(
         session.rt.block_on(async {
             tracing::info!("Exporting p12 for '{machine_name}' ({email})");
             let identity = CertificateIdentity::retrieve_existing(
-                &machine_name,
                 &email,
                 &mut session.dev,
                 &session.team,
