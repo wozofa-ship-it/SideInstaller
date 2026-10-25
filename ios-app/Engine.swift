@@ -3930,6 +3930,8 @@ extension Engine {
         return logs
     }
 
+    // @MainActor: cancelOneClick() below is MainActor-isolated (#35 fix).
+    @MainActor
     func answerAppIDCost(_ proceed: Bool) {
         guard let reply = appIDCostReply else { return }
         appIDCostReply = nil

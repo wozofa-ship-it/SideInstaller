@@ -138,7 +138,7 @@ struct SideInstallerApp: App {
                         // 管线不启动。管线自己的 guards 会在缺证书/配对/WiFi
                         // 时停下并给出指引，与点安装按钮同一套。
                         if engine.lastError == nil, IPALibrary.customImport() != nil {
-                            await engine.runOneClick()
+                            engine.runOneClick()
                         }
                     }
                 }

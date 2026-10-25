@@ -417,7 +417,7 @@ final class InstallActivity {
             // Not from the main thread, the header says.
             Task.detached { [weak self] in
                 do {
-                    try await BGTaskScheduler.shared.submit(request)
+                    try BGTaskScheduler.shared.submit(request)
                 } catch {
                     await self?.taskRefused(identifier, error)
                 }
