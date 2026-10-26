@@ -15,6 +15,7 @@ mod entitlements;
 mod error_text;
 mod ffi_util;
 mod logging;
+mod p12;
 mod pairing;
 
 use std::ffi::{c_char, c_void};

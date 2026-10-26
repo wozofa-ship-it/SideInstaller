@@ -97,6 +97,13 @@ zip = { version = "8.3", default-features = false, features = ["deflate"] }
 flate2 = "1"
 base64 = "0.22.1"
 
+# Reading the PKCS#12 archive SideStore exports its certificate in (`p12.rs`):
+# isideload's p12 reader for encrypted archives, and the `pkcs12` types under
+# it. Versions already pinned in Cargo.lock via isideload.
+p12-keystore = { version = "0.3.0-rc4", package = "isideload-p12-keystore" }
+pkcs12 = "0.2.0-pre.0"
+der = { version = "0.8", features = ["oid"] }
+
 # Named in the 2FA bridge's signature: isideload's login callback returns a
 # `rootcause::Report`. Already in the tree via isideload (same 0.12 line).
 rootcause = "0.12"
