@@ -659,6 +659,11 @@ final class Engine: ObservableObject {
                 startDevicePreparation()
                 try await signInStep()
                 try await download()
+                // Signing registers App IDs, which a free Apple ID has few of,
+                // so an imported IPA waits for the go-ahead first.
+                if downloadedSource == .custom {
+                    try await confirmAppIDCost()
+                }
                 // Most of the app is the same signed or not, so that part goes
                 // to the device while signing runs.
                 startPrestage()
@@ -743,7 +748,8 @@ final class Engine: ObservableObject {
     var popups: [Popup] {
         if isRunning {
             guard isWaitingOnUser else { return [] }
-            return [pairingPIN.map(Popup.pairingCode), guide.map(Popup.guide)].compactMap { $0 }
+            return [pairingPIN.map(Popup.pairingCode), guide.map(Popup.guide),
+                    appIDCost.map(Popup.appIDCost)].compactMap { $0 }
         }
         if finished { return finishedPopups }
         var shown: [Popup] = []
@@ -771,8 +777,8 @@ final class Engine: ObservableObject {
     /// True for a popup the run is waiting on: closing it cancels the install.
     func blocks(_ popup: Popup) -> Bool {
         switch popup {
-        case .pairingCode, .guide: return isWaitingOnUser
-        default:                   return false
+        case .pairingCode, .guide, .appIDCost: return isWaitingOnUser
+        default:                               return false
         }
     }
 
@@ -1688,6 +1694,64 @@ final class Engine: ObservableObject {
     }
 
     // MARK: Step 6 — sign the IPA
+
+    /// Asks what signing this IPA costs in App IDs, before signing it.
+    /// Copied from upstream (FrizzleM/SideInstaller @ 7d1cb04): the fork's
+    /// popup and answer were restored in merge recovery, but this setter
+    /// never was, so custom installs signed with no warning. A check that
+    /// fails, or an IPA whose bundle ID can't be read, signs ahead anyway.
+    @MainActor
+    private func confirmAppIDCost() async throws {
+        guard let session = signSession, let ipa = downloadedIPAPath else { return }
+        guard let bundleID = IPALibrary.appInfo(at: URL(fileURLWithPath: ipa))?.bundleID else {
+            log("⚠️ Couldn't read the IPA's bundle ID, so its App ID cost isn't known; signing goes ahead.")
+            return
+        }
+        setStep(.sign, .active)
+        let cost: AppIDCost
+        do {
+            cost = try await onSignQueue { try self.performAppIDQuota(session: session, bundleID: bundleID) }
+        } catch {
+            log("⚠️ Couldn't check this Apple ID's App IDs (\(short(error))); signing goes ahead.")
+            return
+        }
+        try Task.checkCancellation()
+        let left = cost.available.map(String.init) ?? "unknown"
+        log("App IDs: this app needs \(cost.cost) new (\(cost.newIDs.joined(separator: ", "))); \(left) left. Waiting for the go-ahead.")
+        appIDCost = cost
+        setStep(.sign, .waiting)
+        let proceed = await withTaskCancellationHandler {
+            await withCheckedContinuation { appIDCostReply = $0 }
+        } onCancel: {
+            Task { @MainActor in self.answerAppIDCost(false) }
+        }
+        appIDCost = nil
+        guard proceed else { throw CancellationError() }
+        log("App IDs: going ahead.")
+        setStep(.sign, .active)
+    }
+
+    private func performAppIDQuota(session: OpaquePointer, bundleID: String) throws -> AppIDCost {
+        struct Quota: Decodable {
+            let new_ids: [String]
+            let available: Int?
+            let max: Int?
+            let next_expiry: Double?
+        }
+        var json: UnsafeMutablePointer<CChar>?
+        var error: UnsafeMutablePointer<CChar>?
+        let rc = si_appid_quota(session, bundleID, &json, &error)
+        guard rc == 0 else {
+            let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
+            error.map { si_string_free($0) }
+            throw EngineError.message(msg)
+        }
+        let text = json.map { String(cString: $0) } ?? ""
+        json.map { si_string_free($0) }
+        let quota = try JSONDecoder().decode(Quota.self, from: Data(text.utf8))
+        return AppIDCost(newIDs: quota.new_ids, available: quota.available, limit: quota.max,
+                         nextExpiry: quota.next_expiry.map(Date.init(timeIntervalSince1970:)))
+    }
 
     @MainActor
     private func signApp() async throws {
@@ -3952,9 +4016,8 @@ extension Engine {
             reply.resume(returning: false)
             cancelOneClick()
         }
-        // Fork deviation: upstream's ask flow clears this after the resume,
-        // but the fork has no ask flow wired, so clear here to never leave a
-        // stale cost popup behind.
+        // Clear here as well as in confirmAppIDCost, so a cancelled run
+        // never leaves a stale cost popup behind.
         appIDCost = nil
     }
 }

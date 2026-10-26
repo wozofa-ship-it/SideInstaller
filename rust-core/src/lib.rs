@@ -333,6 +333,21 @@ pub unsafe extern "C" fn si_account_config(
     account::account_config(session, out_json, out_error)
 }
 
+/// Set `*out_json` to what signing an app whose main bundle ID is `bundle_id`
+/// would cost in App IDs. Blocks; registers nothing.
+///
+/// # Safety
+/// See `account::appid_quota`.
+#[no_mangle]
+pub unsafe extern "C" fn si_appid_quota(
+    session: *mut SignSession,
+    bundle_id: *const c_char,
+    out_json: *mut *mut c_char,
+    out_error: *mut *mut c_char,
+) -> i32 {
+    account::appid_quota(session, bundle_id, out_json, out_error)
+}
+
 /// Free a sign session.
 ///
 /// # Safety

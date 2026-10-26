@@ -234,6 +234,17 @@ int32_t si_account_config(SignSession *session,
                           char **out_json,
                           char **out_error);
 
+// What signing an app whose main bundle ID is `bundle_id` would cost in App
+// IDs. BLOCKS; registers nothing. On success *out_json is a heap JSON object:
+// {new_ids: [<identifier, ...>], available: <how many more Apple allows now,
+// or null>, max: <the limit, or null>, next_expiry: <unix seconds the soonest
+// App ID expires, or null>}. Returns 0 on success, non-zero on error
+// (*out_error set). Free strings with si_string_free.
+int32_t si_appid_quota(SignSession *session,
+                       const char *bundle_id,
+                       char **out_json,
+                       char **out_error);
+
 // Free a sign session.
 void si_sign_session_free(SignSession *session);
 
