@@ -19,7 +19,7 @@ use isideload::sideload::application::Application;
 use isideload::sideload::cert_identity::CertificateIdentity;
 use isideload::sideload::sign;
 use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
-use x509_cert::{der::Decode, Certificate};
+use x509_cert_old::{der::Decode, Certificate};
 
 use crate::error_text::report_text;
 use crate::ffi_util::{cstr, opt_str};

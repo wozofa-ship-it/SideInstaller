@@ -89,9 +89,11 @@ serde_json = "1"
 # be handed to SideStore, and base64 for the fields SideStore expects encoded.
 # Both are already in the tree via isideload, so this adds no new deps.
 plist = "1.8"
-# 企业证书本地签名直接用的两个类型（版本与 isideload 对齐，锁文件里已有）
+# p12.rs（上游原样）走 x509-cert 0.3/der 0.8；企业签名走 0.2.5（isideload 的
+# CertificateIdentity 类型），两者用重命名依赖分开，类型互不串。
 rsa = { version = "0.9.10" }
-x509-cert = "0.2.5"
+x509-cert = "0.3"
+x509-cert-old = { version = "0.2.5", package = "x509-cert" }
 # 已签 IPA 打包（版本/spec 与 isideload 对齐，锁文件里已有）
 zip = { version = "8.3", default-features = false, features = ["deflate"] }
 flate2 = "1"
