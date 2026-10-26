@@ -10,9 +10,11 @@ struct SideInstallerShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: RefreshAllAppsIntent(),
             phrases: [
-                "全部续签",
+                // App Shortcuts 的硬性规则：每条短语里必须带一次应用名，
+                // 少一条编译期就直接报错（这次 #44 就是挂在这里）。
+                "用 \(.applicationName) 全部续签",
                 "用 \(.applicationName) 续签全部应用",
-                "续签全部应用"
+                "在 \(.applicationName) 里全部续签"
             ],
             shortTitle: "全部续签",
             systemImageName: "checkmark.seal.fill"
