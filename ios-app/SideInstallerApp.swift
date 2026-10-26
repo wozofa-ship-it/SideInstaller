@@ -115,15 +115,21 @@ struct SideInstallerApp: App {
             // Files opened in the app (share sheet, "Open with", other apps), as
             // an alternative to the document picker.
             .onOpenURL { url in
-                // Handle `sideinstaller://refresh-all` from Shortcuts App Intent.
-                if url.scheme == "sideinstaller" && url.host == "refresh-all" {
-                    NotificationCenter.default.post(name: .refreshAllApps, object: nil)
-                    // 界面不在应用页时通知没人接，共享 manager 自己在后台跑
-                    Task { await SideloadedAppsManager.shared.refreshAllFromShortcut() }
+                // Handle `sideinstaller://` links: refresh-all from Shortcuts
+                // runs at once; every other link goes through the Engine's
+                // confirmation popup and does nothing until the user says yes.
+                // LocalDevVPN returning to the app carries no action, so it
+                // parses as ignored and is safely dropped.
+                if url.scheme == "sideinstaller" {
+                    if url.host == "refresh-all" {
+                        NotificationCenter.default.post(name: .refreshAllApps, object: nil)
+                        // 界面不在应用页时通知没人接，共享 manager 自己在后台跑
+                        Task { await SideloadedAppsManager.shared.refreshAllFromShortcut() }
+                    } else {
+                        Task { @MainActor in engine.receiveLink(url) }
+                    }
                     return
                 }
-                // Ignore other `sideinstaller://` URLs: LocalDevVPN only uses them to
-                // return to the app.
                 guard url.isFileURL else { return }
                 // `.mobiledevicepairing`/`.plist` are pairing files; anything else
                 // is treated as an IPA.

@@ -433,6 +433,8 @@ let chineseStrings: [String: String] = [
     "Refreshing %@": "正在续签 %@",
     "Signed by team %@, not the one you're signed in as — refreshing it here would install a second copy.":
         "由团队 %@ 签名，与你登录的团队不同：在这里续签会另外安装一个副本。",
+    "Skipped: not signed by the team you're signed in as, so a certificate-signed app is never re-signed here.":
+        "已跳过：不是你登录团队签的，证书签的应用不在这里续签。",
     "Refreshed. Its seven days start again now.": "已续签。七天从现在重新开始。",
     "Nothing was refreshed.": "没有续签任何应用。",
     "Refreshed %d of %d apps.": "已续签 %d 个应用，共 %d 个。",
@@ -1135,6 +1137,11 @@ let chineseStrings: [String: String] = [
     "App Sources": "应用源",
     "Link": "链接",
     "This link is waiting for confirmation.": "此链接正在等待确认。",
+    "Install the IPA from this link?": "从这个链接安装这个 IPA？",
+    "Import this signing certificate?": "导入这个签名证书？",
+    "导出描述文件": "导出描述文件",
+    "导出后可在 LiveContainer 里导入同一张证书，不用再找原文件；密码不一起导出，导入时再填一次。": "导出后可在 LiveContainer 里导入同一张证书，不用再找原文件；密码不一起导出，导入时再填一次。",
+    "这里是 Apple ID 证书；企业证书在底部「证书」页。": "这里是 Apple ID 证书；企业证书在底部「证书」页。",
     "No sources yet. Tap + to add one.": "还没有应用源，点 + 添加一个。",
     "Add Source": "添加应用源",
     "Source URL": "应用源地址",

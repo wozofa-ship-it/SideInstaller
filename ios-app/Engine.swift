@@ -753,6 +753,7 @@ final class Engine: ObservableObject {
         }
         if finished { return finishedPopups }
         var shown: [Popup] = []
+        if let link = pendingLink { shown.append(.link(link)) }
         if certConflict { shown.append(.certConflict) }
         if let guide { shown.append(.guide(guide)) }
         if let lastError {
@@ -803,6 +804,55 @@ final class Engine: ObservableObject {
         case .liveContainerImport: liveContainerImportClosed = true
         case .appIDCost:             appIDCost = nil
         case .link:                  pendingLink = nil
+        }
+    }
+
+    /// A `sideinstaller://` link opened from a web page, a chat or another
+    /// app. Nothing acts on it until the user says yes to its popup:
+    /// parsing only sets `pendingLink`, which RootView shows over the
+    /// Install tab. Invalid links become `lastError` instead of a popup.
+    @MainActor
+    func receiveLink(_ url: URL) {
+        switch DeepLink.parse(url, answersSideStore: false) {
+        case .link(let link):
+            pendingLink = link
+            log("Link: \(link.logDescription)")
+        case .invalid(let message):
+            lastError = message
+            log("⛔️ Link: \(message)")
+        case .ignored:
+            break
+        }
+    }
+
+    /// The answer to a link's confirmation popup. Declining just clears it;
+    /// confirming runs what the link asked for, through the same paths as
+    /// a manual import (so the same guards, App ID check and errors apply).
+    @MainActor
+    func answerLink(_ proceed: Bool) {
+        guard let link = pendingLink else { return }
+        pendingLink = nil
+        guard proceed else { return }
+        switch link {
+        case .install(let url):
+            installSource = .custom
+            Task {
+                await importCustomIPA(fromLink: url.absoluteString)
+                if lastError == nil, IPALibrary.customImport() != nil {
+                    runOneClick()
+                }
+            }
+        case .pairingFile(let file):
+            let tmpURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(file.displayName)
+            do {
+                try file.data.write(to: tmpURL, options: .atomic)
+                Task { await importPairingFile(from: tmpURL) }
+            } catch {
+                lastError = L("Couldn't import %@: %@", file.displayName, error.localizedDescription)
+            }
+        case .certificate(let cert):
+            certificateToImport = CertificateImport(certificate: cert, retryInstall: false)
         }
     }
 

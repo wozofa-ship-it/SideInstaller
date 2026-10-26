@@ -134,6 +134,28 @@ struct CertTabView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                // 导出给 LiveContainer：只发 .p12 文件和描述文件本身，
+                // 密码不一起导出，LiveContainer 导入时再填一次密码。
+                // 这样同一张企业证书不用再找原文件就能在另一边用。
+                if hasP12 || hasProvision {
+                    HStack(spacing: 10) {
+                        if hasP12 {
+                            ShareLink(item: EnterpriseCertStore.p12URL) {
+                                Label(L("Export certificate (p12)"), systemImage: "square.and.arrow.up")
+                            }
+                        }
+                        if hasProvision {
+                            ShareLink(item: EnterpriseCertStore.provisionURL) {
+                                Label(L("导出描述文件"), systemImage: "square.and.arrow.up")
+                            }
+                        }
+                    }
+                    .font(.footnote)
+                    Text(L("导出后可在 LiveContainer 里导入同一张证书，不用再找原文件；密码不一起导出，导入时再填一次。"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 SecureField(L("证书密码"), text: $password)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: password) { _, newValue in

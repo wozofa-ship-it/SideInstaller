@@ -172,7 +172,7 @@ struct ContentView: View {
     // MARK: Header
 
     private var header: some View {
-        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "SideInstaller",
+        BrandHeader(icon: "arrow.down.app.fill", image: "AppLogo", title: "SideInstaller 🅥",
                     animateIcon: engine.isRunning) {
             statusPill
                 .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))
@@ -1050,15 +1050,58 @@ struct InstallPopup: View {
             guidePopup(Guides.liveContainerImport)
         case .appIDCost(let cost):
             appIDCostPopup(cost)
-        case .link:
-            // Fork note: the upstream link-confirmation flow isn't wired
-            // (nothing sets `pendingLink` in the fork's Engine), so this
-            // branch only satisfies the switch's exhaustiveness.
+        case .link(let link):
             PopupCard(title: L("Link"), systemImage: "link.circle.fill",
                       tint: Theme.accent, onClose: close) {
-                Text(L("This link is waiting for confirmation."))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 16) {
+                    switch link {
+                    case .install(let url):
+                        Text(L("Install the IPA from this link?"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(url.absoluteString)
+                            .font(.caption.monospaced())
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    case .pairingFile(let file):
+                        Text(L("Import this pairing file?"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(file.displayName) (\(ByteCountFormatter.string(fromByteCount: Int64(file.data.count), countStyle: .file)))")
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    case .certificate(let cert):
+                        Text(L("Import this signing certificate?"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(ByteCountFormatter.string(fromByteCount: Int64(cert.data.count), countStyle: .file))
+                            .font(.caption.monospaced())
+                    }
+                    VStack(spacing: 10) {
+                        Button {
+                            engine.answerLink(true)
+                        } label: {
+                            switch link {
+                            case .install:
+                                Label(L("Install"), systemImage: "arrow.down.app.fill")
+                            default:
+                                Label(L("Import"), systemImage: "square.and.arrow.down")
+                            }
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        Button(role: .cancel) { engine.answerLink(false) } label: {
+                            Text(L("Cancel"))
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Color.secondary)
+                    }
+                }
             }
         }
     }

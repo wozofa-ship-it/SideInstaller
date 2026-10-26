@@ -499,11 +499,12 @@ final class SideloadedAppsManager: ObservableObject {
                 // can't be interrupted midway.
                 if Task.isCancelled { break }
                 let job = jobs[index]
-                // Skip apps signed by a different team: the new bundle ID would
-                // install a second copy instead of replacing the app.
-                if let team = engine.signingTeamID, let installed = job.teamID, installed != team {
+                // 第二道闸：哪怕可续签列表里混进了证书签的，跑到这里
+                // 也拦下。团队号未知、App 团队号未知、团队号不一致，
+                // 三种一律跳过不续，绝不把证书签的 App 重新签成个人 ID。
+                guard let team = engine.signingTeamID, let installed = job.teamID, installed == team else {
                     jobs[index].state = .failed(
-                        L("Signed by team %@, not the one you're signed in as — refreshing it here would install a second copy.", installed))
+                        L("Skipped: not signed by the team you're signed in as, so a certificate-signed app is never re-signed here."))
                     continue
                 }
                 jobs[index].state = .working
@@ -645,12 +646,15 @@ final class SideloadedAppsManager: ObservableObject {
         // replace apps that ID's team signed. Anything else (enterprise
         // certificates, another person's ID) is left out up front instead
         // of being picked up as a job and failing one by one during a run.
-        var kept = paired
-        var excluded = 0
-        if let team = engine.signingTeamID {
-            kept = paired.filter { $0.teamID == nil || $0.teamID == team }
-            excluded = paired.count - kept.count
-        }
+        // 全部续签铁律（防上次的错）：证书签的 App 一律不续。
+        // 上次的口子就在这里：团队号拿不到时不过滤、App 团队号未知
+        // 时也放行，证书签的 App 就被一起续了。现在改成硬过滤：
+        // 团队号未知时一个都不留，App 团队号未知时也不留，只有
+        // 团队号明确等于登录团队的才进可续签列表。
+        let kept = engine.signingTeamID.map { team in
+            paired.filter { $0.teamID == team }
+        } ?? []
+        let excluded = paired.count - kept.count
         refreshable = kept
         teamExcluded = excluded
         unrefreshable = max(0, entries.count - paired.count)
