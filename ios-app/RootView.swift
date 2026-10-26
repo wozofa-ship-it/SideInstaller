@@ -111,6 +111,12 @@ struct RootView: View {
         .onChange(of: engine.pendingLink) { _, link in
             if link != nil { page = .install }
         }
+        // A share / “Open with” IPA import lands here too: the run it started
+        // (or the guide it stopped on) lives on the Install tab, so jump
+        // there instead of leaving the user to go find it by hand.
+        .onChange(of: engine.sharedIPAReady) { _, ready in
+            if ready { page = .install; engine.sharedIPAReady = false }
+        }
         // A certificate a link brought is checked and imported by the same
         // manager as the Certificates page.
         // Zero-arg form: the two-arg (#35) and one-arg (#36) rejections were

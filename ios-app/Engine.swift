@@ -419,6 +419,11 @@ final class Engine: ObservableObject {
     @Published private(set) var signedDisplayName: String?
     /// Filename of the IPA imported for `InstallSource.custom`, if any.
     @Published private(set) var customIPAName: String?
+    /// Set by the share / “Open with” path after a successful IPA import.
+    /// RootView jumps to the Install tab on it, so a run the share started
+    /// (or the guide it stopped on) is in front instead of the user having
+    /// to go to the Install tab by hand. Cleared when RootView consumes it.
+    @Published var sharedIPAReady = false
     /// True while a picked IPA is being copied in.
     @Published private(set) var isImportingIPA = false
     /// Download progress of a link import (0…1); nil for file imports.

@@ -586,6 +586,8 @@ let chineseStrings: [String: String] = [
     "Tunnel": "隧道",
     "Something at %@:%d refused the connection, so the tunnel is carrying traffic — the device just isn't listening on its pairing port. That port only opens while Developer Mode is on, and iOS asks for it again after every restart: turn it on under Settings › Privacy & Security › Developer Mode, then try again. If it's already on, pair this iPhone again under “Pairing file”.":
         "%@:%d 上有东西拒绝了连接，说明隧道是通的，只是设备没有在它的配对端口上监听。该端口只有在开启开发者模式时才会打开，而且每次重启后 iOS 都会再次要求确认：请在 设置 › 隐私与安全性 › 开发者模式 中打开它，然后重试。如果已经打开，请在“配对文件”中重新配对这台 iPhone。",
+    "Couldn't reach the device at %@:%d at all. The loopback VPN is most likely off, or Device IP isn't the address it carries: in LocalDevVPN that's the one under Settings › Device IP (10.7.0.1 by default), not the “Connected to” address on its main screen. First check that the phone and the computer are on the same Wi-Fi (the local tunnel needs a local network).":
+        "完全连不上 %@:%d 上的设备。回环 VPN 很可能没开，或者设备 IP 不是它承载的地址：在 LocalDevVPN 里，那是“设置 › Device IP”里的地址（默认 10.7.0.1），而不是主界面上“Connected to”后面的地址。先确认手机和电脑在同一 WiFi（本地隧道要局域网）。",
     "Start LocalDevVPN when needed": "需要时打开 LocalDevVPN",
     "Start LocalDevVPN now": "立即启动 LocalDevVPN",
     "LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you.":

@@ -138,13 +138,24 @@ struct SideInstallerApp: App {
                 } else {
                     engine.installSource = .custom
                     Task {
+                        let wasRunning = engine.isRunning
                         await engine.importCustomIPA(from: url)
                         // 从分享/“打开方式”进来的 IPA 直接装：只有这次导入成功
                         // 才起管线；导入失败时 importCustomIPA 会写 lastError，
                         // 管线不启动。管线自己的 guards 会在缺证书/配对/WiFi
                         // 时停下并给出指引，与点安装按钮同一套。
                         if engine.lastError == nil, IPALibrary.customImport() != nil {
-                            engine.runOneClick()
+                            // 先跳安装页：管线在跑时进度在那一页，guard 停下时
+                            // 指引卡也在那一页，不用用户自己再去安装页找。
+                            engine.sharedIPAReady = true
+                            if wasRunning {
+                                // 已有管线在跑时 runOneClick 会静默返回，不写
+                                // 任何提示；这里明说等它跑完再试，免得看起来
+                                // 像“只导入就停了”。
+                                engine.lastError = L("An install is already running. Wait for it to finish, then try again.")
+                            } else {
+                                engine.runOneClick()
+                            }
                         }
                     }
                 }

@@ -153,12 +153,8 @@ final class DeviceConnection {
                 return L("Something at %@:%d refused the connection, so the tunnel is carrying traffic — the device just isn't listening on its pairing port. That port only opens while Developer Mode is on, and iOS asks for it again after every restart: turn it on under Settings › Privacy & Security › Developer Mode, then try again. If it's already on, pair this iPhone again under “Pairing file”.",
                          deviceIP, Int(Self.rsdPort))
             }
-            return """
-                Couldn't reach the device at \(deviceIP):\(Self.rsdPort) at all. The \
-                loopback VPN is most likely off, or Device IP isn't the address it \
-                carries: in LocalDevVPN that's the one under Settings › Device IP \
-                (10.7.0.1 by default), not the “Connected to” address on its main screen.
-                """
+            return L("Couldn't reach the device at %@:%d at all. The loopback VPN is most likely off, or Device IP isn't the address it carries: in LocalDevVPN that's the one under Settings › Device IP (10.7.0.1 by default), not the “Connected to” address on its main screen. First check that the phone and the computer are on the same Wi-Fi (the local tunnel needs a local network).",
+                     deviceIP, Int(Self.rsdPort))
         default:
             return """
                 The tunnel didn't come up, and the failure didn't match any known cause. \
