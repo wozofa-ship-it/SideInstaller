@@ -1143,4 +1143,20 @@ let chineseStrings: [String: String] = [
     "OK": "好",
     "Loading…": "正在加载…",
     "Import failed": "导入失败",
+    "Export certificate (p12)": "导出证书（p12）",
+    "Bundle ID": "Bundle 标识符",
+    "Certificate password:": "证书密码：",
+    "No IPA imported.": "没有导入 IPA。",
+    "The built-in tunnel couldn't start. See the log for the reason, then try again.":
+        "内置隧道没能启动，请看日志找原因，然后重试。",
+    "Apple ID sign-in failed on %@. Last error: %@":
+        "Apple ID 在 %@ 上登录失败。最近的错误：%@",
+    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). Revoke it under Tools › Certificates, then refresh again.":
+        "Apple 不会给这个 Apple ID 再发签名证书：它说已经有一个（错误 7460）。请在“工具 › 证书”里吊销它，然后再刷新。",
+    "Every app and app extension SideInstaller signs needs an App ID. A free Apple ID can register 10 a week, and each one counts for 7 days.":
+        "SideInstaller 签名的每个 App 和扩展都需要一个 App ID。免费 Apple ID 每周可注册 10 个，每个会占用 7 天。",
+    "%d app here is signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so it is left out.":
+        "这里有 %d 个应用是用企业证书或其他团队的证书签的，不是你的 Apple ID。续签只续你自己 ID 签的应用，所以它被排除了。",
+    "%d apps here are signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so they are left out.":
+        "这里有 %d 个应用是用企业证书或其他团队的证书签的，不是你的 Apple ID。续签只续你自己 ID 签的应用，所以它们被排除了。",
 ]

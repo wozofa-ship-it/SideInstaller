@@ -99,20 +99,26 @@ enum Backdrop {
 /// whose control points sway on sine waves, and over that the tab's `Backdrop`
 /// wash.
 struct AppBackground: View {
+    // 浅色下也得可读：以前底恒黑，浅色时 .primary 是黑色，黑字压黑底
+    // （关于页截图就是这样）。底色跟随浅/深色，浅色用系统底色 + 淡蓝晕，
+    // 深色保持原来的黑底蓝晕；工具页的深浅过渡在浅色下只压 1/4，避免压灰。
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         // Ticks every frame, with the points derived from the clock so the
         // motion is continuous rather than resetting on a keyframe.
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
+            let light = colorScheme == .light
             ZStack {
-                Color.black
+                light ? Color(.systemBackground) : Color.black
                 mesh(at: t)
                     .blur(radius: 24)
                     // Low enough to read as a deep tint rather than a light.
-                    .opacity(0.2)
+                    .opacity(light ? 0.12 : 0.2)
                 // Off the same clock as the mesh, so every page's copy of this
                 // backdrop is at the identical point of the transition.
-                Color.black.opacity(Backdrop.wash(at: t))
+                Color.black.opacity(Backdrop.wash(at: t) * (light ? 0.25 : 1))
             }
             .ignoresSafeArea()
         }
