@@ -127,7 +127,9 @@ struct RootView: View {
             sideBySideManager.signOut()
         }
         .tint(Theme.accent)
-        .preferredColorScheme(.dark)
+        // 外观只听 App 入口的 SIDAppearance 档（SideInstallerApp 的
+        // .preferredColorScheme），这里不再硬编码 .dark，否则主界面
+        // 永远深色、设置页却跟浅色档走，两边割裂。
         // A swipe down is a cancel; the sign-in closing it is not.
         .sheet(isPresented: Binding(
             get: { engine.twoFactor != nil },

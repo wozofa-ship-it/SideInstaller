@@ -1117,4 +1117,30 @@ let chineseStrings: [String: String] = [
         "使用非官方副本？",
     "If this copy was changed, it can send your Apple ID and password to someone else. Continue only if you trust where it came from.":
         "如果此副本被修改过，它可能会把你的 Apple ID 和密码发送给他人。只有在你信任其来源时才继续。",
+
+    // MARK: - 补漏（设置页 / 外观 / 应用源：原表缺失，L() 回落英文）
+
+    "Appearance": "外观",
+    "Follow System": "跟随系统",
+    "Light": "浅色",
+    "Dark": "深色",
+    "Built-in tunnel interface": "内置隧道接口",
+    "Tunnel peer (device IP)": "隧道对端（设备 IP）",
+    "Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects.":
+        "内置隧道默认接口 10.7.1.1/32、对端 10.7.0.1/32，地址改动下次隧道连接时生效。",
+    "Refresh apps automatically in background": "后台自动续签应用",
+    "Auto Refresh": "自动续签",
+    "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
+        "SideInstaller 在后台保持存活（无声音频 + 定位），每 30 分钟检查一次，签名 3 天内到期的应用会自动续签。定位权限须设为“始终”，隧道须保持连接（内置隧道即可）。系统也会不时在后台唤醒应用检查一次，不要在应用切换器里把它划掉。",
+    "App Sources": "应用源",
+    "Link": "链接",
+    "This link is waiting for confirmation.": "此链接正在等待确认。",
+    "No sources yet. Tap + to add one.": "还没有应用源，点 + 添加一个。",
+    "Add Source": "添加应用源",
+    "Source URL": "应用源地址",
+    "Add": "添加",
+    "That isn't a usable source link.": "这不是可用的应用源链接。",
+    "OK": "好",
+    "Loading…": "正在加载…",
+    "Import failed": "导入失败",
 ]

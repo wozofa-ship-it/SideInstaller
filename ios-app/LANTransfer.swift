@@ -286,11 +286,11 @@ final class LANTransferServer: ObservableObject {
         return """
         <!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Side 🅥 局域网传输</title>
+        <title>SideInstaller 局域网传输</title>
         <style>body{font-family:-apple-system,sans-serif;margin:24px;color:#222}
         table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}
         a{color:#06c;text-decoration:none}</style></head><body>
-        <h2>Side 🅥 文件传输</h2>
+        <h2>SideInstaller 文件传输</h2>
         <form method="post" action="/upload" enctype="multipart/form-data">
         <input type="file" name="file"> <button type="submit">上传</button></form>
         <table><tr><th>文件</th><th>大小</th><th></th><th></th></tr>\(rows)</table>

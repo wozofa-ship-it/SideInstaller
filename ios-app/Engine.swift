@@ -639,8 +639,15 @@ final class Engine: ObservableObject {
         resetRun()
         isRunning = true
         log("=== Starting one-click install ===")
+        // 切后台断安装的根因：InstallActivity（iOS 26 的
+        // BGContinuedProcessingTask + 全程 UIKit 后台时间）写好了却
+        // 从没被接进管线，runStarted/runEnded 全仓零调用。接上后，
+        // 切后台由后台任务接着跑，没任务时也有半分钟 grace + 回前台续跑，
+        // 而不是一离前台就被挂起、隧道断掉。
+        InstallActivity.shared.runStarted()
 
         pipelineTask = Task { @MainActor in
+            var outcome: InstallActivity.Outcome = .stopped
             do {
                 try await ensureNetwork()
                 // The download needs neither the device nor the Apple ID, so it
@@ -666,7 +673,9 @@ final class Engine: ObservableObject {
                 try await install(prestaged: staged)
                 try await writePairing(accountConfig: accountConfig, prepared: prepared)
                 finishSuccess()
+                outcome = .installed
             } catch is CancellationError {
+                outcome = .cancelled
                 log("Install cancelled.")
                 // A cancelled run leaves no progress behind, so the Install
                 // tab goes back to its button.
@@ -679,6 +688,7 @@ final class Engine: ObservableObject {
                 log("⛔️ Stopped: \(msg)")
                 failActiveStep(to: .failed)
             }
+            InstallActivity.shared.runEnded(outcome)
             stopBackgroundWork()
             isRunning = false
             isCancelling = false

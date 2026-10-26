@@ -215,7 +215,7 @@ struct FilesTabView: View {
                     Text(L("文件管理"))
                         .font(.headline)
                 }
-                Text(L("这里是 App 自己的文件目录：下载的、导入的、已签名的 IPA 都在这。也可以在「文件」App 里往 Side 🅥 的目录放文件，回到这里就能看到。"))
+                Text(L("这里是 App 自己的文件目录：下载的、导入的、已签名的 IPA 都在这。也可以在「文件」App 里往 SideInstaller 的目录放文件，回到这里就能看到。"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Button {

@@ -566,7 +566,7 @@ final class SideloadedAppsManager: ObservableObject {
             if BuiltinTunnel.useBuiltinDirectly {
                 // 签名带隧道权限：内置隧道不依赖任何外部 App，拉不起来才报失败
                 guard await BuiltinTunnel.startAndWait() else {
-                    await postResignNotification(title: L("续签失败"), body: L("内置隧道没能启动，打开 Side 🅥 重试一次。"))
+                    await postResignNotification(title: L("续签失败"), body: L("内置隧道没能启动，打开 SideInstaller 重试一次。"))
                     return
                 }
                 engine.refreshNetworkStatus()
