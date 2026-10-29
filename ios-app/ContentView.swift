@@ -26,8 +26,6 @@ struct ContentView: View {
     /// Shows the "install LocalDevVPN first" prompt when Install is tapped
     /// with no tunnel and no LocalDevVPN on the phone.
     @State private var showInstallLOCPrompt = false
-    /// Shows the "Wi-Fi is off" prompt when Install is tapped with no tunnel.
-    @State private var showNoWiFiPrompt = false
     /// Text in the IPA download-link field.
     @State private var ipaLink = ""
     @FocusState private var linkFieldFocused: Bool
@@ -507,16 +505,6 @@ struct ContentView: View {
         } message: {
             Text(L("安装要走 LocalDevVPN 的本地隧道。先装好 LocalDevVPN，之后点安装会自动打开它连接，不用手动开。"))
         }
-        .alert(L("WiFi 未打开"), isPresented: $showNoWiFiPrompt) {
-            Button(L("去设置")) {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    openURL(url)
-                }
-            }
-            Button(L("Cancel"), role: .cancel) { }
-        } message: {
-            Text(L("安装要用本地网络，先打开 WiFi 再点安装。"))
-        }
         .onChange(of: engine.isRunning) { _, running in
             // A run that ended by itself leaves nothing to cancel.
             if !running { confirmingCancel = false }
@@ -532,16 +520,16 @@ struct ContentView: View {
     /// run is going, so nothing waits on the animation.
     private func startInstall() {
         installPressed = false
-        // 点安装先检查隧道：没通就先看 WiFi 开没开。签名带隧道权限
-        // （企业证书等）时不再查 LocalDevVPN——流程里的 tunnelUp()
-        // 会自己把内置隧道拉起来（首次弹一次系统许可）；签名带不了
-        // 隧道（个人 ID 等）就按老规矩查 LocalDevVPN、缺了才提示。
+        // 点安装先检查隧道：没通也不再查 WiFi（2026-10-29，
+        // 跟续签同理：回环隧道不出设备，WiFi 与它无关；
+        // 只有第一次配对才要 WiFi，那是引擎 ensureNetwork
+        // 里 needsFreshPairing 的事，不归这里管）。签名带隧道
+        // 权限（企业证书等）时不再查 LocalDevVPN——流程里的
+        // tunnelUp() 会自己把内置隧道拉起来（首次弹一次系统
+        // 许可）；签名带不了隧道（个人 ID 等）就按老规矩查
+        // LocalDevVPN、缺了才提示。
         engine.refreshNetworkStatus()
         if !engine.vpnConnected {
-            if !engine.wifiConnected {
-                showNoWiFiPrompt = true
-                return
-            }
             if !BuiltinTunnel.useBuiltinDirectly, !engine.localDevVPNInstalled {
                 showInstallLOCPrompt = true
                 return

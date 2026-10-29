@@ -454,14 +454,16 @@ final class SideloadedAppsManager: ObservableObject {
             lastError = L("An install is already running. Wait for it to finish, then refresh.")
             return
         }
-        // 隧道没通时先查 WiFi：没开 WiFi 隧道那头连不上，先把话说清。
-        // 没装 LocalDevVPN 也一样，别让流程跑到一半才报个看不懂的连接错误。
+        // 续签不再以 WiFi 为前置（2026-10-29）：隧道是本机回环
+        // utun，包根本不出设备，WiFi 开没开与它无关；引擎的
+        // ensurePairingConnection 自己就写着“No Wi-Fi check:
+        // this all runs over the loopback tunnel”。以前这里没开
+        // WiFi 就直接拒掉，是多余的门。删掉它：隧道没通也先
+        // 放行，后面 prepareRefresh 里的 tunnelUp() 会真去拉隧
+        // 道，拉不起来再报隧道错误——那才是真原因。没装
+        // LocalDevVPN 也一样，别让流程跑到一半才报个看不懂
+        // 的连接错误。
         engine.refreshNetworkStatus()
-        if !engine.vpnConnected && !engine.wifiConnected {
-            lastError = L("WiFi 未打开，请先打开 WiFi 再续签。")
-            engine.log("⛔️ Refresh all: Wi-Fi is off.")
-            return
-        }
         if !engine.vpnConnected && !engine.localDevVPNInstalled && !BuiltinTunnel.useBuiltinDirectly {
             lastError = L("未安装 LocalDevVPN，请先安装 LocalDevVPN 再续签。")
             engine.log("⛔️ Refresh all: LocalDevVPN isn't installed.")
@@ -560,10 +562,10 @@ final class SideloadedAppsManager: ObservableObject {
         guard !isRefreshing else { return }
         engine.refreshNetworkStatus()
         if !engine.vpnConnected {
-            if !engine.wifiConnected {
-                await postResignNotification(title: L("续签失败"), body: L("WiFi 未打开，请先打开 WiFi 再续签。"))
-                return
-            }
+            // 快捷指令/后台续签同样不再查 WiFi（2026-10-29）：
+            // 下面本来就有一套隧道拉起流程（内置隧道直起，
+            // 起不来再走 LocalDevVPN 交接），WiFi 分支只会
+            // 在隧道明明能起时提前判死刑，删掉它。
             if BuiltinTunnel.useBuiltinDirectly {
                 // 签名带隧道权限：内置隧道不依赖任何外部 App，拉不起来才报失败
                 guard await BuiltinTunnel.startAndWait() else {
@@ -702,8 +704,6 @@ struct AppsView: View {
     @State private var confirmRefresh = false
     /// Shows the "LocalDevVPN isn't installed" prompt with a link to get it.
     @State private var showInstallLOCPrompt = false
-    /// Shows the "Wi-Fi is off" prompt.
-    @State private var showNoWiFiPrompt = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -734,15 +734,14 @@ struct AppsView: View {
         }
         .alert(L("Refresh all apps?"), isPresented: $confirmRefresh) {
             Button(L("Refresh all")) {
-                // 点续签先做一轮检查：隧道已通直接签；没通先看 WiFi 开没开。
-                // 签名带隧道权限时不再查 LocalDevVPN，refreshAll 里的
-                // tunnelUp() 会自己把内置隧道拉起来；签名带不了隧道
-                // （个人 ID 等）才按老规矩查 LocalDevVPN。
+                // 点续签先做一轮检查：隧道已通直接签；没通也不再
+                // 查 WiFi（2026-10-29：回环隧道不出设备，WiFi
+                // 与它无关）。签名带隧道权限时不再查 LocalDevVPN，
+                // refreshAll 里的 tunnelUp() 会自己把内置隧道拉起来；
+                // 签名带不了隧道（个人 ID 等）才按老规矩查 LocalDevVPN。
                 engine.refreshNetworkStatus()
                 if engine.vpnConnected {
                     manager.refreshAll()
-                } else if !engine.wifiConnected {
-                    showNoWiFiPrompt = true
                 } else if !BuiltinTunnel.useBuiltinDirectly, !engine.localDevVPNInstalled {
                     showInstallLOCPrompt = true
                 } else {
@@ -766,16 +765,6 @@ struct AppsView: View {
             Button(L("Cancel"), role: .cancel) { }
         } message: {
             Text(L("续签要走 LocalDevVPN 的本地隧道。先装好 LocalDevVPN，之后点续签会自动打开它连接，不用手动开。"))
-        }
-        .alert(L("WiFi 未打开"), isPresented: $showNoWiFiPrompt) {
-            Button(L("去设置")) {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    openURL(url)
-                }
-            }
-            Button(L("Cancel"), role: .cancel) { }
-        } message: {
-            Text(L("续签要用本地网络，先打开 WiFi 再点续签。"))
         }
     }
 
