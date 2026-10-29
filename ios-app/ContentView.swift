@@ -1186,6 +1186,12 @@ struct InstallPopup: View {
         }
     }
 
+    // 必须带 @ViewBuilder（2026-10-29 构建 #47 血泪）：三个分支
+    // 各返回一种 PopupCard，plain 的 some View 只能是一种类型，
+    // 没它编译报 conflicting arguments to generic parameter。
+    // body 能编是因为 View 协议的 body 自带 @ViewBuilder，普通
+    // 函数没有，得自己加。
+    @ViewBuilder
     private func linkPopup(_ link: DeepLink) -> some View {
         switch link {
         case .install(let url):
