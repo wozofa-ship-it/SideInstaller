@@ -10,6 +10,10 @@ All notable changes to SideInstaller are documented here.
   memory get it without a trip to Tools › Entitlements. SideStore and LiveContainer + SideStore
   are left as they were, because SideStore drops the capability when it renews their App IDs each
   week. If Apple refuses it, the app is signed without it.
+- **Downloads pick up where they stopped.** When the download of SideStore, LiveContainer +
+  SideStore or Madeira stalls or the connection drops, SideInstaller carries on from what it already
+  has instead of starting over, and starts over only if the file was replaced on GitHub meanwhile.
+  A network that can't reach GitHub at all fails as quickly as before.
 - **Sound effects.** Buttons, switches and messages make a short sound: a soft press for the main
   buttons, clicks for switches, and their own sounds for success, errors and anything that needs
   you, such as a pairing code. Silent Mode mutes them, and Settings › Sounds turns them off.
@@ -30,6 +34,13 @@ All notable changes to SideInstaller are documented here.
   turn on Developer Mode when it's already on, and says plainly when it's off.
 
 ### Changed
+- **Madeira comes from its official repository again.** Madeira's own repository now has the
+  self-renewing signing, so Latest installs the newest build of
+  [willfaust/Madeira](https://github.com/willfaust/Madeira)'s main branch from its GitHub Actions
+  runs, instead of a release of the FrizzleM/Madeira fork. GitHub hands those builds only to
+  signed-in accounts, so SideInstaller downloads them through nightly.link and installs one only if
+  it's exactly the file GitHub recorded. The build includes the 32-bit Windows parts the fork's
+  release left out. Advanced lists recent builds by commit and date.
 - **Reports list Device IP, Developer Mode, and whether SideInstaller runs inside LiveContainer.**
   A log pasted into “What happened?” no longer makes the issue's title: the error does.
 - **Key bytes take one line in the log**, not one line per byte. Private keys stay redacted.

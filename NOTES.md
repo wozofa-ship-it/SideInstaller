@@ -1067,22 +1067,97 @@ Mode text (the simulator reads the Mac's sysctl, 1) all behaved. Never run on an
 iPhone: whether its own advert is seen from inside the app, whether the sysctl
 can be read there, and whether either report's iPhone had moved its port.
 
+## Resuming downloads
+
+Every IPA download from GitHub — SideStore, LiveContainer + SideStore, the
+LiveContainer mirror copy, a version picked under Advanced, Madeira's Actions
+build — goes through `SideStoreDownloader.fetch`, which runs `ResumingDownload`
+(since 2026-10-29; before, a single `URLSession.download` that started over on
+any failure, retried twice by `perform`). Pasted links (`fetchDirect`) don't.
+
+- One data task per attempt writes straight to a temp file. The start link
+  (`github.com/<repo>/releases/download/…` or nightly.link) redirects to a
+  signed storage URL (`response.url`), and a later attempt asks that URL for
+  `Range: bytes=<saved>-`. When it refuses (expired), the next attempt goes back
+  to the start link, the Range carried through the redirects, without a pause.
+- The rest must be of the same file. A 206 has to start at the saved byte and
+  carry the ETag the file began with; otherwise, and for a 200 or a 416, the
+  saved part is dropped and the file starts over. `If-Range` is sent too, but
+  GitHub's release storage ignores it: given a stale ETag it still answered
+  206 (checked 2026-10-29), so the ETag comparison is what catches a nightly
+  replaced mid-download.
+- Until something has answered, it behaves as the download always did: a 60 s
+  request timeout, a timeout fails at once (where GitHub is blocked, more waits
+  would only multiply it), and a dropped or refused connection or a 5xx is
+  tried again after 1 and 3 s. Once the file is arriving, the idle timeout is
+  30 s and attempts in a row that get no new byte pause 2, 4, 8 and 15 s, then
+  give up with the last error. An attempt that got new bytes pauses 1 s.
+- A refusal that says when to come back (Retry-After, or GitHub's rate-limit
+  headers) is passed on, not retried, as before. A 4xx from the start link (a
+  missing asset: the API fallback takes over) fails at once, as does a TLS
+  failure or any error `passing` doesn't list.
+- The ETag ends up in the ledger, as before, so `unchangedDownload` still skips
+  a file GitHub serves unchanged. The log's "HTTP 200 for … — N bytes, release
+  …" line says 206 and "resumed n×" after a resume.
+
+Release storage (`release-assets.githubusercontent.com`) answers Range through
+both redirects with the asset's ETag; its links carried an expiry about 50
+minutes out. Tested against a local server that drops, stalls, expires links
+after one use, ignores or misplaces the Range, swaps the file's ETag, refuses
+with 503 or 429 + Retry-After, never answers, or isn't there; and live against
+SideStore, LiveContainer + SideStore and the mirror.
+
 ## Madeira
 
 [Madeira](https://github.com/willfaust/Madeira) (Windows PC games through Wine and
 FEX) is a fourth `InstallSource`. Four things differ from SideStore.
 
-**The download.** It comes from the releases of the fork
-[FrizzleM/Madeira](https://github.com/FrizzleM/Madeira), built from its
-`sideinstaller-refresh` branch (willfaust/Madeira#264), since only that build
-renews its own signing; switch `InstallSource.repo` back once upstream ships it.
-Its release asset is named after the version, as upstream names it
-(`Madeira-0.1.3.ipa` on tag `v0.1.3`, `Madeira-0.1.3-self-refresh.1.ipa` on
-`v0.1.3-self-refresh.1`), so there's no fixed `latest/download` URL.
-`SideStoreDownloader.latestTag` reads the tag off where
-`github.com/<repo>/releases/latest` redirects to, which has no rate limit, and the
-URL is built from it; a 404 falls back to the API as before. There's no nightly,
-so the channel picker is hidden and `Engine.selectedChannel` is always stable.
+**The download.** It's the newest CI build of upstream's main branch
+(`InstallSource.actionsBuild`): the `Madeira-ipa` artifact that
+willfaust/Madeira's "Build IPA" workflow (`build.yml`) uploads on every push, a
+zip holding `Madeira.ipa`. Upstream's newest release, 0.1.3, predates the
+self-refresh (willfaust/Madeira#264, merged 28 October 2026), and the main build
+has the `MadeiraSigningAccountVersion` key and the 32-bit Windows DLLs. Before
+1.6.2 Madeira came from releases of the fork FrizzleM/Madeira.
+
+GitHub serves artifacts only to a signed-in account (the API's `/zip` answers
+401), so:
+- One unauthenticated API call, `actions/artifacts?name=Madeira-ipa&per_page=100`,
+  lists the uploads with each one's commit and the SHA-256 GitHub recorded
+  (`digest`). Only runs of `main` in the repository itself count: pull requests
+  upload the artifact too, and a fork's runs have the fork as head repository
+  even from a branch named `main`. An upload without a digest is skipped. When
+  the newest 100 uploads are all pull requests', `newestRunBuild` asks for the
+  newest successful `main` run of the workflow, then its artifacts (two calls).
+- The zip is downloaded through nightly.link
+  (`nightly.link/<repo>/actions/artifacts/<id>.zip`), which redirects to the
+  file in GitHub's own storage, and must match that digest before anything is
+  kept, so nightly.link can't substitute a file. Mismatch: `unverifiedBuild`;
+  nightly.link refusing or unreachable: `relayFailed`.
+- `IPALibrary.extractIPA(fromArtifact:to:)` streams the IPA out of the zip
+  (stored, as the workflow uploads it with `compression-level: 0`, or deflated)
+  and the IPA is saved as `Madeira.ipa`. The ledger records the zip's digest as
+  its ETag, so a later run that finds the same build skips the download.
+
+The API's hourly limit (60 per address) applies, unlike the release downloads;
+when it's hit, the download step falls back to the `Madeira.ipa` an earlier
+run left, as for any failed download. GitHub's artifact storage was about 4×
+slower than release downloads from here (0.8 against 3.6 MB/s on 28 October
+2026, the same with four parallel ranges), so the 183 MB zip takes minutes;
+the prefetch during pairing and sign-in hides part of it. Artifacts expire after
+90 days without a push to `main`.
+
+**Resuming.** A second run that evening crawled at 0.13 MB/s, then went
+silent and failed on URLSession's 60 s idle timeout with half the file there.
+Every download now resumes: see "Resuming downloads" below. For the artifact,
+nightly.link's storage link is valid for ten minutes (`st`…`se`) and answers 403
+once expired (checked on the real one), which sends the download back to
+nightly.link for a new one.
+
+Advanced lists the `main` builds from that same API call, one per commit,
+labelled with the short commit and build date ("e96065a · 28 Oct 2026"); a picked
+one is saved as `Madeira (e96065a).ipa`. There's no nightly, so the channel
+picker is hidden and `Engine.selectedChannel` is always stable.
 `minimumOSMajorVersion` stops a run below iOS 26, which Madeira's JIT helper
 needs.
 
