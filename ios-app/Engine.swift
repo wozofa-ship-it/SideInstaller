@@ -2011,6 +2011,7 @@ final class Engine: ObservableObject {
     /// 在 Swift 侧用 Security 解开 .p12（证书 + 私钥 DER），交给
     /// Rust 侧 si_sign_ipa_with_cert_ex 本地签名（可带修改项）。
     private func performCertSign(ipa: String, mods: CertSignMods = CertSignMods()) throws -> String {
+        try EnterpriseCertStore.validateForSigning()
         let (certDER, keyDER) = try EnterpriseCertStore.identityDERs()
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("EnterpriseSign-\(UUID().uuidString)", isDirectory: true)

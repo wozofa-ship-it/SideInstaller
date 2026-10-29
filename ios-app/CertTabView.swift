@@ -5,19 +5,22 @@ import UniformTypeIdentifiers
 
 /// 证书页：企业证书管理（导入/信息/移除）、选 IPA 改信息后签名
 /// （名称/Bundle ID/版本/最低系统版本/图标）、已签名列表。
-/// 签名并安装走 Engine 的流水线（进度在安装页），仅签名走
-/// CertSigner 存进「已签名」。
+/// 签名并安装默认走本机直装（本地 HTTPS + itms-services，
+/// 不要 WiFi、不要配对文件），仅签名走 CertSigner 存进「已签名」；
+/// 已签名的「配对安装」和签名区的旧方式仍走 Engine 流水线。
 struct CertTabView: View {
     @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
+    @StateObject private var ota = OTAInstallServer()
 
     // 证书材料状态
     @State private var hasP12 = EnterpriseCertStore.hasP12
     @State private var hasProvision = EnterpriseCertStore.hasProvision
     @State private var password = EnterpriseCertStore.password
     @State private var provisionInfo = EnterpriseCertStore.provisionInfo
+    @State private var certInfo = EnterpriseCertStore.certInfo
     @State private var showP12Picker = false
     @State private var showProvisionPicker = false
     @State private var importError: String?
@@ -34,6 +37,9 @@ struct CertTabView: View {
     @State private var signOnlyBusy = false
     @State private var signOnlyMessage: String?
     @State private var signOnlyFailed = false
+    @State private var otaSignBusy = false
+    @State private var otaSignMessage: String?
+    @State private var otaSignFailed = false
 
     // 已签名
     @State private var signedRecords = SignedIPAStore.load()
@@ -115,7 +121,22 @@ struct CertTabView: View {
                             Text(L("到期"))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Text(expiration.formatted(date: .abbreviated, time: .omitted))
+                            Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
+                                .foregroundStyle(expiration < Date() ? .red : .primary)
+                        }
+                        .font(.footnote)
+                    }
+                }
+                if let cert = certInfo {
+                    if !cert.name.isEmpty {
+                        infoRow(L("证书"), cert.name)
+                    }
+                    if let expiration = cert.expiration {
+                        HStack {
+                            Text(L("证书到期"))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
                                 .foregroundStyle(expiration < Date() ? .red : .primary)
                         }
                         .font(.footnote)
@@ -156,10 +177,20 @@ struct CertTabView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if certReady {
+                    Text(L("企业证书装完后，首次打开 App 前要去「设置 → 通用 → VPN 与设备管理」信任这张证书。"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 SecureField(L("证书密码"), text: $password)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: password) { _, newValue in
                         EnterpriseCertStore.password = newValue
+                    }
+                    .onSubmit {
+                        // 密码输完回车才刷新证书信息：每敲一下都解一次 p12 没必要。
+                        refreshCertState()
                     }
                 if let importError {
                     Text(importError)
@@ -229,10 +260,18 @@ struct CertTabView: View {
         .font(.footnote)
     }
 
+    private func remainingText(_ expiration: Date) -> String {
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiration).day ?? 0
+        if days < 0 { return L("（已过期）") }
+        if days == 0 { return L("（今天到期）") }
+        return L("（剩 %d 天）", days)
+    }
+
     private func refreshCertState() {
         hasP12 = EnterpriseCertStore.hasP12
         hasProvision = EnterpriseCertStore.hasProvision
         provisionInfo = EnterpriseCertStore.provisionInfo
+        certInfo = EnterpriseCertStore.certInfo
     }
 
     // MARK: 签名与修改
@@ -263,13 +302,20 @@ struct CertTabView: View {
                     pluginSection
                     Divider()
                     Button {
-                        engine.runEnterpriseCertInstall(ipaURL: url, mods: effectiveMods)
+                        signAndInstallOTA(url: url)
                     } label: {
-                        Text(L("签名并安装"))
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            if otaSignBusy { ProgressView() }
+                            Text(L("签名并安装"))
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(engine.isRunning || signOnlyBusy || !certReady)
+                    .disabled(engine.isRunning || signOnlyBusy || otaSignBusy || ota.isRunning || !certReady)
+                    Text(L("本机直装：不需要 WiFi、不需要配对文件，点安装后直接进桌面。"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     Button {
                         signOnly(url: url)
                     } label: {
@@ -280,11 +326,37 @@ struct CertTabView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(signOnlyBusy || engine.isRunning || !certReady)
+                    .disabled(signOnlyBusy || otaSignBusy || ota.isRunning || engine.isRunning || !certReady)
+                    Button {
+                        engine.runEnterpriseCertInstall(ipaURL: url, mods: effectiveMods)
+                    } label: {
+                        Text(L("改用配对安装（旧方式）"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(engine.isRunning || signOnlyBusy || otaSignBusy || ota.isRunning || !certReady)
                     if engine.isRunning {
                         Text(L("正在安装，进度在「安装」页看。"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    }
+                    if let otaStatus = ota.status {
+                        Text(otaStatus)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if ota.isRunning {
+                            Button {
+                                ota.stop()
+                            } label: {
+                                Text(L("停止本机安装服务"))
+                                    .font(.footnote)
+                            }
+                        }
+                    }
+                    if let otaSignMessage {
+                        Text(otaSignMessage)
+                            .font(.footnote)
+                            .foregroundStyle(otaSignFailed ? .red : .green)
                     }
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
@@ -345,6 +417,29 @@ struct CertTabView: View {
         }
     }
 
+    /// 签名并安装（本机直装）：先走和「仅签名」同一条签名路，
+    /// 签好直接起本地安装服务拉系统安装，不经过配对流水线。
+    private func signAndInstallOTA(url: URL) {
+        otaSignBusy = true
+        otaSignMessage = nil
+        let currentMods = effectiveMods
+        Task {
+            do {
+                let record = try await CertSigner.signToFile(ipa: url, mods: currentMods)
+                signedRecords = SignedIPAStore.load()
+                otaSignMessage = L("签好了，正在拉起系统安装…")
+                otaSignFailed = false
+                // 后台任务和系统安装拉起走主线程，服务本身跑在自己的队列上。
+                await MainActor.run { ota.install(record: record) }
+            } catch {
+                otaSignMessage = (error as? LocalizedError)?.errorDescription
+                    ?? String(describing: error)
+                otaSignFailed = true
+            }
+            otaSignBusy = false
+        }
+    }
+
     /// 插件注入：选好的插件（dylib/deb/zip）在签名之前注进
     /// App，不选就是不注入。
     private var pluginSection: some View {
@@ -396,9 +491,14 @@ struct CertTabView: View {
 
     private func selectedIPASummary(_ url: URL) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "app.badge.checkmark")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "app.badge.checkmark")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(selectedInfo?.name ?? url.lastPathComponent)
                     .font(.subheadline.weight(.semibold))
@@ -542,6 +642,9 @@ struct CertTabView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Text(L("「安装」走本机直装（不要 WiFi、不要配对），「配对安装」是旧方式。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 if signedRecords.isEmpty {
                     Text(L("还没有已签名的 IPA。用上面的「仅签名」签好就会存到这里，随时能装、能分享。"))
                         .font(.footnote)
@@ -577,12 +680,19 @@ struct CertTabView: View {
             }
             HStack(spacing: 14) {
                 Button {
-                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+                    ota.install(record: record)
                 } label: {
                     Text(L("安装"))
                         .font(.footnote.weight(.semibold))
                 }
-                .disabled(engine.isRunning)
+                .disabled(engine.isRunning || ota.isRunning)
+                Button {
+                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+                } label: {
+                    Text(L("配对安装"))
+                        .font(.footnote)
+                }
+                .disabled(engine.isRunning || ota.isRunning)
                 ShareLink(item: SignedIPAStore.url(for: record)) {
                     Text(L("分享"))
                         .font(.footnote)

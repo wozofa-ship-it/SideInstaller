@@ -86,6 +86,61 @@ enum EnterpriseCertStore {
         }
         return (SecCertificateCopyData(cert) as Data, keyData)
     }
+
+    /// 本机直装的 TLS 服务用：直接拿 .p12 里现成的身份，
+    /// 不经过 DER 来回倒（私钥是 RSA 还是 EC 都不用猜）。
+    static func identity() throws -> SecIdentity {
+        let data = try Data(contentsOf: p12URL)
+        var items: CFArray?
+        let options: [String: Any] = [kSecImportExportPassphrase as String: password]
+        let status = SecPKCS12Import(data as CFData, options as CFDictionary, &items)
+        guard status == errSecSuccess,
+              let array = items as? [[String: Any]],
+              let first = array.first,
+              let rawIdentity = first[kSecImportItemIdentity as String] else {
+            throw EngineError.message(L("证书解不开——密码不对，或者 .p12 文件有问题。"))
+        }
+        return rawIdentity as! SecIdentity
+    }
+
+    /// 证书本身的信息（名头、到期日）：证书卡上要显示，签名前
+    /// 也要拿它校验。解不开（比如密码不对）就返回 nil，不拦着
+    /// 原来的显示；密码错到签名那步还是会明说。
+    struct CertInfo {
+        let name: String
+        let expiration: Date?
+    }
+
+    static var certInfo: CertInfo? {
+        guard let identity = try? identity() else { return nil }
+        var certRef: SecCertificate?
+        guard SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess,
+              let cert = certRef else { return nil }
+        let name = SecCertificateCopySubjectSummary(cert) as String? ?? ""
+        var expiration: Date?
+        if let values = SecCertificateCopyValues(
+            cert, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil) as? [String: Any],
+           let entry = values[kSecOIDX509V1ValidityNotAfter as String] as? [String: Any],
+           let date = entry[kSecPropertyKeyValue as String] as? Date {
+            expiration = date
+        }
+        return CertInfo(name: name, expiration: expiration)
+    }
+
+    /// 签名前校验（两条签名路共用：CertSigner 和 Engine 流水线）。
+    /// 只拦板上钉钉的过期——过期材料签出来的包装上去也是闪退，
+    /// 不如签之前就明说。解析不出来的项不拦，免得误杀能签的。
+    static func validateForSigning() throws {
+        let now = Date()
+        if let expiration = provisionInfo?.expiration, expiration < now {
+            throw EngineError.message(L("描述文件已过期（%@），签出来的包装上去也是闪退，先换一张没过期的描述文件。",
+                                        expiration.formatted(date: .abbreviated, time: .omitted)))
+        }
+        if let expiration = certInfo?.expiration, expiration < now {
+            throw EngineError.message(L("企业证书已过期（%@），先换一张没过期的证书再签。",
+                                        expiration.formatted(date: .abbreviated, time: .omitted)))
+        }
+    }
 }
 
 // MARK: - 签名前修改项
@@ -242,6 +297,7 @@ enum CertSigner {
         guard EnterpriseCertStore.ready else {
             throw EngineError.message(L("企业证书材料不齐：需要 .p12、描述文件和证书密码。"))
         }
+        try EnterpriseCertStore.validateForSigning()
         return try await Task.detached(priority: .userInitiated) {
             let (certDER, keyDER) = try EnterpriseCertStore.identityDERs()
             let fm = FileManager.default
