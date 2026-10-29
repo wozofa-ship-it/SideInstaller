@@ -127,20 +127,8 @@ struct CertTabView: View {
                         .font(.footnote)
                     }
                 }
-                if let cert = certInfo {
-                    if !cert.name.isEmpty {
-                        infoRow(L("证书"), cert.name)
-                    }
-                    if let expiration = cert.expiration {
-                        HStack {
-                            Text(L("证书到期"))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
-                                .foregroundStyle(expiration < Date() ? .red : .primary)
-                        }
-                        .font(.footnote)
-                    }
+                if let cert = certInfo, !cert.name.isEmpty {
+                    infoRow(L("证书"), cert.name)
                 }
                 HStack(spacing: 10) {
                     Button {

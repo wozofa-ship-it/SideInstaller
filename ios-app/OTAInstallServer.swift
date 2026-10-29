@@ -86,8 +86,13 @@ final class OTAInstallServer: ObservableObject {
         do {
             let tlsOptions = NWProtocolTLS.Options()
             let identity = try EnterpriseCertStore.identity()
+            // 构建 #50 红字：这调用只要 2 个参数（多传 queue 编不过），
+            // 且 sec_identity_create 返回的是 Optional，必须解包。
+            guard let secIdentity = sec_identity_create(identity) else {
+                throw EngineError.message(L("本机安装服务身份创建失败，改用配对安装。"))
+            }
             sec_protocol_options_set_local_identity(
-                tlsOptions.securityProtocolOptions, sec_identity_create(identity), queue)
+                tlsOptions.securityProtocolOptions, secIdentity)
             let params = NWParameters(tls: tlsOptions)
             params.allowLocalEndpointReuse = true
             let listener = try NWListener(

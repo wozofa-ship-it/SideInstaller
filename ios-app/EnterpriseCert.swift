@@ -103,12 +103,16 @@ enum EnterpriseCertStore {
         return rawIdentity as! SecIdentity
     }
 
-    /// 证书本身的信息（名头、到期日）：证书卡上要显示，签名前
-    /// 也要拿它校验。解不开（比如密码不对）就返回 nil，不拦着
-    /// 原来的显示；密码错到签名那步还是会明说。
+    /// 证书本身的信息（名头）：证书卡上要显示。解不开（比如
+    /// 密码不对）就返回 nil，不拦着原来的显示；密码错到签名
+    /// 那步还是会明说。
+    /// 注意：证书到期日不要用 SecCertificateCopyValues 拿——
+    /// 它和 kSecOIDX509V1ValidityNotAfter 是 macOS 才有的，
+    /// iOS 上编不过（构建 #50 红字实证）。iOS 没有现成的
+    /// 证书到期 API，所以证书过期那一档不做，过期校验只看
+    /// 描述文件（描述文件到期日从 plist 里直接读得到）。
     struct CertInfo {
         let name: String
-        let expiration: Date?
     }
 
     static var certInfo: CertInfo? {
@@ -117,14 +121,7 @@ enum EnterpriseCertStore {
         guard SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess,
               let cert = certRef else { return nil }
         let name = SecCertificateCopySubjectSummary(cert) as String? ?? ""
-        var expiration: Date?
-        if let values = SecCertificateCopyValues(
-            cert, [kSecOIDX509V1ValidityNotAfter] as CFArray, nil) as? [String: Any],
-           let entry = values[kSecOIDX509V1ValidityNotAfter as String] as? [String: Any],
-           let date = entry[kSecPropertyKeyValue as String] as? Date {
-            expiration = date
-        }
-        return CertInfo(name: name, expiration: expiration)
+        return CertInfo(name: name)
     }
 
     /// 签名前校验（两条签名路共用：CertSigner 和 Engine 流水线）。
@@ -134,10 +131,6 @@ enum EnterpriseCertStore {
         let now = Date()
         if let expiration = provisionInfo?.expiration, expiration < now {
             throw EngineError.message(L("描述文件已过期（%@），签出来的包装上去也是闪退，先换一张没过期的描述文件。",
-                                        expiration.formatted(date: .abbreviated, time: .omitted)))
-        }
-        if let expiration = certInfo?.expiration, expiration < now {
-            throw EngineError.message(L("企业证书已过期（%@），先换一张没过期的证书再签。",
                                         expiration.formatted(date: .abbreviated, time: .omitted)))
         }
     }
