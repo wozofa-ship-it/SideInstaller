@@ -141,6 +141,12 @@ final class Engine: ObservableObject {
     private var appIDCostReply: CheckedContinuation<Bool, Never>?
     /// The `sideinstaller://` link waiting for the go-ahead.
     @Published private(set) var pendingLink: DeepLink?
+    /// When SideStore was last asked for its pairing file, so the file it sends
+    /// back can be told from one some other link brought.
+    private var sideStorePairingRequestedAt: Date?
+    /// When SideStore was last asked for its certificate, and whether the
+    /// install that stopped on error 7460 runs again once it's in.
+    private var sideStoreCertificateRequest: (at: Date, retryInstall: Bool)?
     /// A certificate a link brought, for `RootView` to hand to the Certificates
     /// manager, which checks it against the Apple ID's own before using it.
     @Published var certificateToImport: CertificateImport?
@@ -247,6 +253,21 @@ final class Engine: ObservableObject {
     }
 
     var canSelfPair: Bool { Engine.deviceCanSelfPair }
+
+    /// Whether Developer Mode is on, from the `security.mac.amfi.developer_mode_status`
+    /// sysctl AMFI publishes; nil when this iOS won't let the app read it.
+    /// Static so non-isolated code can read it.
+    static var developerModeIsOn: Bool? {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("security.mac.amfi.developer_mode_status", &value, &size, nil, 0) == 0,
+              size == MemoryLayout<Int32>.size else { return nil }
+        return value != 0
+    }
+
+    /// True when SideInstaller runs as a LiveContainer guest. iOS then applies
+    /// LiveContainer's Info.plist to the process, not SideInstaller's.
+    static var runsInLiveContainer: Bool { getenv("LC_HOME_PATH") != nil }
 
     /// False on iOS 27 and later, where this iPhone can't make itself a classic
     /// lockdown pair record: lockdownd answers `Pair` over the tunnel with
@@ -1857,10 +1878,17 @@ final class Engine: ObservableObject {
         }
     }
 
-    /// `forMadeira` signs the way Madeira needs: with Increased Memory Limit
-    /// enabled on its App IDs before the profile is requested, and without an
-    /// app group. Madeira renews its own profile and registers its App ID again
-    /// when it runs out; it can restore the first on a new App ID, not the second.
+    /// Every app gets Increased Memory Limit on its App ID before the profile is
+    /// requested, as iLoader 2.4.1 does, unless it's an app store that refreshes
+    /// itself, such as SideStore and LiveContainer + SideStore: SideStore registers
+    /// their App IDs again each week without it, so their next profiles would grant
+    /// less than they're signed with (isideload's `MemoryLimit`). A refusal from
+    /// Apple only leaves it out.
+    ///
+    /// `forMadeira` signs the way Madeira needs: with that capability required,
+    /// and without an app group. Madeira renews its own profile and registers
+    /// its App ID again when it runs out; it can restore the first on a new App
+    /// ID, not the second.
     private func performSign(session: OpaquePointer, ipa: String, udid: String, deviceName: String,
                              pairingFilePath: String, forMadeira: Bool) throws -> String {
         log("Signing \(ipa) …")
@@ -1869,8 +1897,9 @@ final class Engine: ObservableObject {
         }
         var signed: UnsafeMutablePointer<CChar>?
         var error: UnsafeMutablePointer<CChar>?
+        // Memory limit: 1 = required, 2 = where it's safe (see sideinstaller.h).
         let rc = si_sign_ipa(session, ipa, udid, deviceName, pairingFilePath,
-                             forMadeira ? 1 : 0, forMadeira ? 0 : 1, &signed, &error)
+                             forMadeira ? 1 : 2, forMadeira ? 0 : 1, &signed, &error)
         if rc == 0 {
             let path = signed.map { String(cString: $0) } ?? ""
             signed.map { si_string_free($0) }
@@ -2877,6 +2906,130 @@ final class Engine: ObservableObject {
         } catch {
             lastError = L("Couldn't import %@: %@", url.lastPathComponent, error.localizedDescription)
             log("⛔️ Pairing import: \(lastError ?? "")")
+        }
+    }
+
+    // MARK: - Upstream helpers (from the Links section; receiveLink/answerLink/installLinkedIPA kept as fork versions, so those duplicates are not taken)
+
+    /// True unless SideStore is known to be missing (see `appPresence`).
+    /// Opening it reports when it isn't there.
+    var sideStoreInstalled: Bool {
+        Self.appPresence(scheme: "sidestore") != .missing
+    }
+
+    /// True unless LiveContainer is known to be missing (see `appPresence`).
+    /// Opening it reports when it isn't there.
+    var liveContainerInstalled: Bool {
+        Self.appPresence(scheme: "livecontainer") != .missing
+    }
+
+    // Is another app installed?
+    //
+    // `canOpenURL` only answers for the schemes listed under
+    // `LSApplicationQueriesSchemes` in the Info.plist of the app this process
+    // really is, and says false for every other one. Inside LiveContainer
+    // that's LiveContainer's Info.plist, not ours, the same trap as the Bonjour
+    // types in issue #38. It lists sidestore and livecontainer but not
+    // localdevvpn, so there LocalDevVPN always read as missing (issue #69).
+
+    enum AppPresence { case installed, missing, unknown }
+
+    /// Whether an app that opens `scheme://` links is installed, as far as
+    /// `canOpenURL` can tell. `.unknown` when it isn't allowed to ask.
+    static func appPresence(scheme: String) -> AppPresence {
+        guard let url = URL(string: "\(scheme)://") else { return .unknown }
+        if UIApplication.shared.canOpenURL(url) { return .installed }
+        return queryableSchemes?.contains(scheme.lowercased()) == true ? .missing : .unknown
+    }
+
+    /// The schemes `canOpenURL` answers for, or nil when they can't be read.
+    /// LiveContainer swaps `Bundle.main` for the guest's bundle and keeps its
+    /// own as `UserDefaults.lcMainBundle`.
+    private static let queryableSchemes: Set<String>? = {
+        let host: Bundle
+        if getenv("LC_HOME_PATH") == nil {
+            host = .main
+        } else if let liveContainer = liveContainerBundle() {
+            host = liveContainer
+        } else {
+            return nil
+        }
+        let schemes = host.object(forInfoDictionaryKey: "LSApplicationQueriesSchemes") as? [String] ?? []
+        return Set(schemes.map { $0.lowercased() })
+    }()
+
+    /// LiveContainer's name on the Home Screen, which the Files app gives its
+    /// folder too; nil outside LiveContainer.
+    static var liveContainerName: String? {
+        guard runsInLiveContainer, let bundle = liveContainerBundle() else { return nil }
+        return bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+    }
+
+    /// LiveContainer's own bundle, from the `+[NSUserDefaults lcMainBundle]`
+    /// it adds for the guest app.
+    private static func liveContainerBundle() -> Bundle? {
+        let selector = NSSelectorFromString("lcMainBundle")
+        let defaults = UserDefaults.self as AnyObject
+        guard defaults.responds(to: selector) else { return nil }
+        return defaults.perform(selector)?.takeUnretainedValue() as? Bundle
+    }
+
+    /// Opens `livecontainer://install?url=`, which has LiveContainer download
+    /// the IPA and install it inside itself. LiveContainer asks before
+    /// replacing an app with the same bundle ID.
+    @MainActor
+    func installInLiveContainer(_ ipa: URL) {
+        // LiveContainer takes the link percent-decoded, so all of it is encoded.
+        let link = ipa.absoluteString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        guard let url = URL(string: "livecontainer://install?url=\(link)") else { return }
+        lastError = nil
+        log("Asking LiveContainer to install \(ipa.lastPathComponent) …")
+        UIApplication.shared.open(url) { opened in
+            Task { @MainActor in
+                guard !opened else { return }
+                self.lastError = ErrorHelp.explained(L("LiveContainer isn't installed on this iPhone."))
+                self.log("⛔️ LiveContainer: \(self.lastError ?? "")")
+            }
+        }
+    }
+
+    /// Opens SideStore, which sends back the pairing file it has as a
+    /// `sideinstaller://pairingFile` link. That link asks before importing.
+    @MainActor
+    func requestSideStorePairing() {
+        guard let url = URL(string: "sidestore://pairing?urlname=\(DeepLink.scheme)") else { return }
+        lastError = nil
+        sideStorePairingRequestedAt = Date()
+        log("Asking SideStore for its pairing file …")
+        UIApplication.shared.open(url) { opened in
+            Task { @MainActor in
+                guard !opened else { return }
+                self.sideStorePairingRequestedAt = nil
+                self.lastError = ErrorHelp.explained(L("SideStore isn't installed on this iPhone, so there's no pairing file to get from it."))
+                self.log("⛔️ Pairing import: \(self.lastError ?? "")")
+            }
+        }
+    }
+
+    /// Opens SideStore, which asks whether to export its certificate and sends
+    /// it back as a `sideinstaller://certificate` link. `retryInstall` runs the
+    /// install again once the certificate is in. Calls `failed` when SideStore
+    /// can't be opened.
+    @MainActor
+    func requestSideStoreCertificate(retryInstall: Bool, failed: @escaping @MainActor () -> Void) {
+        // SideStore takes the template percent-decoded, so all of it is encoded.
+        let template = DeepLink.certificateCallbackTemplate
+            .addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? ""
+        guard let url = URL(string: "sidestore://certificate?callback_template=\(template)") else { return }
+        sideStoreCertificateRequest = (Date(), retryInstall)
+        log("Asking SideStore for its certificate …")
+        UIApplication.shared.open(url) { opened in
+            Task { @MainActor in
+                guard !opened else { return }
+                self.sideStoreCertificateRequest = nil
+                failed()
+            }
         }
     }
 

@@ -581,6 +581,8 @@ let chineseStrings: [String: String] = [
     "Done": "完成",
     "Language": "语言",
     "App language": "应用语言",
+    "Sounds": "声音",
+    "Sound effects": "音效",
     "Auto": "自动",
     // The Tunnel section: starting LocalDevVPN from here.
     "Tunnel": "隧道",
@@ -588,6 +590,10 @@ let chineseStrings: [String: String] = [
         "%@:%d 上有东西拒绝了连接，说明隧道是通的，只是设备没有在它的配对端口上监听。该端口只有在开启开发者模式时才会打开，而且每次重启后 iOS 都会再次要求确认：请在 设置 › 隐私与安全性 › 开发者模式 中打开它，然后重试。如果已经打开，请在“配对文件”中重新配对这台 iPhone。",
     "Couldn't reach the device at %@:%d at all. The loopback VPN is most likely off, or Device IP isn't the address it carries: in LocalDevVPN that's the one under Settings › Device IP (10.7.0.1 by default), not the “Connected to” address on its main screen. First check that the phone and the computer are on the same Wi-Fi (the local tunnel needs a local network).":
         "完全连不上 %@:%d 上的设备。回环 VPN 很可能没开，或者设备 IP 不是它承载的地址：在 LocalDevVPN 里，那是“设置 › Device IP”里的地址（默认 10.7.0.1），而不是主界面上“Connected to”后面的地址。先确认手机和电脑在同一 WiFi（本地隧道要局域网）。",
+    "Something at %@:%d refused the connection, so the tunnel is carrying traffic, but this iPhone isn't listening on its pairing port: Developer Mode is off. Turn it on under Settings › Privacy & Security › Developer Mode (the iPhone restarts), then try again.":
+        "%@:%d 上有东西拒绝了连接，说明隧道是通的，但这台 iPhone 没有在配对端口上监听：开发者模式已关闭。请在 设置 › 隐私与安全性 › 开发者模式 中打开它（iPhone 会重启），然后重试。",
+    "Something at %@:%d refused the connection, so the tunnel is carrying traffic, but this iPhone isn't listening on its pairing port, although Developer Mode is on. Pair this iPhone again under “Pairing file”, then try again. If it still fails, restart the iPhone.":
+        "%@:%d 上有东西拒绝了连接，说明隧道是通的，但尽管开发者模式已打开，这台 iPhone 仍没有在配对端口上监听。请在“配对文件”中重新配对这台 iPhone，然后重试。如果仍然失败，请重启 iPhone。",
     "Start LocalDevVPN when needed": "需要时打开 LocalDevVPN",
     "Start LocalDevVPN now": "立即启动 LocalDevVPN",
     "LocalDevVPN isn't installed. Get it from the App Store, and this can start it for you.":
@@ -1072,6 +1078,12 @@ let chineseStrings: [String: String] = [
     "not connected": "未连接",
     "none": "无",
     "made on this iPhone": "在此 iPhone 上生成",
+    "Runs inside LiveContainer": "在 LiveContainer 中运行",
+    "on": "已开启",
+    "off": "已关闭",
+    "unknown": "未知",
+    "yes": "是",
+    "no": "否",
     "latest": "最新",
     "custom server": "自定义服务器",
     "Auto, starts with %@": "自动，从 %@ 开始",
@@ -1092,8 +1104,14 @@ let chineseStrings: [String: String] = [
     "Share the report": "分享报告",
     "Preview the report": "预览报告",
     "Report": "报告",
-    "The report is saved in Files › On My iPhone › SideInstaller › Reports. On GitHub, attach it with “Paste, drop, or click to add files” below the text, then submit the issue.":
-        "报告保存在“文件” › 我的 iPhone › SideInstaller › Reports。在 GitHub 上，用文本框下方的“Paste, drop, or click to add files”附上它，然后提交 Issue。",
+    "The issue opens filled in. When the log is too long for that, SideInstaller copies it for you to paste at the end of the issue. The whole report is also saved in %@.":
+        "Issue 会自动填好。如果日志太长、无法自动填入，SideInstaller 会把它复制下来，供你粘贴到 Issue 末尾。完整报告也保存在 %@。",
+    "Files › On My iPhone": "“文件” › 我的 iPhone",
+    "Copy the full log": "复制完整日志",
+    "Paste the log into the issue": "把日志粘贴到 Issue 中",
+    "Open GitHub": "打开 GitHub",
+    "The full log is too long to fill in, so SideInstaller copied it. On GitHub, tap the end of the text, choose Paste, then submit the issue.":
+        "完整日志太长，无法自动填入，所以 SideInstaller 已将其复制。在 GitHub 上轻点文本末尾，选择“粘贴”，然后提交 Issue。",
     "Describe the problem above first.": "请先在上方描述问题。",
     "Couldn't save the report: %@": "无法保存报告：%@",
 

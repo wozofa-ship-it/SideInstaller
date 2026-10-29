@@ -74,7 +74,10 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_remotepairing-pairable-host._tcp</string>
+		<string>_remotepairing-pairable-host._tcp</string>
 		<string>_sideinstallerprobe._tcp</string>
+		<string>_stikpairprobe._tcp</string>
+		<string>_remotepairing._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SideInstaller advertises an on-device pairing service so this iPhone can pair with it, connects to the local lockdown daemon to install apps, and can serve a file-transfer page to devices on your Wi-Fi.</string>

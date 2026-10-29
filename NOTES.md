@@ -546,7 +546,7 @@ stays, next to the pairing activity.
   callback (`SITwoFactorCb`).
 - `si_sign_ipa(session, ipa, udid, device_name, …)` — first calls
   `DeveloperSession::ensure_device_registered(team, name, udid)` so the team has
-  the connected device, then `Sideloader::sign_app(ipa, None, false)` → signed
+  the connected device, then `Sideloader::sign_app(ipa, None, memory_limit, …)` → signed
   `.app` bundle path. sign_app internally registers the App ID + provisioning
   profile and retrieves/creates the dev certificate, then signs with
   `apple-codesign`. **Device registration is mandatory here:** we use the
@@ -606,6 +606,17 @@ stays, next to the pairing activity.
   `Frameworks/SideStoreApp.framework/SideStore`, where `build_github.sh` moves
   and dylibifies `SideStore.app`. When the check can't run, it errs towards not
   writing the file.
+
+**Increased Memory Limit (since iLoader 2.4.1 does it):** the Install tab and
+the Apps tab's refresh pass `si_sign_ipa` a `memory_limit` of 2, so isideload
+enables that capability on the App ID before the profile is requested and the
+app is signed with `com.apple.developer.kernel.increased-memory-limit`. If Apple
+refuses, the app is signed without it. SideStore, LiveContainer+SideStore,
+AltStore and StikStore are left out: they refresh themselves, and the App ID
+SideStore registers each week doesn't get the capability on a free team
+(SideStore issue #1616), so their next profiles would grant less than they're
+signed with. Madeira passes 1 (required), Side by Side 0. See the vendored
+isideload README, change 13.
 
 **idevice version coexistence:** isideload pulls idevice **0.1.61** (crates.io,
 behind its `install` feature, which is required because its feature-gating is
@@ -1016,6 +1027,46 @@ So the cutoff is 26.4 and it holds through 26.6.2 at least; nothing says why.
 None of this has run on a 26.x device, and the new copy hasn't been seen on
 screen.
 
+#### Port 49152 refused on iOS 27 (issues #56, #100)
+
+Both reports: an iOS 27 iPhone with a pairing file it made itself, LocalDevVPN
+up, and `tunnel_create_rppairing` to 10.7.0.1:49152 answered with a reset
+(ECONNREFUSED, kind `RsdUnreachable`), so nothing on the iPhone accepted on that
+port. #56 says pairing again didn't help. #100's log shows SideInstaller running
+inside LiveContainer: its Live Activity failed with “Target does not include
+NSSupportsLiveActivities plist key” and its continued-processing task with
+BGTaskScheduler error 3 (not permitted), although the released 1.6.1 IPA has both
+keys. LiveContainer's own Info.plist has neither. What that does to the tunnel is
+unknown. Local Network permission isn't it: TN3179 counts VPN interfaces out of
+local network privacy.
+
+49152 is just the first port iOS hands out. On a Mac, rapportd holds it. On an
+iPhone remotepairingd normally gets it, which is why StikDebug and SideInstaller
+can dial it blind, but whatever binds first at boot wins. The iPhone advertises
+its real listener as `_remotepairing._tcp` (pymobiledevice3 takes the port from
+there), and a local browse sees the iPhone's own services (on a Mac, `dns-sd -B`
+lists the Mac's own adverts on interface 1). So after a refused 49152,
+`DeviceConnection.connectRemotePairing` calls
+`NetworkStatus.ownRemotePairingAdvert` (NetServiceBrowser on the main run loop,
+3 s at most; only a service resolving to one of this iPhone's own addresses
+counts), logs what it found, and dials the advertised port when it's another one.
+Side by Side never does this, since its listener isn't this iPhone's.
+`_remotepairing._tcp` is in NSBonjourServices, and LiveContainer's plist lists it
+too.
+
+The refusal advice now reads `security.mac.amfi.developer_mode_status`
+(`Engine.developerModeIsOn`): off says so plainly, on drops the “turn on
+Developer Mode” advice and suggests pairing again, then a restart. Where the
+sysctl can't be read, the old text stays. Problem reports list Developer Mode,
+Device IP and whether SideInstaller runs inside LiveContainer.
+
+Checked in the iPhone Duo simulator (2026-10-27), with a fake advert from
+`dns-sd -R … _remotepairing._tcp local. 49170` and a hook dialling a closed port
+first: the refusal, the lookup (“port 49170”), the second dial and the Developer
+Mode text (the simulator reads the Mac's sysctl, 1) all behaved. Never run on an
+iPhone: whether its own advert is seen from inside the app, whether the sysctl
+can be read there, and whether either report's iPhone had moved its port.
+
 ## Madeira
 
 [Madeira](https://github.com/willfaust/Madeira) (Windows PC games through Wine and
@@ -1036,9 +1087,10 @@ so the channel picker is hidden and `Engine.selectedChannel` is always stable.
 needs.
 
 **Signing.** Madeira isn't ready to play without
-`com.apple.developer.kernel.increased-memory-limit`. `si_sign_ipa` takes a flag
-that has isideload enable that capability on the app's App IDs before the profile
-is requested (`Engine.isMadeira` also catches a Madeira IPA imported as custom, or
+`com.apple.developer.kernel.increased-memory-limit`. For it `si_sign_ipa` gets a
+`memory_limit` of 1: isideload enables that capability on the app's App IDs
+before the profile is requested, and signing fails if Apple refuses (other apps
+get 2, which signs without it then) (`Engine.isMadeira` also catches a Madeira IPA imported as custom, or
 refreshed from Documents, by its bundle id: `com.willfaust.madeora` or any id under
 it, such as the `.test` one of a local development build). Its `MadeiraJITHelper.appex` is signed like every
 extension here, with the main app's profile and entitlements, and renamed with the
@@ -1121,6 +1173,30 @@ async step cores in `Engine`, so they can never drift. State for the progress
 bar/checklist (`Engine.stepStates`, `installProgress`, `pairingPIN`, `guide`)
 is all `@Published`. Reused-pairing/sign-in/download are skipped when already
 valid; a stale pairing file triggers one automatic re-pair before giving up.
+
+#### Report a problem: GitHub's link limits (issue #100)
+
+A new-issue link can't carry a file, and its length is capped twice (measured
+2026-10-27 with curl): GitHub answers 414 from about 8 KB, and a browser that
+isn't signed in (the in-app Safari keeps its own cookies) is redirected to
+`/login?return_to=…`, which carries the whole link escaped again (each `%`, `&`,
+`=`, `/` and `?` grows by two) and fails with GitHub's “Whoops, something went
+wrong!” 500 from about 6.6 KB. The old 7,500-character cap hit that with an
+ordinary log, and the saved report file was hardly ever attached (inside
+LiveContainer it isn't under Files › SideInstaller at all).
+
+`ProblemReport.issueDraft` now caps the sign-in link's length
+(`signInLength`, 6,000) and puts the whole log in the issue. If it fits in the
+link, it goes there. Otherwise the link carries the description, details, error and
+the log's last lines, the rest is copied to the clipboard (log first, newest
+lines kept, then a description or error the link had to cut, then crash logs,
+within GitHub's 65,536-character body limit, counting line breaks twice), and an
+alert says to paste it at the end of the issue, where the body says
+“Paste below this line”. “Copy the full log” copies it again. A non-Latin
+description can cost 15 sign-in characters a character, so the loop can cut the
+description and error from the link entirely and the title to 30 characters.
+Rust's `{:#?}` byte lists are put on one line by `LogRedactor` (a public key was
+35 lines of #100), after the redaction rules.
 
 ## Honest status summary
 

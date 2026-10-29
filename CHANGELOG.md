@@ -2,6 +2,38 @@
 
 All notable changes to SideInstaller are documented here.
 
+## 1.6.2
+
+### Added
+- **Apps get Increased Memory Limit.** As iLoader 2.4.1 does, SideInstaller now turns on this
+  capability for an app's App ID when it signs the app, so emulators and other apps that need more
+  memory get it without a trip to Tools › Entitlements. SideStore and LiveContainer + SideStore
+  are left as they were, because SideStore drops the capability when it renews their App IDs each
+  week. If Apple refuses it, the app is signed without it.
+- **Sound effects.** Buttons, switches and messages make a short sound: a soft press for the main
+  buttons, clicks for switches, and their own sounds for success, errors and anything that needs
+  you, such as a pairing code. Silent Mode mutes them, and Settings › Sounds turns them off.
+
+### Fixed
+- **Bug reports carry the whole log.** A GitHub link only holds a few thousand characters, so a
+  report's issue got the last lines of the log at most and asked for the report file to be
+  attached, which was easy to miss, and inside LiveContainer the file wasn't where the issue said
+  (#100). When the log doesn't fit in the link, SideInstaller now copies it and says so, and the
+  issue ends with “Paste below this line”. “Copy the full log” copies it again.
+- **Report a problem no longer ends on GitHub's “Whoops, something went wrong!” page.** When the
+  in-app browser wasn't signed in to GitHub, a long report made a sign-in link too long for
+  GitHub. Links are now kept short enough for it.
+- **The pairing port is looked for when 49152 refuses.** When this iPhone refuses the device link
+  on port 49152, SideInstaller asks which port it advertises for remote pairing and tries that one
+  before giving up (#56, #100).
+- **The “refused the connection” message knows whether Developer Mode is on.** It no longer asks to
+  turn on Developer Mode when it's already on, and says plainly when it's off.
+
+### Changed
+- **Reports list Device IP, Developer Mode, and whether SideInstaller runs inside LiveContainer.**
+  A log pasted into “What happened?” no longer makes the issue's title: the error does.
+- **Key bytes take one line in the log**, not one line per byte. Private keys stay redacted.
+
 ## 1.6.1
 
 ### Added

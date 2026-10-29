@@ -28,6 +28,8 @@ struct SettingsView: View {
 
     /// 内置隧道本端地址，与 BuiltinTunnel 共用同一 UserDefaults 键。
     @AppStorage("CZFBuiltinTunnelIfaceIP") private var builtinTunnelIfaceIP = "10.7.1.1/32"
+    /// Buttons, switches and messages make sounds; see `SoundEffects`.
+    @AppStorage(SoundEffects.enabledKey) private var soundEffects = true
 
     /// 界面外观，与 App 入口共用同一 UserDefaults 键，改完立即生效。
     @AppStorage("SIDAppearance") private var appearance: AppAppearance = .system
@@ -38,6 +40,7 @@ struct SettingsView: View {
                 accountSection
                 languageSection
                 appearanceSection
+                soundsSection
                 tunnelSection
                 autoRefreshSection
                 downloadsSection
@@ -99,7 +102,7 @@ struct SettingsView: View {
             ForEach(accounts.accounts) { account in
                 Button { accounts.activate(account) } label: { accountRow(account) }
                     // `.plain` keeps the row text from using the accent color.
-                    .buttonStyle(.plain)
+                    .buttonStyle(.plain, sound: .tick)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             pendingRemove = account
@@ -192,6 +195,16 @@ struct SettingsView: View {
             .pickerStyle(.segmented)
         } header: {
             Text(L("Appearance"))
+        }
+    }
+
+    // MARK: Sounds
+
+    private var soundsSection: some View {
+        Section {
+            Toggle(L("Sound effects"), isOn: $soundEffects)
+        } header: {
+            Text(L("Sounds"))
         }
     }
 

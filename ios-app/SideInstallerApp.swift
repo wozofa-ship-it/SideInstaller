@@ -56,6 +56,12 @@ struct SideInstallerApp: App {
         ) { task in
             SIDAutoRefresh.handleBackgroundWake(task as! BGAppRefreshTask)
         }
+        // So is an install's progress.
+        InstallActivity.shared.endLeftovers()
+        // iOS hands over the last crash's diagnostic now, for Report a problem.
+        CrashDiagnostics.shared.start()
+        // Drawn now so the first tap already has its sound.
+        SoundEffects.prepare()
     }
 
     var body: some Scene {
@@ -112,6 +118,8 @@ struct SideInstallerApp: App {
                     SIDAutoRefresh.scheduleBackgroundWake()
                 }
             }
+            // Every switch in the app clicks on and off.
+            .toggleStyle(SoundingToggleStyle())
             // Files opened in the app (share sheet, "Open with", other apps), as
             // an alternative to the document picker.
             .onOpenURL { url in

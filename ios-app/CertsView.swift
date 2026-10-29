@@ -91,8 +91,7 @@ struct CertsView: View {
                         .font(.subheadline.weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
+                .buttonStyle(.bordered, sound: .tap)
                 .tint(Theme.accent)
                 if let pwd = exportPassword {
                     VStack(spacing: 4) {
