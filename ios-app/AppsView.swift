@@ -479,11 +479,16 @@ final class SideloadedAppsManager: ObservableObject {
         keepAlive.startAudio()
 
         refreshTask = Task {
+            // 原账号：全程结束（正常、失败、取消）都要切回来。activate
+            // 是同步的，放 defer 里保证任何出口都执行；defer 不能
+            // await，所以内存 session 的重登放在正文末尾尽力做。
+            let originalAccount = AccountStore.shared.active
             defer {
                 isRefreshing = false
                 refreshStatus = nil
                 refreshTask = nil
                 self.keepAlive.stopAudio()
+                if let originalAccount { AccountStore.shared.activate(originalAccount) }
             }
             do {
                 try await engine.prepareRefresh()
@@ -495,31 +500,95 @@ final class SideloadedAppsManager: ObservableObject {
                 return
             }
 
+            // 按团队分组跑：每组先切到该团队的账号、登完核对团队号再
+            // 签。组内保持页面顺序，组按首次出现顺序。取消只在组间
+            // 和 App 间检查，正在签装的单个 App 不中断。
+            let groups = Self.groupedByTeam(jobs)
+            let multiAccount = groups.count > 1
             var refreshed = 0
-            for index in jobs.indices {
-                // Cancellation is checked between apps; signing and installing
-                // can't be interrupted midway.
+            var didSwitchAccount = false
+            for group in groups {
                 if Task.isCancelled { break }
-                let job = jobs[index]
-                // 第二道闸：哪怕可续签列表里混进了证书签的，跑到这里
-                // 也拦下。团队号未知、App 团队号未知、团队号不一致，
-                // 三种一律跳过不续，绝不把证书签的 App 重新签成个人 ID。
-                guard let team = engine.signingTeamID, let installed = job.teamID, installed == team else {
-                    jobs[index].state = .failed(
-                        L("Skipped: not signed by the team you're signed in as, so a certificate-signed app is never re-signed here."))
-                    continue
+                let team = group.team
+                // 当前 session 已是该组团队时不用切（prepareRefresh 刚
+                // 登的原账号组就是这种情况）。
+                if engine.signingTeamID != team {
+                    guard let groupAccount = AccountStore.shared.account(forTeam: team) else {
+                        // rebuildRefreshable 已拦过，走到这里说明列表过期：
+                        // 整组跳过，绝不拿当前账号给它签名。
+                        for index in jobs.indices where jobs[index].teamID == team {
+                            jobs[index].state = .failed(
+                                L("Skipped: no saved Apple ID matches this app's team (%@). Switch to that account and refresh again.", team))
+                        }
+                        engine.log("⛔️ Refresh group \(team): no saved account maps to this team — skipped.")
+                        continue
+                    }
+                    // 切账号：Settings 切账号时 RootView 的 revision 监听
+                    // 会异步丢弃旧 session，但那是 fire-and-forget，不能
+                    // 等；这里显式等旧 session 释放完再登，否则 signIn
+                    // 会因 signSession != nil 直接跳过、还用旧账号。
+                    AccountStore.shared.activate(groupAccount)
+                    didSwitchAccount = true
+                    await engine.dropSignSession()
+                    do {
+                        try await engine.signInForRefresh()
+                    } catch {
+                        let message = Self.text(for: error)
+                        for index in jobs.indices where jobs[index].teamID == team {
+                            jobs[index].state = .failed(
+                                L("Couldn't sign in as %@ (%@). Switch to that account and refresh again.", groupAccount.normalized, message))
+                        }
+                        engine.log("⛔️ Refresh group \(team) as \(groupAccount.normalized): sign-in failed: \(message)")
+                        continue
+                    }
+                    // 底线核对：登完的团队必须等于该组团队，否则整组跳
+                    // 过。2FA 取消/锁定/凭据错误/限流都走到这里的上一
+                    // 步：只跳过该组，继续跑别的组。
+                    guard engine.signingTeamID == team else {
+                        for index in jobs.indices where jobs[index].teamID == team {
+                            jobs[index].state = .failed(
+                                L("Skipped: signed in as %@, but this app's team is %@. Switch to that account and refresh again.", groupAccount.normalized, team))
+                        }
+                        engine.log("⛔️ Refresh group \(team): signed in as \(groupAccount.normalized) but team is \(engine.signingTeamID ?? "unknown") — skipped.")
+                        continue
+                    }
+                    engine.log("Refresh group \(team): signed in as \(groupAccount.normalized).")
                 }
-                jobs[index].state = .working
-                refreshStatus = L("Refreshing %@", job.name)
-                do {
-                    try await engine.refreshInstalledApp(named: job.name, ipaPath: job.ipa.path)
-                    jobs[index].state = .done
-                    refreshed += 1
-                } catch {
-                    let message = Self.text(for: error)
-                    jobs[index].state = .failed(message)
-                    engine.log("⛔️ Refresh \(job.name): \(message)")
+                let groupEmail = AccountStore.shared.account(forTeam: team)?.normalized
+                    ?? AccountStore.shared.activeAppleID
+                for job in group.jobs {
+                    if Task.isCancelled { break }
+                    guard let index = jobs.firstIndex(where: { $0.bundleID == job.bundleID }) else { continue }
+                    // 第二道闸（保留）：逐个再核一次团队，防列表与
+                    // session 漂移。团队号未知、App 团队号未知、团队号
+                    // 不一致，三种一律跳过不续，绝不把证书签的 App
+                    // 重新签成个人 ID。
+                    guard let teamNow = engine.signingTeamID, let installed = job.teamID, installed == teamNow else {
+                        jobs[index].state = .failed(
+                            L("Skipped: not signed by the team you're signed in as, so a certificate-signed app is never re-signed here."))
+                        continue
+                    }
+                    jobs[index].state = .working
+                    refreshStatus = multiAccount
+                        ? L("Refreshing %@ as %@", job.name, groupEmail)
+                        : L("Refreshing %@", job.name)
+                    do {
+                        try await engine.refreshInstalledApp(named: job.name, ipaPath: job.ipa.path)
+                        jobs[index].state = .done
+                        refreshed += 1
+                    } catch {
+                        let message = Self.text(for: error)
+                        jobs[index].state = .failed(message)
+                        engine.log("⛔️ Refresh \(job.name): \(message)")
+                    }
                 }
+            }
+
+            // 切回原账号的内存 session（activeID 已由 defer 恢复）。
+            // 只有本轮切过账号时才需要；重登失败则 team 已清，下次
+            // 登录重取，绝不顶着别的账号的团队号。
+            if didSwitchAccount {
+                await self.restoreOriginalSession(original: originalAccount)
             }
 
             refreshSummary = jobs.count == 1
@@ -539,6 +608,52 @@ final class SideloadedAppsManager: ObservableObject {
                 isRefreshing = false        // `load` won't run while a refresh holds the link
                 load(quiet: true)
             }
+        }
+    }
+
+    /// One refresh group: the jobs of a single team, signed with that team's
+    /// Apple ID. Job order inside a group matches the page's order.
+    private struct RefreshGroup {
+        let team: String
+        var jobs: [RefreshJob]
+    }
+
+    /// Groups jobs by team, groups in first-appearance order. Jobs without a
+    /// team never reach here (rebuildRefreshable filters them); dropped
+    /// defensively so a stale list can't crash the run.
+    private static func groupedByTeam(_ jobs: [RefreshJob]) -> [RefreshGroup] {
+        var order: [String] = []
+        var byTeam: [String: [RefreshJob]] = [:]
+        for job in jobs {
+            guard let team = job.teamID else { continue }
+            if byTeam[team] == nil { order.append(team) }
+            byTeam[team, default: []].append(job)
+        }
+        return order.compactMap { team in
+            byTeam[team].map { RefreshGroup(team: team, jobs: $0) }
+        }
+    }
+
+    /// Distinct teams in the refreshable list. The confirm dialog uses it to
+    /// say when more than one Apple ID will sign.
+    var refreshableTeamCount: Int {
+        Set(refreshable.compactMap { $0.teamID }).count
+    }
+
+    /// Best-effort re-sign-in as the run's original account, after a
+    /// multi-account run switched away from it. activeID is already restored
+    /// by refreshAll's defer; this only restores the in-memory session and
+    /// team. On failure the team stays cleared (dropSignSession cleared it)
+    /// so nothing claims the wrong team; the next sign-in re-derives it.
+    private func restoreOriginalSession(original: SavedAccount?) async {
+        guard let original else { return }
+        AccountStore.shared.activate(original)
+        await engine.dropSignSession()
+        do {
+            try await engine.signInForRefresh()
+            engine.log("Refresh done: signed back in as \(original.normalized).")
+        } catch {
+            engine.log("⛔️ Refresh done: couldn't sign back in as \(original.normalized): \(Self.text(for: error)) — team cleared, next sign-in re-derives it.")
         }
     }
 
@@ -644,18 +759,20 @@ final class SideloadedAppsManager: ObservableObject {
         let paired = await Task.detached(priority: .userInitiated) {
             SideloadedAppsManager.pair(installed, with: IPALibrary.installable())
         }.value
-        // Refresh re-signs with the signed-in Apple ID, so it can only ever
-        // replace apps that ID's team signed. Anything else (enterprise
-        // certificates, another person's ID) is left out up front instead
-        // of being picked up as a job and failing one by one during a run.
-        // 全部续签铁律（防上次的错）：证书签的 App 一律不续。
-        // 上次的口子就在这里：团队号拿不到时不过滤、App 团队号未知
-        // 时也放行，证书签的 App 就被一起续了。现在改成硬过滤：
-        // 团队号未知时一个都不留，App 团队号未知时也不留，只有
-        // 团队号明确等于登录团队的才进可续签列表。
-        let kept = engine.signingTeamID.map { team in
-            paired.filter { $0.teamID == team }
-        } ?? []
+        // 多账号续签：可续签 = 配对成功 且 团队号映射到某个已存账号，
+        // 或等于当前登录团队（冷启动兜底：团队号还没记到账号上时，
+        // 沿用现行“只续当前登录团队”的行为）。团队号未知、或映射不
+        // 到任何账号且不等于当前团队（企业证书团队）的，照样排除，
+        // 计入 teamExcluded。IPA-on-disk 这道门不动：没进 paired 的
+        // 本来就不在这里。证书签的 App 不续的本意不变——进来的每个
+        // App 仍只用它自己团队的账号签，绝不拿当前账号给它签名。
+        let knownTeams = Set(AccountStore.shared.accounts.compactMap { $0.teamID })
+        let currentTeam = engine.signingTeamID
+        let kept = paired.filter { job in
+            guard let team = job.teamID else { return false }
+            if knownTeams.contains(team) { return true }
+            return team == currentTeam
+        }
         let excluded = paired.count - kept.count
         refreshable = kept
         teamExcluded = excluded
@@ -751,10 +868,14 @@ struct AppsView: View {
             Button(L("Cancel"), role: .cancel) { }
         } message: {
             Text(manager.refreshable.count == 1
-                 ? L("%@ will be signed again with your Apple ID and installed over the copy on this device. It keeps its data, and its seven days start over.",
+                 ? L("%@ will be signed again with the Apple ID that signed it and installed over the copy on this device. It keeps its data, and its seven days start over.",
                      manager.refreshable.first?.name ?? "")
-                 : L("%d apps will be signed again with your Apple ID and installed over the copies on this device. They keep their data, and their seven days start over.",
+                 : L("%d apps will be signed again, each with the Apple ID that signed it, and installed over the copies on this device. They keep their data, and their seven days start over.",
                      manager.refreshable.count))
+            if manager.refreshableTeamCount > 1 {
+                Text(L("These apps were signed under %d Apple IDs, so each group is signed with its own Apple ID.",
+                       manager.refreshableTeamCount))
+            }
         }
         .alert(L("未安装 LocalDevVPN"), isPresented: $showInstallLOCPrompt) {
             Button(L("去安装")) {

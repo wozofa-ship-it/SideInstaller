@@ -8,10 +8,15 @@ import SideInstallerFFI
 struct SavedAccount: Identifiable, Codable, Equatable {
     let id: UUID
     var appleID: String
+    /// Team ID a successful sign-in as this account reported, if known yet.
+    /// Nil means "not recorded", never "has no team": archives saved before
+    /// team recording decode without this key and get nil.
+    var teamID: String?
 
-    init(id: UUID = UUID(), appleID: String) {
+    init(id: UUID = UUID(), appleID: String, teamID: String? = nil) {
         self.id = id
         self.appleID = appleID
+        self.teamID = teamID
     }
 
     /// The email as sent to Apple; a stray space breaks the SRP proof.
@@ -85,6 +90,23 @@ final class AccountStore: ObservableObject {
 
     /// True when `account` is the one in use.
     func isActive(_ account: SavedAccount) -> Bool { account.id == activeID }
+
+    /// The saved account whose recorded team matches, if any. Refresh-all
+    /// uses this to find which Apple ID can renew a given team's apps.
+    func account(forTeam teamID: String) -> SavedAccount? {
+        accounts.first { $0.teamID == teamID }
+    }
+
+    /// Records the team ID a successful sign-in reported, on the account
+    /// that signed in (the active one). Called from Engine's sign-in success
+    /// path, on the main thread. A no-op when nothing changed, so a repeat
+    /// sign-in doesn't rewrite the archive for nothing.
+    func noteTeamID(_ teamID: String) {
+        guard let active, active.teamID != teamID,
+              let idx = accounts.firstIndex(where: { $0.id == active.id }) else { return }
+        accounts[idx].teamID = teamID
+        persist()
+    }
 
     func password(for account: SavedAccount) -> String {
         volatilePasswords[account.id] ?? Self.keychainRead(account.id) ?? ""

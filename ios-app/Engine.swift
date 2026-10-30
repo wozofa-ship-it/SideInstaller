@@ -1096,6 +1096,37 @@ final class Engine: ObservableObject {
         appleID.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Frees the in-memory sign session and waits for it, so a following
+    /// signIn() really logs in as the newly activated account. The fire-and-
+    /// forget `forgetAppleSession()` below can't be awaited: a signIn() issued
+    /// right after it would still see the old session and skip (`signSession
+    /// != nil`), silently signing with the wrong account. Runs the free on
+    /// `signQueue`, which owns `signSession`, then clears the team on the
+    /// main actor. Does NOT delete the saved developer-session token on disk:
+    /// the next sign-in reuses it, so an account switch normally needs no
+    /// fresh Apple authentication (2FA stays possible as a safety valve).
+    @MainActor
+    func dropSignSession() async {
+        try? await onSignQueue {
+            if let session = self.signSession { si_sign_session_free(session) }
+            self.signSession = nil
+        }
+        signingTeamID = nil
+        UserDefaults.standard.removeObject(forKey: Self.savedTeamKey)
+        signInStatus = "signed out"
+        log("In-memory sign session dropped for an account switch.")
+    }
+
+    /// Signs in as the currently active account, for flows outside the Install
+    /// tab (e.g. a multi-account refresh switching groups). Thin wrapper over
+    /// the private signIn(): no checklist changes, same 2FA/lock/rate-limit
+    /// handling. Callers must have dropped the old session first, or this
+    /// skips on the existing session.
+    @MainActor
+    func signInForRefresh() async throws {
+        try await signIn(updatingChecklist: false)
+    }
+
     /// Frees the cached sign-in session so the next run signs in as the active
     /// account. Called when credentials change. Runs on `signQueue`, which owns
     /// `signSession`.
@@ -1298,7 +1329,13 @@ final class Engine: ObservableObject {
             let s = summary.map { String(cString: $0) } ?? ""
             summary.map { si_string_free($0) }
             let team = Self.teamID(inSummary: s)
-            setMain { self.signingTeamID = team }
+            setMain {
+                self.signingTeamID = team
+                // Remember which account owns this team, so a later
+                // multi-account refresh can map an app's team back to the
+                // Apple ID that can renew it without signing in first.
+                if let team { AccountStore.shared.noteTeamID(team) }
+            }
             if let team { UserDefaults.standard.set(team, forKey: Self.savedTeamKey) }
             log("Sign-in OK. \(s)")
             return s
