@@ -1146,7 +1146,7 @@ struct CertTabView: View {
                     } label: {
                         Image(systemName: selectedSignedIDs.contains(record.id)
                               ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(selectedSignedIDs.contains(record.id) ? .accentColor : .secondary)
+                            .foregroundStyle(selectedSignedIDs.contains(record.id) ? Color.accentColor : Color.secondary)
                     }
                     .buttonStyle(.plain)
                 }

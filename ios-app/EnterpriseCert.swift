@@ -272,8 +272,11 @@ enum CertRevocationChecker {
         if let data,
            SecPKCS12Import(data as CFData, options as CFDictionary, &items) == errSecSuccess,
            let array = items as? [[String: Any]],
-           let trust = array.first?[kSecImportItemTrust as String] as? SecTrust {
-            return trust
+           let rawTrust = array.first?[kSecImportItemTrust as String] as? AnyObject,
+           CFGetTypeID(rawTrust) == SecTrustGetTypeID() {
+            // 这里不能写 as? SecTrust：编译器认定对 CoreFoundation
+            // 类型的条件转换恒成功而直接报错；先验 typeID 再硬转。
+            return unsafeBitCast(rawTrust, to: SecTrust.self)
         }
         guard let identity = try? EnterpriseCertStore.identity() else { return nil }
         var certRef: SecCertificate?
@@ -300,7 +303,7 @@ enum IPADecryptionCheck {
         } catch { return nil }
         defer { try? fm.removeItem(at: tmp) }
         guard FileZipTool.unzip(archive: ipaURL, to: tmp) == nil else { return nil }
-        guard let payload = try? fm.contentsOfDirectory(at: tmp.appendingPathComponent("Payload")),
+        guard let payload = try? fm.contentsOfDirectory(at: tmp.appendingPathComponent("Payload"), includingPropertiesForKeys: nil),
               let appDir = payload.first(where: { $0.pathExtension == "app" }) else { return nil }
         let executableName: String
         if let plistData = try? Data(contentsOf: appDir.appendingPathComponent("Info.plist")),
