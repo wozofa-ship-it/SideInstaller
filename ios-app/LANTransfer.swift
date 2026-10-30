@@ -270,7 +270,9 @@ final class LANTransferServer: ObservableObject {
     // MARK: 页面与上传解析
 
     private func indexHTML() -> String {
-        let items = AppFileLibrary.scan()
+        // 文件页改成连文件夹一起列之后，这里仍只列文件：
+        // 局域网传输的下载链接对文件夹没有意义，别让它出现在列表里。
+        let items = AppFileLibrary.scan().filter { !$0.isDirectory }
         var rows = ""
         for item in items {
             let rel = item.relativeDir.isEmpty ? item.name : "\(item.relativeDir)/\(item.name)"

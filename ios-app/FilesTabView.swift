@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// Documents 里的一个文件（递归，含子文件夹）。
+/// Documents 里的一个文件或文件夹（递归，含子文件夹）。
 struct LocalFileItem: Identifiable {
     let url: URL
     let name: String
@@ -10,6 +10,10 @@ struct LocalFileItem: Identifiable {
     let relativeDir: String
     let size: Int
     let modified: Date?
+    /// 是不是文件夹：轻松签文件列表式，文件夹也是一行。
+    let isDirectory: Bool
+    /// 文件夹的直接子项数（不含隐藏项），文件恒为 0。
+    let childCount: Int
     var id: String { url.path }
     var isIPA: Bool { name.lowercased().hasSuffix(".ipa") }
     var isZip: Bool { name.lowercased().hasSuffix(".zip") }
@@ -29,15 +33,25 @@ enum AppFileLibrary {
         for case let url as URL in enumerator {
             let values = try? url.resourceValues(
                 forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
-            if values?.isDirectory == true { continue }
+            let isDirectory = values?.isDirectory == true
             let rel = url.path.replacingOccurrences(of: root.path + "/", with: "")
             let dir = (rel as NSString).deletingLastPathComponent
+            // 文件夹数直接子项（不含隐藏项），文件恒为 0。
+            let childCount: Int
+            if isDirectory {
+                let children = (try? fm.contentsOfDirectory(atPath: url.path)) ?? []
+                childCount = children.filter { !$0.hasPrefix(".") }.count
+            } else {
+                childCount = 0
+            }
             items.append(LocalFileItem(
                 url: url,
                 name: url.lastPathComponent,
                 relativeDir: dir == "." ? "" : dir,
                 size: values?.fileSize ?? 0,
-                modified: values?.contentModificationDate))
+                modified: values?.contentModificationDate,
+                isDirectory: isDirectory,
+                childCount: childCount))
         }
         return items.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
     }
@@ -82,6 +96,8 @@ struct FilesTabView: View {
     @State private var opFailed = false
     // Mach-O 查看 / 局域网传输
     @State private var machoItem: LocalFileItem?
+    /// ⓘ 详情 sheet 正在看的行。
+    @State private var detailItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
     /// 局域网地址点按复制后的短暂「已复制」提示。
     @State private var lanCopied = false
@@ -131,6 +147,9 @@ struct FilesTabView: View {
         }
         .sheet(item: $machoItem) { item in
             MachOView(url: item.url, fileName: item.name)
+        }
+        .sheet(item: $detailItem) { item in
+            FileDetailSheet(item: item)
         }
         .sheet(isPresented: $showImporter) {
             FileImporterRepresentableView(
@@ -340,6 +359,24 @@ struct FilesTabView: View {
         }
     }
 
+    /// 轻松签文件列表式第二行：文件夹是“n 项”，文件是“大小  时间”。
+    private func fileSecondLine(_ item: LocalFileItem) -> String {
+        if item.isDirectory {
+            return L("%d 项", item.childCount)
+        }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)
+        guard let modified = item.modified else { return size }
+        return "\(size)  \(fileTimeText(modified))"
+    }
+
+    /// 今天显示时间（14:38:19），以前的显示日期（2026/10/27），轻松签同款。
+    private func fileTimeText(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .standard)
+        }
+        return date.formatted(date: .numeric, time: .omitted)
+    }
+
     private func fileRow(_ item: LocalFileItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -348,45 +385,70 @@ struct FilesTabView: View {
                           ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
                 }
+                // 轻松签文件列表式：文件夹蓝色、文件灰色文档图标。
+                Image(systemName: item.isDirectory ? "folder.fill" : "doc")
+                    .foregroundStyle(item.isDirectory ? .blue : .secondary)
+                    .font(.title3)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(2)
-                    Text("\(item.relativeDir.isEmpty ? L("根目录") : item.relativeDir) · \(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))\(item.modified.map { " · " + $0.formatted(date: .abbreviated, time: .omitted) } ?? "")")
+                    Text(fileSecondLine(item))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                Spacer()
+                Button {
+                    detailItem = item
+                } label: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.plain)
             }
             if !selecting {
             HStack(spacing: 14) {
-                ShareLink(item: item.url) {
-                    Text(L("分享"))
-                        .font(.footnote)
-                }
-                if item.isIPA {
-                    Button {
-                        workspace.selectedIPA = item.url
-                        onGoCert()
+                if item.isDirectory {
+                    // 文件夹是新增的行：分享/签名/安装都是文件的操作，
+                    // 这里只留删除（重命名在长按菜单里）。
+                    Spacer()
+                    Button(role: .destructive) {
+                        delete(item)
                     } label: {
-                        Text(L("去签名"))
-                            .font(.footnote.weight(.semibold))
+                        Text(L("删除"))
+                            .font(.footnote)
                     }
-                    if item.isInSignedDir {
+                } else {
+                    ShareLink(item: item.url) {
+                        Text(L("分享"))
+                            .font(.footnote)
+                    }
+                    if item.isIPA {
                         Button {
-                            engine.runInstallSignedIPA(ipaURL: item.url)
+                            workspace.selectedIPA = item.url
+                            onGoCert()
                         } label: {
-                            Text(L("安装"))
+                            Text(L("去签名"))
                                 .font(.footnote.weight(.semibold))
                         }
-                        .disabled(engine.isRunning)
+                        if item.isInSignedDir {
+                            Button {
+                                engine.runInstallSignedIPA(ipaURL: item.url)
+                            } label: {
+                                Text(L("安装"))
+                                    .font(.footnote.weight(.semibold))
+                            }
+                            .disabled(engine.isRunning)
+                        }
                     }
-                }
-                Spacer()
-                Button(role: .destructive) {
-                    delete(item)
-                } label: {
-                    Text(L("删除"))
-                        .font(.footnote)
+                    Spacer()
+                    Button(role: .destructive) {
+                        delete(item)
+                    } label: {
+                        Text(L("删除"))
+                            .font(.footnote)
+                    }
                 }
             }
             }
@@ -401,13 +463,17 @@ struct FilesTabView: View {
             }
         }
         .contextMenu {
-            ShareLink(item: item.url) {
-                Label(L("分享"), systemImage: "square.and.arrow.up")
-            }
-            Button {
-                machoItem = item
-            } label: {
-                Label(L("Mach-O 依赖"), systemImage: "list.bullet.rectangle")
+            // 文件夹是新增的行：分享/Mach-O/压缩/解压/签名/安装都是
+            // 文件的操作，文件夹只留重命名和删除。
+            if !item.isDirectory {
+                ShareLink(item: item.url) {
+                    Label(L("分享"), systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    machoItem = item
+                } label: {
+                    Label(L("Mach-O 依赖"), systemImage: "list.bullet.rectangle")
+                }
             }
             Button {
                 renameText = item.name
@@ -415,30 +481,32 @@ struct FilesTabView: View {
             } label: {
                 Label(L("重命名"), systemImage: "pencil")
             }
-            Button {
-                zipSingle(item)
-            } label: {
-                Label(L("压缩成 ZIP"), systemImage: "archivebox")
-            }
-            if item.isZip {
+            if !item.isDirectory {
                 Button {
-                    unzip(item)
+                    zipSingle(item)
                 } label: {
-                    Label(L("解压"), systemImage: "tray.and.arrow.up")
+                    Label(L("压缩成 ZIP"), systemImage: "archivebox")
                 }
-            }
-            if item.isIPA {
-                Button {
-                    workspace.selectedIPA = item.url
-                    onGoCert()
-                } label: {
-                    Label(L("去企业证书签名"), systemImage: "checkmark.seal")
-                }
-                if item.isInSignedDir {
+                if item.isZip {
                     Button {
-                        engine.runInstallSignedIPA(ipaURL: item.url)
+                        unzip(item)
                     } label: {
-                        Label(L("安装"), systemImage: "square.and.arrow.down")
+                        Label(L("解压"), systemImage: "tray.and.arrow.up")
+                    }
+                }
+                if item.isIPA {
+                    Button {
+                        workspace.selectedIPA = item.url
+                        onGoCert()
+                    } label: {
+                        Label(L("去企业证书签名"), systemImage: "checkmark.seal")
+                    }
+                    if item.isInSignedDir {
+                        Button {
+                            engine.runInstallSignedIPA(ipaURL: item.url)
+                        } label: {
+                            Label(L("安装"), systemImage: "square.and.arrow.down")
+                        }
                     }
                 }
             }
@@ -513,7 +581,9 @@ struct FilesTabView: View {
     }
 
     private func zipSelection() {
-        let items = files.filter { selection.contains($0.id) }
+        // 只打包文件：文件夹以前根本不在列表里，Rust 压包接不接
+        // 目录项没验证过，别在这里新开行为，选了文件夹就跳过它。
+        let items = files.filter { selection.contains($0.id) && !$0.isDirectory }
         guard !items.isEmpty else { return }
         let root = IPALibrary.documentsDir
         var out = root.appendingPathComponent("打包.zip")
@@ -564,6 +634,43 @@ struct FilesTabView: View {
                 opMessage = L("已解压到 %@", dest.lastPathComponent)
                 opFailed = false
             }
+        }
+    }
+}
+
+/// 文件详情（轻松签文件列表右边的 ⓘ）：名字、大小、修改时间、路径。
+/// 文件夹没有字节大小可言，大小那行显示“共 n 项”。
+private struct FileDetailSheet: View {
+    let item: LocalFileItem
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                detailRow(L("名字"), item.name)
+                detailRow(L("大小"), item.isDirectory
+                          ? L("%d 项", item.childCount)
+                          : ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))
+                detailRow(L("修改时间"), item.modified?.formatted(date: .abbreviated, time: .standard) ?? L("未知"))
+                detailRow(L("路径"), item.url.path)
+            }
+            .navigationTitle(L("详情"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(L("完成")) { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.subheadline)
         }
     }
 }
