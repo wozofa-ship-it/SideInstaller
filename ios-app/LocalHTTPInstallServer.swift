@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import UIKit
 
@@ -289,7 +290,7 @@ final class LocalHTTPInstallServer: ObservableObject {
             let total = raw.count
             guard let base = raw.baseAddress else { return }
             while sent < total {
-                let n = send(fd, base.advanced(by: sent), total - sent, 0)
+                let n = Darwin.send(fd, base.advanced(by: sent), total - sent, 0)
                 if n <= 0 { return }
                 sent += n
             }
@@ -307,7 +308,7 @@ final class LocalHTTPInstallServer: ObservableObject {
                 let total = raw.count
                 guard let base = raw.baseAddress else { ok = false; return }
                 while sent < total {
-                    let n = send(fd, base.advanced(by: sent), total - sent, 0)
+                    let n = Darwin.send(fd, base.advanced(by: sent), total - sent, 0)
                     if n <= 0 { ok = false; return }
                     sent += n
                 }
