@@ -500,6 +500,20 @@ final class SideloadedAppsManager: ObservableObject {
                 return
             }
 
+            // prepareRefresh 刚登完当前账号、记下了它的团队映射；但
+            // jobs 是登之前建的（那时这队可能还没映射），重建一次让
+            // 刚记下的映射当场生效：切到 icloud 点一次全部续签，
+            // icloud 的 App 这一轮就能进列表，不用再重读、再点一次。
+            // 只续到期的那几只（快捷指令/后台）仍按原 ID 过滤。
+            await rebuildRefreshable()
+            let rebuiltCandidates = onlyBundleIDs.map { ids in
+                refreshable.filter { ids.contains($0.bundleID) }
+            } ?? refreshable
+            if rebuiltCandidates.count != jobs.count {
+                engine.log("Refresh all: list rebuilt after sign-in (\(jobs.count) → \(rebuiltCandidates.count)).")
+                jobs = rebuiltCandidates
+            }
+
             // 按团队分组跑：每组先切到该团队的账号、登完核对团队号再
             // 签。组内保持页面顺序，组按首次出现顺序。取消只在组间
             // 和 App 间检查，正在签装的单个 App 不中断。
@@ -828,11 +842,11 @@ struct AppsView: View {
             VStack(spacing: 18) {
                 header.cascadeItem(0)
                 refreshAllButton
+                refreshNote
                 loadButton
                 refreshRunCard
                 // Errors show as a popup, which `RootView` lays over the app.
                 appList
-                refreshNote
                 unmatchedSection
             }
             .padding(20)
@@ -1066,17 +1080,19 @@ struct AppsView: View {
     }
 
     /// Notes explaining why listed apps can't be refreshed from this page.
+    /// Shown right under "Refresh all" so the reason is visible without
+    /// scrolling past the whole list.
     @ViewBuilder
     private var refreshNote: some View {
         if manager.hasLoaded && manager.teamExcluded > 0 {
             Text(manager.teamExcluded == 1
-                 ? L("%d app here is signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so it is left out.", manager.teamExcluded)
-                 : L("%d apps here are signed with an enterprise or another team's certificate, not your Apple ID. Refresh only renews apps signed by your own ID, so they are left out.", manager.teamExcluded))
+                 ? L("%d app here is signed under a team that matches no saved Apple ID, so it is left out. Switch to the Apple ID that signed it and sign in once, then reload, and it will join the list. Enterprise-signed apps stay excluded.", manager.teamExcluded)
+                 : L("%d apps here are signed under teams that match no saved Apple ID, so they are left out. Switch to the Apple ID that signed them and sign in once, then reload, and they will join the list. Enterprise-signed apps stay excluded.", manager.teamExcluded))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .cascadeItem(5 + manager.entries.count)
+                .cascadeItem(2)
         }
         if manager.hasLoaded && manager.unrefreshable > 0 && !manager.entries.isEmpty {
             Text(manager.unrefreshable == 1
@@ -1088,7 +1104,7 @@ struct AppsView: View {
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .cascadeItem(5 + manager.entries.count)
+                .cascadeItem(2)
         }
     }
 
