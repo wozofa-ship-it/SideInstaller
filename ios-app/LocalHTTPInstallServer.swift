@@ -26,10 +26,13 @@ final class LocalHTTPInstallServer: ObservableObject {
     //（0.9.6 编译红字），且它报 ready 也不等于系统安装器能连上
     // localhost；轻松签就是 BSD socket 绑 127.0.0.1，同款做法。
     private var listenFD: Int32 = -1
+    private var listenFD6: Int32 = -1
     private let fdLock = NSLock()
     private var activeCandidate = 0
     private let queue = DispatchQueue(label: "czf.localhttp.install")
-    private let acceptQueue = DispatchQueue(label: "czf.localhttp.accept")
+    // 双栈要同时 accept 两个口：串行队列会让第二个 acceptLoop
+    // 永远排不上（第一个 accept 一直阻塞），所以用并发队列。
+    private let acceptQueue = DispatchQueue(label: "czf.localhttp.accept", attributes: .concurrent)
     private var clientFDs = Set<Int32>()
     private var installID = ""
     private var ipaURL: URL?
@@ -81,11 +84,15 @@ final class LocalHTTPInstallServer: ObservableObject {
         // 关监听口：阻塞在 accept 里的循环会被 EBADF 唤醒退出。
         // fdLock 防 double-close（stop 可能在主线程和 work 队列
         // 上同时进来，close 同一个号两次会误关后来复用的号）。
+        // 双栈两个口一起关，缺一个都会让另一半继续占端口。
         fdLock.lock()
         let fd = listenFD
+        let fd6 = listenFD6
         listenFD = -1
+        listenFD6 = -1
         fdLock.unlock()
         if fd >= 0 { close(fd) }
+        if fd6 >= 0 { close(fd6) }
         // 已接进来的连接在 work 队列上关（不阻塞主线程）。
         queue.async { [weak self] in
             guard let self else { return }
@@ -146,13 +153,45 @@ final class LocalHTTPInstallServer: ObservableObject {
             tryPort(candidate + 1)
             return
         }
+        // 双栈：localhost 可能解析到 ::1（IPv6），只绑 IPv4 时系统
+        // 安装器连 ::1 直接被拒——v58 在真机上仍弹“无法连接
+        // localhost”就是这个缺口（ESign 的 GCDWebServer 绑回环是
+        // 双栈同款）。IPv6 口单独 v6only，不跟 IPv4 口抢地址；
+        // 任一口绑不上都换下一个端口（两口必须同端口，清单里
+        // 只写一个端口，缺一半就等于另一半白绑）。
+        let fd6 = socket(AF_INET6, SOCK_STREAM, 0)
+        guard fd6 >= 0 else { close(fd); tryPort(candidate + 1); return }
+        var reuse6: Int32 = 1
+        setsockopt(fd6, SOL_SOCKET, SO_REUSEADDR, &reuse6,
+                   socklen_t(MemoryLayout<Int32>.size))
+        var v6only: Int32 = 1
+        setsockopt(fd6, IPPROTO_IPV6, IPV6_V6ONLY, &v6only,
+                   socklen_t(MemoryLayout<Int32>.size))
+        var addr6 = sockaddr_in6()
+        addr6.sin6_family = sa_family_t(AF_INET6)
+        addr6.sin6_port = UInt16(candidate).bigEndian
+        addr6.sin6_addr = in6addr_loopback
+        let bound6 = withUnsafePointer(to: &addr6) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                bind(fd6, sa, socklen_t(MemoryLayout<sockaddr_in6>.size))
+            }
+        }
+        guard bound6 == 0, listen(fd6, 5) == 0 else {
+            close(fd)
+            close(fd6)
+            tryPort(candidate + 1)
+            return
+        }
         fdLock.lock()
         listenFD = fd
+        listenFD6 = fd6
         fdLock.unlock()
         activeCandidate = candidate
         // 接受循环放独立队列：accept 会阻塞，不能占 work 队列
-        //（stopWork/hardStopWork 的定时器还在上面）。
+        //（stopWork/hardStopWork 的定时器还在上面）。双栈两个
+        // 口各一条 acceptLoop（队列已改并发，两条能同时阻塞）。
         acceptQueue.async { [weak self] in self?.acceptLoop(fd: fd) }
+        acceptQueue.async { [weak self] in self?.acceptLoop(fd: fd6) }
         onReady(port: candidate)
     }
 
@@ -248,7 +287,18 @@ final class LocalHTTPInstallServer: ObservableObject {
         guard let first = headText.components(separatedBy: "\r\n").first else { return nil }
         let parts = first.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" else { return nil }
-        return String(parts[1])
+        var raw = String(parts[1])
+        // 容错：安装器可能发绝对地址（GET http://localhost:端口/...）
+        // 或带查询串，原样精确匹配会 404。绝对地址只取路径部分
+        //（URL.path 本来就不含查询串），相对地址顺手去掉 ? 之后。
+        if raw.hasPrefix("http://") || raw.hasPrefix("https://") {
+            if let url = URL(string: raw) {
+                raw = url.path
+            }
+        } else if let q = raw.firstIndex(of: "?") {
+            raw = String(raw[..<q])
+        }
+        return raw
     }
 
     private func respond(fd: Int32, path: String) {
@@ -264,8 +314,8 @@ final class LocalHTTPInstallServer: ObservableObject {
                      length: 0, body: Data())
                 return
             }
-            // 安装器下载包时 App 已退到后台，分片发、发完再停，
-            // 别把大包一次塞进内存。
+            // 安装器下载包时 App 已退到后台，分片发、发完不停
+            //（停服务走 600 秒硬停），别把大包一次塞进内存。
             send(fd: fd, status: "200 OK", contentType: "application/octet-stream",
                  length: size, body: nil)
             sendFile(fd: fd, handle: handle, remaining: size)
@@ -317,21 +367,24 @@ final class LocalHTTPInstallServer: ObservableObject {
             left -= chunk.count
         }
         try? handle.close()
-        // 只有整包发完才留 20 秒给安装器重试，之后停服务；
-        // 中途断开只关连接，停服务走 600 秒硬停或用户重试。
+        // 整包发完不停服务：安装器可能重试/断点续传，20 秒就停
+        // 会把重试挡在外面（ESign 是装完才停，不设 20 秒）。
+        // 停服务只走 600 秒硬停、下次安装的 stop()，不走发完计时。
+        // 中途断开也只关连接，同样不走停服务。
         guard left == 0 else { return }
-        stopWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.stop() }
-        stopWork = work
-        queue.asyncAfter(deadline: .now() + 20, execute: work)
     }
 
     // MARK: - 后台与状态
 
     private func beginBackgroundTask() {
         endBackgroundTask()
+        // 到期只结束任务、不停服务：ESign 靠静音音频无限时保活，
+        // Side 起动时也已起 keepAlive 音频（Shortcuts 续签用），
+        // App 不会因此挂起；到期就停服务的话，用户在系统安装
+        // 弹窗上多停 30 秒、服务就没了，安装器再连就是“无法连接”。
+        // 停服务只走 600 秒硬停、下次安装的 stop()，不走任务到期。
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "LocalHTTPInstall") {
-            [weak self] in self?.stop()
+            [weak self] in self?.endBackgroundTask()
         }
     }
 
