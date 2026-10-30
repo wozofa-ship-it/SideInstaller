@@ -1621,6 +1621,29 @@ final class Engine: ObservableObject {
 
     // MARK: Versions to pick from (Advanced)
 
+    /// Disk cache for release catalogs, in SignedIPAStore's tolerant
+    /// JSON-file shape: a missing or unreadable file just means "fetch
+    /// fresh". Lets a catalog survive an app restart, so reopening the
+    /// version picker within 15 minutes doesn't cost another GitHub call.
+    private static var catalogCacheURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("releaseCatalogs.json")
+    }
+
+    private static func loadCatalogCache() -> [InstallSource: ReleaseCatalog] {
+        guard let data = try? Data(contentsOf: catalogCacheURL),
+              let cached = try? JSONDecoder().decode([InstallSource: ReleaseCatalog].self, from: data)
+        else { return [:] }
+        return cached
+    }
+
+    private static func saveCatalogCache(_ catalogs: [InstallSource: ReleaseCatalog]) {
+        if let data = try? JSONEncoder().encode(catalogs) {
+            try? data.write(to: catalogCacheURL, options: .atomic)
+        }
+    }
+
     /// Lists `source`'s releases for the version picker, unless a list from the
     /// last 15 minutes is at hand. One GitHub API call, which counts against the
     /// same hourly limit as the download's fallbacks.
@@ -1629,6 +1652,14 @@ final class Engine: ObservableObject {
         guard source != .custom, loadingCatalog != source else { return }
         if !force, let cached = releaseCatalogs[source],
            Date().timeIntervalSince(cached.fetched) < 15 * 60 { return }
+        // Disk cache, same 15-minute rule: a catalog saved by an earlier
+        // launch still counts, so reopening the picker doesn't refetch.
+        if !force, let disk = Self.loadCatalogCache()[source],
+           Date().timeIntervalSince(disk.fetched) < 15 * 60 {
+            releaseCatalogs[source] = disk
+            log("Versions: using saved \(source.displayName) catalog.")
+            return
+        }
         loadingCatalog = source
         catalogErrors[source] = nil
         // Checked, since a newer load for another build may have started since.
@@ -1636,6 +1667,8 @@ final class Engine: ObservableObject {
         do {
             let catalog = try await SideStoreDownloader.releaseCatalog(source: source)
             releaseCatalogs[source] = catalog
+            // Persist for the next launch (same 15-minute rule applies on read).
+            Self.saveCatalogCache(releaseCatalogs)
             log("Versions: \(source.displayName) has \(catalog.others[.stable]?.count ?? 0) stable and \(catalog.others[.nightly]?.count ?? 0) pre-release builds besides the latest.")
         } catch is CancellationError {
             // The picker closed mid-fetch; opening it again retries.

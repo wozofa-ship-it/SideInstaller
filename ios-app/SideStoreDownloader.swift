@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 
 /// Which release track to pull the IPA from.
-enum ReleaseChannel: String, CaseIterable, Identifiable {
+enum ReleaseChannel: String, CaseIterable, Identifiable, Codable {
     case stable
     case nightly
 
@@ -63,7 +63,7 @@ struct ActionsBuild {
 /// What to install: two SideStore builds and Madeira, fetched from GitHub, or a
 /// user-supplied IPA. Nothing is known about the latter, so its release
 /// properties are nil.
-enum InstallSource: String, CaseIterable, Identifiable {
+enum InstallSource: String, CaseIterable, Identifiable, Codable {
     case sideStore
     case liveContainer
     case madeira
@@ -309,7 +309,7 @@ enum InstallSource: String, CaseIterable, Identifiable {
 
 /// One release of a build, as the version picker under Advanced offers it, or
 /// one GitHub Actions build of it.
-struct ReleaseVersion: Identifiable, Hashable {
+struct ReleaseVersion: Identifiable, Hashable, Codable {
     /// The release's tag, e.g. "0.6.3" or "alpha"; for an Actions build, its
     /// short commit ("e96065a").
     let tag: String
@@ -348,7 +348,7 @@ struct ReleaseVersion: Identifiable, Hashable {
 }
 
 /// A build's releases on GitHub, sorted into the two channels for the picker.
-struct ReleaseCatalog {
+struct ReleaseCatalog: Codable {
     /// The release "Latest" installs on each channel, when the list has it.
     let latest: [ReleaseChannel: ReleaseVersion]
     /// Each channel's other releases carrying the build, newest first.

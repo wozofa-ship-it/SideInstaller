@@ -92,7 +92,9 @@ struct FilesTabView: View {
     /// 切到证书页（RootView 给的）。
     var onGoCert: () -> Void
 
-    @State private var files = AppFileLibrary.scan()
+    /// First scan happens in onAppear; starting empty so the list isn't
+    /// scanned twice on first appearance.
+    @State private var files: [LocalFileItem] = []
     @State private var showImporter = false
     @State private var importError: String?
     // 多选 / 重命名 / 压缩解压

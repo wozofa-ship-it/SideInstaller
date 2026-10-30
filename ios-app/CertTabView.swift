@@ -75,9 +75,11 @@ struct CertTabView: View {
     @State private var showingBatchDeleteConfirm = false
 
     private var certReady: Bool { hasP12 && hasProvision && !password.isEmpty }
-    private var selectedInfo: IPALibrary.AppInfo? {
-        selectedIPA.flatMap { IPALibrary.appInfo(at: $0) }
-    }
+    /// 选中 IPA 的 Info.plist 解析结果：select() 时算一次存下来，
+    /// 后续表单重绘直接复用，不再每敲一键就重新解压读盘。
+    /// select() 是唯一的选中入口（库里点选、别页传过来都走它），
+    /// 取消选中时一并清空，不会残留旧值。
+    @State private var selectedInfo: IPALibrary.AppInfo?
 
     var body: some View {
         NavigationStack {
@@ -618,6 +620,7 @@ struct CertTabView: View {
             Spacer()
             Button {
                 selectedIPA = nil
+                selectedInfo = nil
                 resetMods()
                 signOnlyMessage = nil
             } label: {
@@ -684,8 +687,10 @@ struct CertTabView: View {
         resetMods()
         iconItem = nil
         signOnlyMessage = nil
-        // 框里预填这个 IPA 的原值，用户在原值上改。
-        if let info = IPALibrary.appInfo(at: url) {
+        // 框里预填这个 IPA 的原值，用户在原值上改；解析结果存下来，
+        // 后续表单重绘直接复用，不再每敲一键重新解压读盘。
+        selectedInfo = IPALibrary.appInfo(at: url)
+        if let info = selectedInfo {
             mods.name = info.name
             mods.bundleID = info.bundleID
             mods.version = info.version ?? ""
