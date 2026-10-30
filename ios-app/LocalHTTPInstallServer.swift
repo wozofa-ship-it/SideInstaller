@@ -4,10 +4,11 @@ import UIKit
 
 /// 本地直装（轻松签式）：App 内起一个明文 HTTP 服务，生成 OTA
 /// 清单，用 itms-services 拉起系统安装——不走配对、不走隧道、
-/// 不要 WiFi。关键区别：这里是明文 HTTP 回环（http://127.0.0.1），
+/// 不要 WiFi。关键区别：这里是明文 HTTP 回环（http://localhost），
 /// 不用 TLS、不用企业证书当服务身份。之前那版 HTTPS + 证书 TLS
 /// 在 iOS 26 上系统安装器建不起连接（实测“无法连接 127.0.0.1”），
-/// 所以这条路特意不用证书做 TLS。
+/// 所以这条路特意不用证书做 TLS；地址也照轻松签用 localhost
+///（不用 127.0.0.1 字面地址），跟轻松签实证做法对齐。
 /// 限制先说明白：
 /// - 只能装企业证书签好的包（个人 ID 签的包走这条路装不上，
 ///   系统安装器验签名那关就过不了，仍走配对安装）。
@@ -54,7 +55,7 @@ final class LocalHTTPInstallServer: ObservableObject {
         beginBackgroundTask()
         installID = UUID().uuidString
         self.ipaURL = ipaURL
-        // 清单等端口定下来再生成（里面要写 127.0.0.1:端口）。
+        // 清单等端口定下来再生成（里面要写 localhost:端口）。
         pendingMeta = (appName: appName, bundleID: bundleID, version: version)
         hardStopWork = DispatchWorkItem { [weak self] in self?.stop() }
         if let hardStopWork {
@@ -77,6 +78,10 @@ final class LocalHTTPInstallServer: ObservableObject {
         endBackgroundTask()
         DispatchQueue.main.async {
             self.isRunning = false
+            // 服务停了就把旧状态清掉，免得证书页一直挂着上一次的
+            // “已拉起系统安装”；失败标志不在这里清（失败信号要
+            // 留给证书页读到、弹兜底，见 failedToStart）。
+            self.status = nil
         }
     }
 
@@ -132,7 +137,7 @@ final class LocalHTTPInstallServer: ObservableObject {
 
     private func onReady(port: Int) {
         guard let meta = pendingMeta else { return }
-        let base = "http://127.0.0.1:\(port)/\(installID)"
+        let base = "http://localhost:\(port)/\(installID)"
         let manifestURL = "\(base)/manifest.plist"
         let item: [String: Any] = [
             "assets": [

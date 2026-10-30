@@ -7,9 +7,10 @@ import UniformTypeIdentifiers
 /// 三段切栏（轻松签式分屏）：证书管理 / 签名 IPA / 应用库
 /// （未签名按目录分组、已签名列表）；一次只显示一段，
 /// 不再三卡叠在一个长滚动里。
-/// 安装仍走配对老路（Engine 设备链路）：企业证书安装不弹回环
-/// 直装、不连回环服务。LocalHTTPInstallServer.swift 文件留着
-/// 不用（与 HTTPS 旧版 OTAInstallServer 同例）。
+/// 企业安装走独立安装（LocalHTTPInstallServer 本地回环，
+/// 不走共用 Engine、不走隧道、不要 WiFi）；回环起不来时
+/// 弹兜底，用户点「改用配对安装」才走 Engine 配对路。
+/// OTAInstallServer.swift 是 HTTPS 旧版，留着不用、不删。
 struct CertTabView: View {
     @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
@@ -56,9 +57,11 @@ struct CertTabView: View {
     @State private var pendingSignMods = CertSignMods()
     @State private var showingWarningAlert = false
 
-    // 配对安装进行中：用来在 Engine 跑完后认成功（finished 才算）。
-    @State private var engineInstallInFlight = false
-    @State private var showingEngineSuccessAlert = false
+    // 企业独立安装：本地回环服务（不走共用 Engine）。
+    // 回环起不来时弹兜底，兜底记录就是这次要装的包。
+    @StateObject private var localInstall = LocalHTTPInstallServer()
+    @State private var localFallbackRecord: SignedIPARecord?
+    @State private var showingLocalFallbackAlert = false
 
     // 应用库
     @State private var certPage = CertPage.certificate
@@ -128,19 +131,26 @@ struct CertTabView: View {
                 ensureUnsignedInfo()
             }
         }
-        .onChange(of: engine.isRunning) { old, new in
-            // 配对兜底跑完：finished 置位才算成功（取消不算）。
-            if old && !new && engineInstallInFlight {
-                engineInstallInFlight = false
-                if engine.finished {
-                    showingEngineSuccessAlert = true
-                }
+        .onChange(of: localInstall.failedToStart) { _, failed in
+            // 回环起不来：弹兜底，让用户选改用配对安装还是算了。
+            if failed {
+                showingLocalFallbackAlert = true
             }
         }
-        .alert(L("安装完成"), isPresented: $showingEngineSuccessAlert) {
-            Button(L("知道了"), role: .cancel) {}
+        .alert(L("本地安装起不来"), isPresented: $showingLocalFallbackAlert) {
+            Button(L("改用配对安装")) {
+                if let record = localFallbackRecord {
+                    localInstall.consumeFailedToStart()
+                    localFallbackRecord = nil
+                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+                }
+            }
+            Button(L("取消"), role: .cancel) {
+                localInstall.consumeFailedToStart()
+                localFallbackRecord = nil
+            }
         } message: {
-            Text(L("装好了，可以回桌面查看安装进度。"))
+            Text(L("本地回环安装没能启动。改用配对安装需要隧道和 WiFi，进度在「安装」页看。"))
         }
         .onChange(of: iconItem) { _, item in
             guard let item else { return }
@@ -440,7 +450,7 @@ struct CertTabView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(engine.isRunning || signBusy || !certReady)
+                    .disabled(signBusy || localInstall.isRunning || !certReady)
                     Button {
                         startSign(kind: .signOnly)
                     } label: {
@@ -451,9 +461,9 @@ struct CertTabView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(signBusy || engine.isRunning || !certReady)
-                    if engine.isRunning {
-                        Text(L("正在安装，进度在「安装」页看。"))
+                    .disabled(signBusy || localInstall.isRunning || !certReady)
+                    if let status = localInstall.status {
+                        Text(status)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -830,20 +840,15 @@ struct CertTabView: View {
         case .signAndInstall:
             Task {
                 do {
-                    // 先签好存进「已签名」，再走配对安装（Engine 设备
-                    // 链路）：不弹回环直装、不连回环服务。装完 Engine
-                    // finished 置位后弹“装好了”回桌面提示。
+                    // 先签好存进「已签名」，再走企业独立安装（本地
+                    // 回环，不走共用 Engine、不走隧道、不要 WiFi）。
                     let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
                     ensureUnsignedInfo()
-                    engineInstallInFlight = true
-                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
-                    // Engine 前置检查（配对文件、隧道）不过时会直接
-                    // 返回、isRunning 根本没置位：这时就别留着标志，
-                    // 否则之后别的 tab 一次成功安装也会误弹。
-                    if !engine.isRunning {
-                        engineInstallInFlight = false
+                    await MainActor.run {
+                        self.localFallbackRecord = record
+                        self.localInstall.install(record: record)
                     }
                 } catch {
                     signOnlyMessage = (error as? LocalizedError)?.errorDescription
@@ -855,16 +860,12 @@ struct CertTabView: View {
         }
     }
 
-    /// 已签名行「安装」：走配对安装（Engine 设备链路），不弹
-    /// 回环直装。装完 Engine finished 置位后弹“装好了”提示。
+    /// 已签名行「安装」：走企业独立安装（本地回环，不走共用
+    /// Engine、不走隧道、不要 WiFi）。回环起不来时弹兜底，
+    /// 用户点「改用配对安装」才走 Engine 配对路。
     private func installSigned(_ record: SignedIPARecord) {
-        engineInstallInFlight = true
-        engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
-        // Engine 前置检查不过时直接返回、isRunning 没置位：别留
-        // 着标志，否则之后别的 tab 一次成功安装也会误弹。
-        if !engine.isRunning {
-            engineInstallInFlight = false
-        }
+        localFallbackRecord = record
+        localInstall.install(record: record)
     }
 
     // MARK: 应用库（未签名/已签名切栏）
@@ -1073,6 +1074,11 @@ struct CertTabView: View {
 
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let status = localInstall.status {
+                Text(status)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             if signedRecords.isEmpty {
                 Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))
                     .font(.footnote)
@@ -1172,7 +1178,7 @@ struct CertTabView: View {
                         Text(L("安装"))
                             .font(.footnote.weight(.semibold))
                     }
-                    .disabled(engine.isRunning || signBusy)
+                    .disabled(localInstall.isRunning)
                     ShareLink(item: SignedIPAStore.url(for: record)) {
                         Text(L("分享"))
                             .font(.footnote)
