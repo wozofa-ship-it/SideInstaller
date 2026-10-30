@@ -272,8 +272,11 @@ pub unsafe fn cert_revoke(
 /// Export the signing certificate as PKCS#12 (base64-encoded).
 ///
 /// Retrieves the existing certificate identity for `machine_name`/`email`,
-/// builds the p12 with the machine ID as password, and returns it
-/// base64-encoded via `out_b64`.
+/// builds the p12 with "1" as password (user decision 2026-10-30: the
+/// machine-ID password is too long to type when importing elsewhere),
+/// and returns it base64-encoded via `out_b64`.
+/// The SideStore handover in account.rs still uses the machine ID and is
+/// untouched by this default.
 ///
 /// # Safety
 /// `session` must be a valid pointer from `cert_signin`; `email`,
@@ -319,8 +322,12 @@ pub unsafe fn cert_export_p12(
                 )
             })?;
 
-            // The machine id is the password AltStore-family apps expect.
-            let password = identity.machine_id.clone();
+            // Export password is fixed to "1": the machine-ID password is
+            // too long to type when importing the p12 elsewhere (user
+            // decision 2026-10-30). This only affects the exported file;
+            // the stored signing key and the SideStore handover in
+            // account.rs (which still uses the machine ID) are untouched.
+            let password = "1".to_string();
             let p12 = identity
                 .as_p12(&password)
                 .await
