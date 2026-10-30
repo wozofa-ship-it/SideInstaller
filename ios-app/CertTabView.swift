@@ -3,10 +3,11 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// 证书页：企业证书管理（导入/信息/移除/吊销检查）、选 IPA 改
-/// 信息后签名（名称/Bundle ID/版本/最低系统版本/图标/多开）、
-/// 应用库（未签名/已签名切栏）。
-/// 安装走配对老路（Engine 设备链路）：企业证书安装不弹回环
+/// 证书页：企业证书专区（与个人 ID 签名分开，ID 签名在应用页）。
+/// 三段切栏（轻松签式分屏）：证书管理 / 签名 IPA / 应用库
+/// （未签名按目录分组、已签名列表）；一次只显示一段，
+/// 不再三卡叠在一个长滚动里。
+/// 安装仍走配对老路（Engine 设备链路）：企业证书安装不弹回环
 /// 直装、不连回环服务。LocalHTTPInstallServer.swift 文件留着
 /// 不用（与 HTTPS 旧版 OTAInstallServer 同例）。
 struct CertTabView: View {
@@ -60,6 +61,7 @@ struct CertTabView: View {
     @State private var showingEngineSuccessAlert = false
 
     // 应用库
+    @State private var certPage = CertPage.certificate
     @State private var libraryTab = CertLibraryTab.unsigned
     @State private var librarySearchText = ""
     @State private var unsignedIPAs: [LocalFileItem] = []
@@ -83,17 +85,25 @@ struct CertTabView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    header.cascadeItem(0)
-                    certCard.cascadeItem(1)
-                    signCard.cascadeItem(2)
-                    libraryCard.cascadeItem(3)
+            VStack(spacing: 0) {
+                header
+                    .cascadeItem(0)
+                    .padding(.horizontal, 20)
+                Picker("", selection: $certPage) {
+                    Text(L("证书")).tag(CertPage.certificate)
+                    Text(L("签名")).tag(CertPage.signing)
+                    Text(L("应用库")).tag(CertPage.library)
                 }
-                .padding([.horizontal, .top], 20)
-                .padding(.bottom, 20)
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                ScrollView {
+                    pageContent
+                        .padding([.horizontal, .top], 20)
+                        .padding(.bottom, 20)
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
             .background(AppBackground())
         }
         .onAppear {
@@ -147,6 +157,20 @@ struct CertTabView: View {
             .font(.largeTitle.weight(.bold))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
+    }
+
+    /// 企业证书页分屏：一次只显示一段（轻松签式），不再三卡叠滚。
+    /// 切栏本身不改任何状态，卡片还是原来那三张。
+    @ViewBuilder
+    private var pageContent: some View {
+        switch certPage {
+        case .certificate:
+            certCard.cascadeItem(1)
+        case .signing:
+            signCard.cascadeItem(2)
+        case .library:
+            libraryCard.cascadeItem(3)
+        }
     }
 
     // MARK: 证书管理
@@ -213,6 +237,7 @@ struct CertTabView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Divider()
                 HStack(spacing: 10) {
                     Button {
                         showP12Picker = true
@@ -254,6 +279,7 @@ struct CertTabView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Divider()
                 SecureField(L("证书密码"), text: $password)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: password) { _, newValue in
@@ -269,6 +295,7 @@ struct CertTabView: View {
                         .foregroundStyle(.red)
                 }
                 if hasP12 || hasProvision {
+                    Divider()
                     Button(role: .destructive) {
                         confirmingRemoveCert = true
                     } label: {
@@ -436,7 +463,7 @@ struct CertTabView: View {
                             .foregroundStyle(signOnlyFailed ? .red : .green)
                     }
                     if !certReady {
-                        Text(L("先在上面把证书、描述文件和密码备齐。"))
+                        Text(L("先去「证书」页把证书、描述文件和密码备齐。"))
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
@@ -684,6 +711,8 @@ struct CertTabView: View {
 
     private func select(_ url: URL) {
         selectedIPA = url
+        // 从库里点选就是来签名的，直接切到签名段，别让用户再往上翻。
+        certPage = .signing
         resetMods()
         iconItem = nil
         signOnlyMessage = nil
@@ -781,14 +810,14 @@ struct CertTabView: View {
                         signedRecords = SignedIPAStore.load()
                         unsignedIPAs = unsignedItems()
                         ensureUnsignedInfo()
-                        signOnlyMessage = L("已签出 %d 个副本，存到下面的「已签名」，逐个点安装。", multiCount)
+                        signOnlyMessage = L("已签出 %d 个副本，存到「应用库 → 已签名」，逐个点安装。", multiCount)
                         signOnlyFailed = false
                     } else {
                         _ = try await CertSigner.signToFile(ipa: url, mods: mods)
                         signedRecords = SignedIPAStore.load()
                         unsignedIPAs = unsignedItems()
                         ensureUnsignedInfo()
-                        signOnlyMessage = L("签好了，已存到下面的「已签名」。")
+                        signOnlyMessage = L("签好了，已存到「应用库 → 已签名」。")
                         signOnlyFailed = false
                     }
                 } catch {
@@ -915,24 +944,42 @@ struct CertTabView: View {
     /// 未签名栏：文件库里还没签过的 IPA（Signed 目录里的已签
     /// 成品不算未签名）。只读展示名字、目录、大小，不逐行解
     /// Info.plist（证书页每敲一键都重读是已知性能坑）；点
-    /// 「去签名」就进上面签名表单。
+    /// 「去签名」就进签名段表单。
+    /// 按目录分组（轻松签应用库式）：根目录在前，其余按目录名排。
     private var unsignedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             if filteredUnsigned.isEmpty {
                 Text(librarySearchText.isEmpty
-                     ? L("文件库里还没有没签过的 IPA。去文件页导入一个，或者点上面「从文件导入」。")
+                     ? L("文件库里还没有没签过的 IPA。去文件页导入一个，或者去「签名」页点「从文件导入」。")
                      : L("没有匹配的 IPA。"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(filteredUnsigned) { item in
-                    unsignedRow(item)
-                    if item.id != filteredUnsigned.last?.id {
-                        Divider()
+                ForEach(groupedUnsigned, id: \.key) { group in
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(group.key.isEmpty ? L("根目录") : group.key)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        ForEach(group.items) { item in
+                            unsignedRow(item)
+                            if item.id != group.items.last?.id {
+                                Divider()
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// 未签名栏按目录分组：同一目录的放一组，组内保持原顺序。
+    private var groupedUnsigned: [(key: String, items: [LocalFileItem])] {
+        let groups = Dictionary(grouping: filteredUnsigned, by: { $0.relativeDir })
+        return groups.keys.sorted(by: { a, b in
+            if a.isEmpty { return true }
+            if b.isEmpty { return false }
+            return a < b
+        }).map { key in (key: key, items: groups[key] ?? []) }
     }
 
     /// 搜索过滤只读缓存：名字命中文件名或解析出的 App 名都算，
@@ -947,7 +994,7 @@ struct CertTabView: View {
     }
 
     /// 轻松签应用页未签名行：名字 / V版本 | 大小 | Bundle ID / 文件名，
-    /// 整行可点进上面签名表单（不要行内按钮）。
+    /// 整行可点进签名段表单（不要行内按钮）。
     private func unsignedRow(_ item: LocalFileItem) -> some View {
         Button {
             select(item.url)
@@ -1027,7 +1074,7 @@ struct CertTabView: View {
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             if signedRecords.isEmpty {
-                Text(L("还没有已签名的 IPA。用上面的「仅签名」签好就会存到这里，随时能装、能分享。"))
+                Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else if filteredSigned.isEmpty {
@@ -1139,6 +1186,7 @@ struct CertTabView: View {
                             .font(.footnote)
                     }
                 }
+                .padding(.top, 4)
             }
         }
     }
@@ -1185,6 +1233,21 @@ struct CertTabView: View {
 private enum CertSignKind {
     case signOnly
     case signAndInstall
+}
+
+/// 企业证书页切栏：证书 / 签名 / 应用库。
+private enum CertPage: Identifiable {
+    case certificate
+    case signing
+    case library
+
+    var id: String {
+        switch self {
+        case .certificate: return "certificate"
+        case .signing: return "signing"
+        case .library: return "library"
+        }
+    }
 }
 
 /// 应用库切栏。
