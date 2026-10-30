@@ -38,7 +38,7 @@ struct AboutView: View {
 
     private var header: some View {
         BrandHeader(icon: "info.circle.fill", image: "AppLogo", title: "SideInstaller 🅥",
-                    subtitle: L("an app by Frizzle")) {
+                    subtitle: L("an app by Frizzle") + "\n解剖自我 🅥 修改版") {
             StatusPill(text: versionText, systemImage: "tag.fill", color: Theme.accent2)
         }
     }
