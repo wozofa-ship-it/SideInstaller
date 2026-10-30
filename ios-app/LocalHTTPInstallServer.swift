@@ -126,12 +126,12 @@ final class LocalHTTPInstallServer: ObservableObject {
         // handler 只抓 manifest/ipaPath 两个值，不抓 self：server
         // 持有 handler，handler 再抓 self 就是循环引用，停不掉。
         server.addHandler(forMethod: "GET", path: "/\(installID)/manifest.plist",
-                          requestClass: GCDWebServerRequest.self) { _ in
+                          request: GCDWebServerRequest.self) { _ in
             GCDWebServerDataResponse(data: manifest, contentType: "application/xml")
         }
         let ipaPath = ipaURL.path
         server.addHandler(forMethod: "GET", path: "/\(installID)/app.ipa",
-                          requestClass: GCDWebServerRequest.self) { request in
+                          request: GCDWebServerRequest.self) { request in
             // 文件起服时已验过存在；装的过程中被删了就明给 404，
             // 不返回 nil（nil 在连接层行为未定义，别依赖它）。
             guard FileManager.default.fileExists(atPath: ipaPath) else {
