@@ -18,6 +18,15 @@ struct LocalFileItem: Identifiable {
     var isIPA: Bool { name.lowercased().hasSuffix(".ipa") }
     var isZip: Bool { name.lowercased().hasSuffix(".zip") }
     var isInSignedDir: Bool { relativeDir == "Signed" }
+    /// App 自己用的 DDI 支撑文件，不是用户文件：DDI 文件夹、以及根
+    /// 目录或 DDI/ 里的 Image.dmg、trustcache、BuildManifest。文件页
+    /// 默认不把它们混在用户文件里，收到系统文件组里，需要时再展开。
+    var isSystem: Bool {
+        if isDirectory { return name == "DDI" }
+        let ddiNames: Set<String> = ["Image.dmg", "Image.dmg.trustcache", "BuildManifest.plist"]
+        guard ddiNames.contains(name) else { return false }
+        return relativeDir.isEmpty || relativeDir == "DDI" || relativeDir.hasPrefix("DDI/")
+    }
 }
 
 /// App 自己 Documents 目录的文件扫描（下载/导入/已签名都在这）。
@@ -98,12 +107,15 @@ struct FilesTabView: View {
     @State private var machoItem: LocalFileItem?
     /// ⓘ 详情 sheet 正在看的行。
     @State private var detailItem: LocalFileItem?
+    /// 系统文件组是否展开（默认折叠，文件页先只看用户文件）。
+    @State private var showSystemFiles = false
     @StateObject private var lanServer = LANTransferServer()
     /// 局域网地址点按复制后的短暂「已复制」提示。
     @State private var lanCopied = false
 
     private var ipas: [LocalFileItem] { files.filter { $0.isIPA } }
-    private var others: [LocalFileItem] { files.filter { !$0.isIPA } }
+    private var others: [LocalFileItem] { files.filter { !$0.isIPA && !$0.isSystem } }
+    private var systemFiles: [LocalFileItem] { files.filter { $0.isSystem } }
     private var totalSize: Int { files.reduce(0) { $0 + $1.size } }
 
     var body: some View {
@@ -123,6 +135,9 @@ struct FilesTabView: View {
                         }
                         if !others.isEmpty {
                             fileSection(title: L("其他文件"), items: others).cascadeItem(3)
+                        }
+                        if !systemFiles.isEmpty {
+                            systemSection.cascadeItem(4)
                         }
                     }
                 }
@@ -353,6 +368,40 @@ struct FilesTabView: View {
                     fileRow(item)
                     if item.id != items.last?.id {
                         Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    /// 系统文件组：默认折叠，只露一行标题和个数；点开后和别的
+    /// 文件一样看详情、分享、删除。DDI 挂载走自己的路径，不靠
+    /// 文件列表找文件，所以收起来不影响 DDI，只是不让它 clutter。
+    private var systemSection: some View {
+        PanelCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Button { showSystemFiles.toggle() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc")
+                            .foregroundStyle(.secondary)
+                        Text(L("系统文件"))
+                            .font(.headline)
+                        Spacer()
+                        Text("\(systemFiles.count)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: showSystemFiles ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(.secondary)
+                            .font(.footnote)
+                    }
+                }
+                .buttonStyle(.plain)
+                if showSystemFiles {
+                    ForEach(systemFiles) { item in
+                        fileRow(item)
+                        if item.id != systemFiles.last?.id {
+                            Divider()
+                        }
                     }
                 }
             }
