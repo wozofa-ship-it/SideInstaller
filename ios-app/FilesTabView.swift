@@ -85,7 +85,6 @@ enum AppFileLibrary {
 /// 文件页：管理 App 沙盒 Documents 里的文件——导入、分享、删除，
 /// IPA 可以直接去企业证书签名或（已签名的）直接安装。
 struct FilesTabView: View {
-    @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
@@ -112,6 +111,11 @@ struct FilesTabView: View {
     /// 系统文件组是否展开（默认折叠，文件页先只看用户文件）。
     @State private var showSystemFiles = false
     @StateObject private var lanServer = LANTransferServer()
+    /// 文件页已签名安装：本地回环服务（企业签的包专用，
+    /// 不走共用 Engine、不走隧道、不要 WiFi）。
+    @StateObject private var localInstall = LocalHTTPInstallServer()
+    /// 文件页回环失败后重试用的记录（装时记下）。
+    @State private var fileInstallRecord: SignedIPARecord?
     /// 局域网地址点按复制后的短暂「已复制」提示。
     @State private var lanCopied = false
 
@@ -120,12 +124,58 @@ struct FilesTabView: View {
     private var systemFiles: [LocalFileItem] { files.filter { $0.isSystem } }
     private var totalSize: Int { files.reduce(0) { $0 + $1.size } }
 
+    /// 文件页已签名 IPA 安装：只走本地回环（企业签的包），
+    /// 不碰配对/共享「安装」页；记录找得到就用记录，
+    /// 找不到（手动拷进已签名目录的）就现解 Info.plist；
+    /// 两样都没有就明说，不静默失败。
+    private func installSignedFile(_ item: LocalFileItem) {
+        if let record = SignedIPAStore.load().first(where: { SignedIPAStore.url(for: $0) == item.url }) {
+            fileInstallRecord = record
+            localInstall.install(record: record)
+            return
+        }
+        // 无记录的现解安装没有可存的重试记录：先清掉旧的，
+        // 免得失败时重试按钮指到上一次的包；重装点行上的安装即可。
+        fileInstallRecord = nil
+        guard let info = IPALibrary.appInfo(at: item.url), !info.bundleID.isEmpty else {
+            opMessage = L("这个已签名文件没有安装记录，解包也拿不到 Bundle ID，装不了，先去证书页重签一次。")
+            opFailed = true
+            return
+        }
+        localInstall.install(ipaURL: item.url, appName: info.name, bundleID: info.bundleID, version: info.version ?? "1.0")
+    }
+
+    /// 文件页回环安装状态：只在文件页内显示，不碰共享「安装」页。
+    @ViewBuilder
+    private var fileInstallStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let status = localInstall.status {
+                Text(status)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = localInstall.lastError, !localInstall.isRunning {
+                HStack(spacing: 8) {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                    Spacer()
+                    if let record = fileInstallRecord {
+                        Button(L("重试回环安装")) { localInstall.install(record: record) }
+                            .font(.footnote)
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     header.cascadeItem(0)
                     importCard.cascadeItem(1)
+                    fileInstallStatus
                     if selecting {
                         selectionBar.cascadeItem(2)
                     }
@@ -485,12 +535,12 @@ struct FilesTabView: View {
                         }
                         if item.isInSignedDir {
                             Button {
-                                engine.runInstallSignedIPA(ipaURL: item.url)
+                                installSignedFile(item)
                             } label: {
                                 Text(L("安装"))
                                     .font(.footnote.weight(.semibold))
                             }
-                            .disabled(engine.isRunning)
+                            .disabled(localInstall.isRunning)
                         }
                     }
                     Spacer()
@@ -554,7 +604,7 @@ struct FilesTabView: View {
                     }
                     if item.isInSignedDir {
                         Button {
-                            engine.runInstallSignedIPA(ipaURL: item.url)
+                            installSignedFile(item)
                         } label: {
                             Label(L("安装"), systemImage: "square.and.arrow.down")
                         }

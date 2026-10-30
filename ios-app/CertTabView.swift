@@ -8,11 +8,10 @@ import UniformTypeIdentifiers
 /// （未签名按目录分组、已签名列表）；一次只显示一段，
 /// 不再三卡叠在一个长滚动里。
 /// 企业安装走独立安装（LocalHTTPInstallServer 本地回环，
-/// 不走共用 Engine、不走隧道、不要 WiFi）；回环起不来时
-/// 弹兜底，用户点「改用配对安装」才走 Engine 配对路。
+/// 不走共用 Engine、不走隧道、不要 WiFi）；回环失败时原因
+/// 只在企业页内显示 + 重试回环，绝不去共享「安装」页。
 /// OTAInstallServer.swift 是 HTTPS 旧版，留着不用、不删。
 struct CertTabView: View {
-    @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
@@ -58,10 +57,9 @@ struct CertTabView: View {
     @State private var showingWarningAlert = false
 
     // 企业独立安装：本地回环服务（不走共用 Engine）。
-    // 回环起不来时弹兜底，兜底记录就是这次要装的包。
+    // 回环失败后重试用的记录，就是这次要装的包。
     @StateObject private var localInstall = LocalHTTPInstallServer()
     @State private var localFallbackRecord: SignedIPARecord?
-    @State private var showingLocalFallbackAlert = false
 
     // 应用库
     @State private var certPage = CertPage.certificate
@@ -146,27 +144,8 @@ struct CertTabView: View {
                 ensureUnsignedInfo()
             }
         }
-        .onChange(of: localInstall.failedToStart) { _, failed in
-            // 回环起不来：弹兜底，让用户选改用配对安装还是算了。
-            if failed {
-                showingLocalFallbackAlert = true
-            }
-        }
-        .alert(L("本地安装起不来"), isPresented: $showingLocalFallbackAlert) {
-            Button(L("改用配对安装")) {
-                if let record = localFallbackRecord {
-                    localInstall.consumeFailedToStart()
-                    localFallbackRecord = nil
-                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
-                }
-            }
-            Button(L("取消"), role: .cancel) {
-                localInstall.consumeFailedToStart()
-                localFallbackRecord = nil
-            }
-        } message: {
-            Text(L("本地回环安装没能启动。改用配对安装需要隧道和 WiFi，进度在「安装」页看。"))
-        }
+        // 回环失败不再弹配对兜底：原因只在企业页内显示 + 重试
+        // 回环（见 enterpriseInstallError），绝不去共享「安装」页。
         .onChange(of: iconItem) { _, item in
             guard let item else { return }
             Task {
@@ -483,6 +462,7 @@ struct CertTabView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                    enterpriseInstallError
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
                             .font(.footnote)
@@ -974,8 +954,8 @@ struct CertTabView: View {
     }
 
     /// 已签名行「安装」：走企业独立安装（本地回环，不走共用
-    /// Engine、不走隧道、不要 WiFi）。回环起不来时弹兜底，
-    /// 用户点「改用配对安装」才走 Engine 配对路。
+    /// Engine、不走隧道、不要 WiFi）。回环失败时原因只在
+    /// 企业页内显示 + 重试回环，绝不去共享「安装」页。
     private func installSigned(_ record: SignedIPARecord) {
         localFallbackRecord = record
         localInstall.install(record: record)
@@ -1371,6 +1351,24 @@ struct CertTabView: View {
         }
     }
 
+    /// 企业安装失败提示 + 回环重试：只在企业页内显示，
+    /// 不弹配对兜底、不碰共享「安装」页。
+    @ViewBuilder
+    private var enterpriseInstallError: some View {
+        if let error = localInstall.lastError, !localInstall.isRunning {
+            HStack(spacing: 8) {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                Spacer()
+                if let record = localFallbackRecord {
+                    Button(L("重试回环安装")) { localInstall.install(record: record) }
+                        .font(.footnote)
+                }
+            }
+        }
+    }
+
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let status = localInstall.status {
@@ -1378,6 +1376,7 @@ struct CertTabView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
+            enterpriseInstallError
             if signedRecords.isEmpty {
                 Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))
                     .font(.footnote)

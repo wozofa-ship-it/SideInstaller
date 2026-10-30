@@ -18,8 +18,9 @@ import UIKit
 final class LocalHTTPInstallServer: ObservableObject {
     @Published private(set) var isRunning = false
     @Published private(set) var status: String?
-    /// 起不来时置 true，证书页据此弹“改用配对安装”兜底。
-    @Published private(set) var failedToStart = false
+    /// 最近一次失败原因：企业页/文件页据此在页内显示 + 重试回环，
+    /// 不弹兜底、不碰配对/共享安装页；下次 install() 时清掉。
+    @Published private(set) var lastError: String?
 
     private var listener: NWListener?
     private var activeCandidate = 0
@@ -33,6 +34,7 @@ final class LocalHTTPInstallServer: ObservableObject {
 
     /// 对一个已签好的记录拉起本地安装。
     func install(record: SignedIPARecord) {
+        lastError = nil
         guard !record.bundleID.isEmpty else {
             setStatus(L("这个已签名记录没有 Bundle ID，装不了，先重签一次。"))
             return
@@ -42,11 +44,11 @@ final class LocalHTTPInstallServer: ObservableObject {
     }
 
     /// 对一个刚签好的文件拉起本地安装（签名页「签名并安装」用）。
-    /// 必须在主线程调：这里同步清掉上一轮的失败标志（stop() 里
-    /// 不清，免得失败信号还没被证书页读到就被后来的一次 stop 吞掉）。
+    /// 必须在主线程调：这里同步清掉上一轮的失败原因（stop() 里
+    /// 不清，免得失败原因还没被页内读到就被后来的一次 stop 吞掉）。
     func install(ipaURL: URL, appName: String, bundleID: String, version: String) {
         stop()
-        failedToStart = false
+        lastError = nil
         guard FileManager.default.fileExists(atPath: ipaURL.path) else {
             setStatus(L("签好的文件找不到了，先重签一次。"))
             return
@@ -79,8 +81,8 @@ final class LocalHTTPInstallServer: ObservableObject {
         DispatchQueue.main.async {
             self.isRunning = false
             // 服务停了就把旧状态清掉，免得证书页一直挂着上一次的
-            // “已拉起系统安装”；失败标志不在这里清（失败信号要
-            // 留给证书页读到、弹兜底，见 failedToStart）。
+            // “已拉起系统安装”；失败原因不在这里清（lastError 要
+            // 留给页内显示 + 重试，下次 install() 时才清）。
             self.status = nil
         }
     }
@@ -91,8 +93,9 @@ final class LocalHTTPInstallServer: ObservableObject {
 
     private func tryPort(_ candidate: Int) {
         guard candidate <= 18110 else {
-            setStatus(L("本地端口 18100-18110 都被占用了，本地安装起不来，改用配对安装。"))
-            DispatchQueue.main.async { self.failedToStart = true }
+            let msg = L("本地端口 18100-18110 都被占用了，本地安装起不来。")
+            setStatus(msg)
+            DispatchQueue.main.async { self.lastError = msg }
             stop()
             return
         }
@@ -117,8 +120,9 @@ final class LocalHTTPInstallServer: ObservableObject {
                     } else {
                         // 清单已发出、安装进行中，服务挂了就明说，
                         // 别悄悄换端口（安装器手里的旧地址就失效了）。
-                        self.setStatus(L("本地安装服务断了，改用配对安装。"))
-                        DispatchQueue.main.async { self.failedToStart = true }
+                        let msg = L("本地安装服务断了，点安装重试。")
+                        self.setStatus(msg)
+                        DispatchQueue.main.async { self.lastError = msg }
                         self.stop()
                     }
                 default:
@@ -152,8 +156,9 @@ final class LocalHTTPInstallServer: ObservableObject {
         ]
         guard let data = try? PropertyListSerialization.data(
             fromPropertyList: ["items": [item]], format: .xml, options: 0) else {
-            setStatus(L("安装清单生成失败，改用配对安装。"))
-            DispatchQueue.main.async { self.failedToStart = true }
+            let msg = L("安装清单生成失败，点安装重试。")
+            setStatus(msg)
+            DispatchQueue.main.async { self.lastError = msg }
             stop()
             return
         }
@@ -163,8 +168,9 @@ final class LocalHTTPInstallServer: ObservableObject {
         let encoded = manifestURL.addingPercentEncoding(
             withAllowedCharacters: .urlQueryAllowed) ?? manifestURL
         guard let link = URL(string: "itms-services://?action=download-manifest&url=\(encoded)") else {
-            setStatus(L("安装链接生成失败，改用配对安装。"))
-            DispatchQueue.main.async { self.failedToStart = true }
+            let msg = L("安装链接生成失败，点安装重试。")
+            setStatus(msg)
+            DispatchQueue.main.async { self.lastError = msg }
             stop()
             return
         }
@@ -172,8 +178,9 @@ final class LocalHTTPInstallServer: ObservableObject {
         DispatchQueue.main.async {
             UIApplication.shared.open(link, options: [:]) { [weak self] opened in
                 if !opened {
-                    self?.setStatus(L("系统安装没拉起来，改用配对安装。"))
-                    DispatchQueue.main.async { self?.failedToStart = true }
+                    let msg = L("系统安装没拉起来，点安装重试。")
+                    self?.setStatus(msg)
+                    DispatchQueue.main.async { self?.lastError = msg }
                     self?.stop()
                 }
             }
@@ -298,8 +305,4 @@ final class LocalHTTPInstallServer: ObservableObject {
         DispatchQueue.main.async { self.status = text }
     }
 
-    /// 兜底弹过后清掉标志，免得下次启动又弹。
-    func consumeFailedToStart() {
-        failedToStart = false
-    }
 }
