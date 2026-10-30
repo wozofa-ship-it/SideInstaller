@@ -102,10 +102,17 @@ final class LocalHTTPInstallServer: ObservableObject {
         do {
             // 明文 TCP，不挂 TLS：系统安装器连不上带证书身份的
             // HTTPS 回环，但明文 HTTP 回环是轻松签同款做法。
+            // 关键：必须显式绑到 127.0.0.1（轻松签 BindToLocalhost
+            // 同款）。只给端口不给地址时，监听器不一定落在回环
+            // 上，App 自己看是 ready，系统安装器连 localhost
+            // 却够不着，弹的就是“无法连接 localhost”——0.9.5
+            // 分离版只分了路、没定死绑定地址，所以照样失败。
             let params = NWParameters.tcp
             params.allowLocalEndpointReuse = true
-            let listener = try NWListener(
-                using: params, on: NWEndpoint.Port(rawValue: UInt16(candidate))!)
+            let endpoint = NWEndpoint.hostPort(
+                host: .ipv4(IPv4Address.loopback),
+                port: NWEndpoint.Port(rawValue: UInt16(candidate))!)
+            let listener = try NWListener(using: params, on: endpoint)
             activeCandidate = candidate
             listener.stateUpdateHandler = { [weak self] state in
                 guard let self, self.activeCandidate == candidate else { return }
