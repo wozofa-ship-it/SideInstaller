@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import UIKit
 
 /// 本地直装（轻松签式）：App 内起一个明文 HTTP 服务，生成 OTA
@@ -22,9 +21,15 @@ final class LocalHTTPInstallServer: ObservableObject {
     /// 不弹兜底、不碰配对/共享安装页；下次 install() 时清掉。
     @Published private(set) var lastError: String?
 
-    private var listener: NWListener?
+    // BSD 直绑回环：NWListener 的 on: 只收端口、收不了 host
+    //（0.9.6 编译红字），且它报 ready 也不等于系统安装器能连上
+    // localhost；轻松签就是 BSD socket 绑 127.0.0.1，同款做法。
+    private var listenFD: Int32 = -1
+    private let fdLock = NSLock()
     private var activeCandidate = 0
     private let queue = DispatchQueue(label: "czf.localhttp.install")
+    private let acceptQueue = DispatchQueue(label: "czf.localhttp.accept")
+    private var clientFDs = Set<Int32>()
     private var installID = ""
     private var ipaURL: URL?
     private var manifestData = Data()
@@ -72,8 +77,21 @@ final class LocalHTTPInstallServer: ObservableObject {
         hardStopWork?.cancel()
         hardStopWork = nil
         activeCandidate = 0
-        listener?.cancel()
-        listener = nil
+        // 关监听口：阻塞在 accept 里的循环会被 EBADF 唤醒退出。
+        // fdLock 防 double-close（stop 可能在主线程和 work 队列
+        // 上同时进来，close 同一个号两次会误关后来复用的号）。
+        fdLock.lock()
+        let fd = listenFD
+        listenFD = -1
+        fdLock.unlock()
+        if fd >= 0 { close(fd) }
+        // 已接进来的连接在 work 队列上关（不阻塞主线程）。
+        queue.async { [weak self] in
+            guard let self else { return }
+            let fds = self.clientFDs
+            self.clientFDs.removeAll()
+            for c in fds { close(c) }
+        }
         ipaURL = nil
         pendingMeta = nil
         manifestData = Data()
@@ -99,50 +117,54 @@ final class LocalHTTPInstallServer: ObservableObject {
             stop()
             return
         }
-        do {
-            // 明文 TCP，不挂 TLS：系统安装器连不上带证书身份的
-            // HTTPS 回环，但明文 HTTP 回环是轻松签同款做法。
-            // 关键：必须显式绑到 127.0.0.1（轻松签 BindToLocalhost
-            // 同款）。只给端口不给地址时，监听器不一定落在回环
-            // 上，App 自己看是 ready，系统安装器连 localhost
-            // 却够不着，弹的就是“无法连接 localhost”——0.9.5
-            // 分离版只分了路、没定死绑定地址，所以照样失败。
-            let params = NWParameters.tcp
-            params.allowLocalEndpointReuse = true
-            let endpoint = NWEndpoint.hostPort(
-                host: .ipv4(IPv4Address.loopback),
-                port: NWEndpoint.Port(rawValue: UInt16(candidate))!)
-            let listener = try NWListener(using: params, on: endpoint)
-            activeCandidate = candidate
-            listener.stateUpdateHandler = { [weak self] state in
-                guard let self, self.activeCandidate == candidate else { return }
-                switch state {
-                case .ready:
-                    self.onReady(port: candidate)
-                case .failed:
-                    self.listener = nil
-                    if self.manifestData.isEmpty {
-                        // 还没对外公布清单：换个端口再试。
-                        self.tryPort(candidate + 1)
-                    } else {
-                        // 清单已发出、安装进行中，服务挂了就明说，
-                        // 别悄悄换端口（安装器手里的旧地址就失效了）。
-                        let msg = L("本地安装服务断了，点安装重试。")
-                        self.setStatus(msg)
-                        DispatchQueue.main.async { self.lastError = msg }
-                        self.stop()
-                    }
-                default:
-                    break
-                }
+        // 明文 TCP，不挂 TLS：系统安装器连不上带证书身份的
+        // HTTPS 回环，但明文 HTTP 回环是轻松签同款做法。
+        // 关键：BSD 直接绑 127.0.0.1（轻松签 BindToLocalhost
+        // 同款）。NWListener 的 on: 只收端口、收不了 host，
+        // 0.9.6 因此编译失败；且它报 ready 也不等于系统安装器
+        // 能连上 localhost——0.9.5 分离版只分了路、没定死绑定
+        // 地址，系统安装器照样弹“无法连接 localhost”。
+        // BSD bind+listen 是同步的：到这里端口已经绑死在回环
+        // 上，不用等异步 ready，直接生成清单、拉起系统安装。
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { tryPort(candidate + 1); return }
+        var reuse: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse,
+                   socklen_t(MemoryLayout<Int32>.size))
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(candidate).bigEndian
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let bound = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                bind(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection)
-            }
-            self.listener = listener
-            listener.start(queue: queue)
-        } catch {
+        }
+        guard bound == 0, listen(fd, 5) == 0 else {
+            close(fd)
             tryPort(candidate + 1)
+            return
+        }
+        fdLock.lock()
+        listenFD = fd
+        fdLock.unlock()
+        activeCandidate = candidate
+        // 接受循环放独立队列：accept 会阻塞，不能占 work 队列
+        //（stopWork/hardStopWork 的定时器还在上面）。
+        acceptQueue.async { [weak self] in self?.acceptLoop(fd: fd) }
+        onReady(port: candidate)
+    }
+
+    /// 阻塞接受循环（跑在 acceptQueue 上）。stop() 关掉监听口
+    /// 后，阻塞的 accept 返回 EBADF，循环退出；EINTR 只重等一次。
+    private func acceptLoop(fd: Int32) {
+        while true {
+            let client = accept(fd, nil, nil)
+            if client < 0 {
+                if errno == EINTR { continue }
+                return
+            }
+            queue.async { [weak self] in self?.handleClient(client) }
         }
     }
 
@@ -196,26 +218,24 @@ final class LocalHTTPInstallServer: ObservableObject {
 
     // MARK: - HTTP（只认 GET，两条路由）
 
-    private func handle(_ connection: NWConnection) {
-        connection.start(queue: queue)
-        receive(connection, buffer: Data())
-    }
-
-    private func receive(_ connection: NWConnection, buffer: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) {
-            [weak self] data, _, isComplete, error in
-            guard let self else {
-                connection.cancel()
-                return
-            }
-            var buf = buffer
-            if let data { buf.append(data) }
+    /// 一个已接受的连接（跑在 work 队列上，串行，clientFDs
+    /// 的增删都在这条队列上，不用另加锁）。读到完整 HTTP 头
+    /// 就按路径回包；对端断开、出错、头超 1MB 都直接关。
+    private func handleClient(_ fd: Int32) {
+        clientFDs.insert(fd)
+        defer {
+            clientFDs.remove(fd)
+            close(fd)
+        }
+        var buf = Data()
+        var tmp = [UInt8](repeating: 0, count: 16 * 1024)
+        while buf.count <= (1 << 20) {
+            let n = recv(fd, &tmp, tmp.count, 0)
+            if n <= 0 { return }
+            buf.append(tmp, count: n)
             if let path = Self.requestPath(buf) {
-                self.respond(connection, path: path)
-            } else if isComplete || error != nil || buf.count > (1 << 20) {
-                connection.cancel()
-            } else {
-                self.receive(connection, buffer: buf)
+                respond(fd: fd, path: path)
+                return
             }
         }
     }
@@ -230,64 +250,79 @@ final class LocalHTTPInstallServer: ObservableObject {
         return String(parts[1])
     }
 
-    private func respond(_ connection: NWConnection, path: String) {
+    private func respond(fd: Int32, path: String) {
         if path == "/\(installID)/manifest.plist" {
-            send(connection, status: "200 OK", contentType: "text/xml",
-                 length: manifestData.count, body: manifestData) {
-                connection.cancel()
-            }
+            send(fd: fd, status: "200 OK", contentType: "text/xml",
+                 length: manifestData.count, body: manifestData)
             return
         }
         if path == "/\(installID)/app.ipa", let ipaURL {
             guard let size = (try? FileManager.default.attributesOfItem(atPath: ipaURL.path))?[.size] as? Int,
                   let handle = try? FileHandle(forReadingFrom: ipaURL) else {
-                send(connection, status: "404 Not Found", contentType: "text/plain",
-                     length: 0, body: Data()) { connection.cancel() }
+                send(fd: fd, status: "404 Not Found", contentType: "text/plain",
+                     length: 0, body: Data())
                 return
             }
             // 安装器下载包时 App 已退到后台，分片发、发完再停，
             // 别把大包一次塞进内存。
-            send(connection, status: "200 OK", contentType: "application/octet-stream",
-                 length: size, body: nil) { [weak self] in
-                self?.sendFile(connection, handle: handle, remaining: size)
-            }
+            send(fd: fd, status: "200 OK", contentType: "application/octet-stream",
+                 length: size, body: nil)
+            sendFile(fd: fd, handle: handle, remaining: size)
             return
         }
-        send(connection, status: "404 Not Found", contentType: "text/plain",
-             length: 0, body: Data()) { connection.cancel() }
+        send(fd: fd, status: "404 Not Found", contentType: "text/plain",
+             length: 0, body: Data())
     }
 
-    private func send(_ connection: NWConnection, status: String, contentType: String,
-                      length: Int, body: Data?, done: @escaping () -> Void) {
+    /// 同步发完一整段：send 可能只发出去一部分，循环发完
+    ///（或对端断开就停）。发完由调用方关连接。
+    private func send(fd: Int32, status: String, contentType: String,
+                      length: Int, body: Data?) {
         var head = "HTTP/1.1 \(status)\r\n"
         head += "Content-Type: \(contentType)\r\n"
         head += "Content-Length: \(length)\r\n"
         head += "Connection: close\r\n\r\n"
         var payload = Data(head.utf8)
         if let body { payload.append(body) }
-        connection.send(content: payload, completion: .contentProcessed { _ in done() })
+        payload.withUnsafeBytes { raw in
+            var sent = 0
+            let total = raw.count
+            guard let base = raw.baseAddress else { return }
+            while sent < total {
+                let n = send(fd, base.advanced(by: sent), total - sent, 0)
+                if n <= 0 { return }
+                sent += n
+            }
+        }
     }
 
-    private func sendFile(_ connection: NWConnection, handle: FileHandle, remaining: Int) {
-        guard remaining > 0 else {
-            try? handle.close()
-            connection.cancel()
-            // 包发完了：留 20 秒给安装器重试，之后停服务。
-            stopWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in self?.stop() }
-            stopWork = work
-            queue.asyncAfter(deadline: .now() + 20, execute: work)
-            return
+    private func sendFile(fd: Int32, handle: FileHandle, remaining: Int) {
+        var left = remaining
+        while left > 0 {
+            let chunk = handle.readData(ofLength: min(left, 64 * 1024))
+            guard !chunk.isEmpty else { break }
+            var ok = true
+            chunk.withUnsafeBytes { raw in
+                var sent = 0
+                let total = raw.count
+                guard let base = raw.baseAddress else { ok = false; return }
+                while sent < total {
+                    let n = send(fd, base.advanced(by: sent), total - sent, 0)
+                    if n <= 0 { ok = false; return }
+                    sent += n
+                }
+            }
+            guard ok else { break }
+            left -= chunk.count
         }
-        let chunk = handle.readData(ofLength: min(remaining, 64 * 1024))
-        guard !chunk.isEmpty else {
-            try? handle.close()
-            connection.cancel()
-            return
-        }
-        connection.send(content: chunk, completion: .contentProcessed { [weak self] _ in
-            self?.sendFile(connection, handle: handle, remaining: remaining - chunk.count)
-        })
+        try? handle.close()
+        // 只有整包发完才留 20 秒给安装器重试，之后停服务；
+        // 中途断开只关连接，停服务走 600 秒硬停或用户重试。
+        guard left == 0 else { return }
+        stopWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.stop() }
+        stopWork = work
+        queue.asyncAfter(deadline: .now() + 20, execute: work)
     }
 
     // MARK: - 后台与状态
