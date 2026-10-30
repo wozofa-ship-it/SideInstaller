@@ -78,6 +78,19 @@ struct CertTabView: View {
     @State private var recordPendingDelete: SignedIPARecord?
     @State private var showingDeleteConfirm = false
     @State private var showingBatchDeleteConfirm = false
+    // 批量签名（未签名栏）：只签名不安装，跟多开同理。
+    @State private var batchingUnsigned = false
+    @State private var selectedUnsignedIDs: Set<String> = []
+    @State private var batchBusy = false
+    @State private var batchMessage: String?
+    @State private var batchFailed = false
+    // 签名预设（签名段）：只存跨 App 通用的项。
+    @State private var presets: [CertSignPreset] = []
+    @State private var presetNameText = ""
+    @State private var presetMessage: String?
+    // 签名日志（应用库「记录」栏）。
+    @State private var logEntries: [CertSignLogEntry] = []
+    @State private var showingLogClearConfirm = false
 
     private var certReady: Bool { hasP12 && hasProvision && !password.isEmpty }
     /// 选中 IPA 的 Info.plist 解析结果：select() 时算一次存下来，
@@ -114,6 +127,8 @@ struct CertTabView: View {
             signedRecords = SignedIPAStore.load()
             unsignedIPAs = unsignedItems()
             ensureUnsignedInfo()
+            presets = CertSignPresetStore.load()
+            logEntries = CertSignLogStore.load()
             if let shared = workspace.selectedIPA {
                 select(shared)
                 workspace.selectedIPA = nil
@@ -437,6 +452,7 @@ struct CertTabView: View {
                     modField(L("最低系统版本"), text: $mods.minOS,
                              placeholder: "如 15.0")
                     iconRow
+                    presetSection
                     pluginSection
                     multiOpenSection
                     Divider()
@@ -579,6 +595,84 @@ struct CertTabView: View {
 
     private var multiCount: Int { max(1, min(20, Int(multiCountText) ?? 1)) }
     private var multiStart: Int { max(1, min(999, Int(multiStartText) ?? 1)) }
+
+    /// 签名预设：存跨 App 通用的项（插件、最低系统版本、多开），
+    /// 名字/Bundle ID/版本是每 App 自己的，不进预设。
+    private var presetSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(L("预设"))
+                    .font(.footnote)
+                    .frame(width: 92, alignment: .leading)
+                TextField(L("新预设名称"), text: $presetNameText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.footnote)
+                Button(L("保存")) { saveCurrentPreset() }
+                    .font(.footnote)
+                    .disabled(presetNameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+            }
+            if presets.isEmpty {
+                Text(L("把常用的插件、最低系统版本、多开数量存成预设，下次直接套用（名字、Bundle ID、版本是每 App 自己的，不进预设）。"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(presets) { preset in
+                    HStack(spacing: 8) {
+                        Button { applyPreset(preset) } label: {
+                            Text(preset.name)
+                                .font(.footnote)
+                        }
+                        Spacer()
+                        Button { removePreset(preset) } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            if let presetMessage {
+                Text(presetMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func saveCurrentPreset() {
+        let name = presetNameText.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        _ = CertSignPresetStore.save(name: name, minOS: mods.minOS,
+            multiCount: multiCount, multiStart: multiStart,
+            icon: mods.icon, pluginURLs: mods.plugins)
+        presets = CertSignPresetStore.load()
+        presetNameText = ""
+        presetMessage = L("预设“%@”已保存。", name)
+    }
+
+    private func applyPreset(_ preset: CertSignPreset) {
+        // 先清掉表单里已暂存的插件（跟换 IPA 时 resetMods 同例），
+        // 再把预设的插件文件重新暂存一份进表单（预设原件不动）。
+        for url in mods.plugins { CertPluginStore.remove(url) }
+        mods.plugins = []
+        var staged: [URL] = []
+        for url in CertSignPresetStore.pluginURLs(for: preset) {
+            if let stagedURL = CertPluginStore.stage(url) { staged.append(stagedURL) }
+        }
+        mods.plugins = staged
+        mods.minOS = preset.minOS
+        mods.icon = preset.icon
+        iconItem = nil
+        multiCountText = String(preset.multiCount)
+        multiStartText = String(preset.multiStart)
+        presetMessage = L("已套用预设“%@”。", preset.name)
+    }
+
+    private func removePreset(_ preset: CertSignPreset) {
+        CertSignPresetStore.remove(preset)
+        presets = CertSignPresetStore.load()
+    }
 
     /// 插件注入：选好的插件（dylib/deb/zip）在签名之前注进
     /// App，不选就是不注入。
@@ -820,21 +914,32 @@ struct CertTabView: View {
                         signedRecords = SignedIPAStore.load()
                         unsignedIPAs = unsignedItems()
                         ensureUnsignedInfo()
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: baseName, kind: .signOnly, success: true,
+                            detail: L("已签出 %d 个副本，存到「已签名」。", multiCount)))
                         signOnlyMessage = L("已签出 %d 个副本，存到「应用库 → 已签名」，逐个点安装。", multiCount)
                         signOnlyFailed = false
                     } else {
-                        _ = try await CertSigner.signToFile(ipa: url, mods: mods)
+                        let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                         signedRecords = SignedIPAStore.load()
                         unsignedIPAs = unsignedItems()
                         ensureUnsignedInfo()
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: record.appName, kind: .signOnly, success: true,
+                            detail: L("已存到「已签名」")))
                         signOnlyMessage = L("签好了，已存到「应用库 → 已签名」。")
                         signOnlyFailed = false
                     }
                 } catch {
-                    signOnlyMessage = (error as? LocalizedError)?.errorDescription
+                    let message = (error as? LocalizedError)?.errorDescription
                         ?? String(describing: error)
+                    signOnlyMessage = message
                     signOnlyFailed = true
+                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                        appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
+                        kind: .signOnly, success: false, detail: message))
                 }
+                logEntries = CertSignLogStore.load()
                 signBusy = false
             }
         case .signAndInstall:
@@ -846,15 +951,23 @@ struct CertTabView: View {
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
                     ensureUnsignedInfo()
+                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                        appName: record.appName, kind: .signAndInstall, success: true,
+                        detail: L("已签好，已拉起安装。")))
                     await MainActor.run {
                         self.localFallbackRecord = record
                         self.localInstall.install(record: record)
                     }
                 } catch {
-                    signOnlyMessage = (error as? LocalizedError)?.errorDescription
+                    let message = (error as? LocalizedError)?.errorDescription
                         ?? String(describing: error)
+                    signOnlyMessage = message
                     signOnlyFailed = true
+                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                        appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
+                        kind: .signAndInstall, success: false, detail: message))
                 }
+                logEntries = CertSignLogStore.load()
                 signBusy = false
             }
         }
@@ -897,6 +1010,7 @@ struct CertTabView: View {
                 Picker("", selection: $libraryTab) {
                     Text(L("未签名")).tag(CertLibraryTab.unsigned)
                     Text(L("已签名")).tag(CertLibraryTab.signed)
+                    Text(L("记录")).tag(CertLibraryTab.log)
                 }
                 .pickerStyle(.segmented)
                 libraryContent
@@ -939,6 +1053,8 @@ struct CertTabView: View {
             unsignedList
         case .signed:
             signedList
+        case .log:
+            logList
         }
     }
 
@@ -956,6 +1072,20 @@ struct CertTabView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
+                HStack(spacing: 12) {
+                    Text(L("共 %d 个", filteredUnsigned.count))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        batchingUnsigned.toggle()
+                        if !batchingUnsigned { selectedUnsignedIDs.removeAll() }
+                    } label: {
+                        Text(batchingUnsigned ? L("完成") : L("批量"))
+                            .font(.footnote)
+                    }
+                    .disabled(batchBusy)
+                }
                 ForEach(groupedUnsigned, id: \.key) { group in
                     VStack(alignment: .leading, spacing: 12) {
                         Text(group.key.isEmpty ? L("根目录") : group.key)
@@ -967,6 +1097,26 @@ struct CertTabView: View {
                                 Divider()
                             }
                         }
+                    }
+                }
+                if batchingUnsigned {
+                    HStack(spacing: 12) {
+                        Button { selectedUnsignedIDs = Set(filteredUnsigned.map { $0.id }) } label: {
+                            Text(L("全选")).font(.footnote)
+                        }
+                        Button { selectedUnsignedIDs.removeAll() } label: {
+                            Text(L("取消全选")).font(.footnote)
+                        }
+                        Spacer()
+                        Button { batchSign() } label: {
+                            Text(L("签名选中（%d）", selectedUnsignedIDs.count)).font(.footnote)
+                        }
+                        .disabled(selectedUnsignedIDs.isEmpty || batchBusy)
+                    }
+                    if let batchMessage {
+                        Text(batchMessage)
+                            .font(.footnote)
+                            .foregroundStyle(batchFailed ? .red : .green)
                     }
                 }
             }
@@ -996,28 +1146,174 @@ struct CertTabView: View {
 
     /// 轻松签应用页未签名行：名字 / V版本 | 大小 | Bundle ID / 文件名，
     /// 整行可点进签名段表单（不要行内按钮）。
-    private func unsignedRow(_ item: LocalFileItem) -> some View {
-        Button {
-            select(item.url)
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(unsignedDisplayName(item))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(unsignedSecondLine(item))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(item.name)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func unsignedRowTexts(_ item: LocalFileItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(unsignedDisplayName(item))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Text(unsignedSecondLine(item))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(item.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private func unsignedRow(_ item: LocalFileItem) -> some View {
+        if batchingUnsigned {
+            Button {
+                if selectedUnsignedIDs.contains(item.id) {
+                    selectedUnsignedIDs.remove(item.id)
+                } else {
+                    selectedUnsignedIDs.insert(item.id)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: selectedUnsignedIDs.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedUnsignedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
+                    unsignedRowTexts(item)
+                }
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                select(item.url)
+            } label: {
+                unsignedRowTexts(item)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 批量签名：只签名不安装（一次装多个做不出来，跟多开同理），
+    /// 每 App 原信息不动（名字、Bundle ID 等都不改），逐个签进「已签名」。
+    private func batchSign() {
+        guard !batchBusy, !selectedUnsignedIDs.isEmpty else { return }
+        guard certReady else {
+            batchMessage = L("先去「证书」页把证书、描述文件和密码备齐。")
+            batchFailed = true
+            return
+        }
+        let targets = unsignedIPAs.filter { selectedUnsignedIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        batchBusy = true
+        batchMessage = nil
+        Task {
+            var ok = 0
+            var fail = 0
+            var firstError: String?
+            for item in targets {
+                do {
+                    _ = try await CertSigner.signToFile(ipa: item.url, mods: CertSignMods())
+                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                        appName: unsignedDisplayName(item), kind: .batch, success: true,
+                        detail: L("已存到「已签名」")))
+                    ok += 1
+                } catch {
+                    fail += 1
+                    let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                    if firstError == nil { firstError = message }
+                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                        appName: unsignedDisplayName(item), kind: .batch, success: false,
+                        detail: message))
+                }
+            }
+            await MainActor.run {
+                self.signedRecords = SignedIPAStore.load()
+                self.unsignedIPAs = self.unsignedItems()
+                self.ensureUnsignedInfo()
+                self.logEntries = CertSignLogStore.load()
+                self.selectedUnsignedIDs = self.selectedUnsignedIDs.intersection(self.unsignedIPAs.map { $0.id })
+                self.batchBusy = false
+                if fail == 0 {
+                    self.batchMessage = L("批量签完：%d 个已存到「已签名」。", ok)
+                    self.batchFailed = false
+                } else {
+                    var message = L("批量签完：成功 %d 个，失败 %d 个。", ok, fail)
+                    if let firstError { message += " " + firstError }
+                    self.batchMessage = message
+                    self.batchFailed = true
+                }
+            }
+        }
+    }
+
+    private var logList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if logEntries.isEmpty {
+                Text(L("还没有签名记录。签一次就会记一条，成功失败都有。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 12) {
+                    Text(L("共 %d 条", logEntries.count))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button { showingLogClearConfirm = true } label: {
+                        Text(L("清空")).font(.footnote)
+                    }
+                }
+                ForEach(logEntries) { entry in
+                    logRow(entry)
+                    if entry.id != logEntries.last?.id { Divider() }
+                }
+            }
+        }
+        .alert(L("清空签名记录？"), isPresented: $showingLogClearConfirm) {
+            Button(L("清空"), role: .destructive) {
+                CertSignLogStore.clear()
+                logEntries = []
+            }
+            Button(L("取消"), role: .cancel) {}
+        } message: {
+            Text(L("只删记录，不动已签名的 IPA 文件。"))
+        }
+    }
+
+    private func logRow(_ entry: CertSignLogEntry) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text(entry.appName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer()
+                Text(entry.success ? L("成功") : L("失败"))
+                    .font(.caption)
+                    .foregroundStyle(entry.success ? .green : .red)
+            }
+            Text("\(logKindText(entry.kind)) · \(Self.logDateFormatter.string(from: entry.date))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            if !entry.detail.isEmpty {
+                Text(entry.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func logKindText(_ kind: CertSignLogKind) -> String {
+        switch kind {
+        case .signOnly: return L("仅签名")
+        case .signAndInstall: return L("签名并安装")
+        case .batch: return L("批量签名")
+        }
+    }
+
+    private static let logDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
 
     private func unsignedDisplayName(_ item: LocalFileItem) -> String {
         if let name = unsignedInfo[item.url.path]?.name, !name.isEmpty {
@@ -1257,14 +1553,16 @@ private enum CertPage: Identifiable {
 }
 
 /// 应用库切栏。
-private enum CertLibraryTab: Identifiable {
+private enum CertLibraryTab: Identifiable, Hashable {
     case unsigned
     case signed
+    case log
 
     var id: String {
         switch self {
         case .unsigned: return "unsigned"
         case .signed: return "signed"
+        case .log: return "log"
         }
     }
 }

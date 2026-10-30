@@ -577,6 +577,144 @@ enum SignedIPAStore {
     }
 }
 
+// MARK: - 签名日志
+
+/// 签名操作种类（存码，显示时再翻成文案）。
+enum CertSignLogKind: String, Codable {
+    case signOnly
+    case signAndInstall
+    case batch
+}
+
+/// 一条签名记录：只记结果，不记证书密码等敏感信息。
+struct CertSignLogEntry: Codable, Identifiable {
+    var id: UUID
+    var date: Date
+    var appName: String
+    var kind: CertSignLogKind
+    var success: Bool
+    /// 成功是结果说明，失败是报错原文。
+    var detail: String
+}
+
+/// 签名日志清单：存 Application Support，最新在前，最多留 100 条。
+enum CertSignLogStore {
+    private static var fileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("CertSignLog.json")
+    }
+
+    static func load() -> [CertSignLogEntry] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let entries = try? JSONDecoder().decode([CertSignLogEntry].self, from: data)
+        else { return [] }
+        return entries.sorted { $0.date > $1.date }
+    }
+
+    private static func save(_ entries: [CertSignLogEntry]) {
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    static func append(_ entry: CertSignLogEntry) {
+        var entries = load()
+        entries.insert(entry, at: 0)
+        if entries.count > 100 { entries = Array(entries.prefix(100)) }
+        save(entries)
+    }
+
+    static func clear() { save([]) }
+}
+
+// MARK: - 签名预设
+
+/// 一条签名预设：只存跨 App 通用的项。名字/Bundle ID/版本是
+/// 每 App 自己的，不进预设；插件文件另存预设目录（套用时
+/// 重新暂存一份，换 IPA 清暂存时不伤预设原件）。
+struct CertSignPreset: Codable, Identifiable {
+    var id: UUID
+    var name: String
+    var minOS: String
+    var multiCount: Int
+    var multiStart: Int
+    var icon: Data?
+    var pluginFileNames: [String]
+}
+
+/// 签名预设：索引存 Application Support，插件文件存同目录下
+/// 每预设一个子目录（同名插件互不干扰）。
+enum CertSignPresetStore {
+    private static var dir: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CertSignPresets", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    private static var indexURL: URL { dir.appendingPathComponent("presets.json") }
+
+    static func load() -> [CertSignPreset] {
+        guard let data = try? Data(contentsOf: indexURL),
+              let presets = try? JSONDecoder().decode([CertSignPreset].self, from: data)
+        else { return [] }
+        return presets.sorted { $0.name < $1.name }
+    }
+
+    private static func save(_ presets: [CertSignPreset]) {
+        if let data = try? JSONEncoder().encode(presets) {
+            try? data.write(to: indexURL, options: .atomic)
+        }
+    }
+
+    private static func pluginDir(for id: UUID) -> URL {
+        let url = dir.appendingPathComponent(id.uuidString, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// 预设的插件文件（只返回还存在的，删过的不算）。
+    static func pluginURLs(for preset: CertSignPreset) -> [URL] {
+        let d = pluginDir(for: preset.id)
+        return preset.pluginFileNames.map { d.appendingPathComponent($0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// 保存当前可复用项为预设；同名预设直接覆盖（旧目录一起删）。
+    /// 插件拷失败的跳过，不记入；索引写失败也不抛，调用方照常报保存。
+    static func save(name: String, minOS: String, multiCount: Int, multiStart: Int,
+                     icon: Data?, pluginURLs: [URL]) -> CertSignPreset {
+        var presets = load()
+        if let old = presets.first(where: { $0.name == name }) {
+            try? FileManager.default.removeItem(at: pluginDir(for: old.id))
+            presets.removeAll { $0.id == old.id }
+        }
+        let preset = CertSignPreset(id: UUID(), name: name, minOS: minOS,
+                                    multiCount: multiCount, multiStart: multiStart,
+                                    icon: icon, pluginFileNames: [])
+        let pdir = pluginDir(for: preset.id)
+        var names: [String] = []
+        for url in pluginURLs {
+            let dest = pdir.appendingPathComponent(url.lastPathComponent)
+            if (try? FileManager.default.copyItem(at: url, to: dest)) != nil {
+                names.append(url.lastPathComponent)
+            }
+        }
+        var seen = Set<String>()
+        var final = preset
+        final.pluginFileNames = names.filter { seen.insert($0).inserted }
+        presets.append(final)
+        save(presets)
+        return final
+    }
+
+    static func remove(_ preset: CertSignPreset) {
+        try? FileManager.default.removeItem(at: pluginDir(for: preset.id))
+        save(load().filter { $0.id != preset.id })
+    }
+}
+
 // MARK: - 独立签名器（只签名不安装，不走 Engine 流水线）
 
 enum CertSigner {
