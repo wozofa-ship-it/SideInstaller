@@ -13,8 +13,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.9.7"
-    CURRENT_PROJECT_VERSION: "52"
+    MARKETING_VERSION: "0.9.8"
+    CURRENT_PROJECT_VERSION: "53"
     TARGETED_DEVICE_FAMILY: "1,2"
     # aws-lc-rs / idevice are arm64-only here; drop x86_64 sim slice.
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
@@ -38,6 +38,10 @@ targets:
     dependencies:
       - framework: SideInstallerFFI.xcframework
         embed: false
+      # GCDWebServer（企业安装回环服务，vendored 在 ios-app/GCDWebServer/）
+      # 上游 podspec 的 iOS 依赖：CoreServices（MIME 类型）+ CFNetwork。
+      - framework: CoreServices.framework
+      - framework: CFNetwork.framework
       # Embedded as PlugIns/SideInstallerLiveActivity.appex.
       - target: SideInstallerLiveActivity
       # Embedded as PlugIns/TunnelProv.appex (built-in loopback tunnel).
@@ -58,7 +62,10 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.frizzle.sideinstaller
         INFOPLIST_FILE: ios-app/Info.plist
         # idevice's static lib pulls in C++ symbols (aws-lc); link libc++.
-        OTHER_LDFLAGS: "-lc++"
+        # GCDWebServer 的 Request/Response 用 zlib（gzip），上游 podspec 的 iOS library 就是 z。
+        OTHER_LDFLAGS: "-lc++ -lz"
+        # Swift 调 GCDWebServer（ObjC）走桥接头；只有主 App 靶用，扩展靶不设。
+        SWIFT_OBJC_BRIDGING_HEADER: ios-app/SideInstaller-Bridging-Header.h
         GENERATE_INFOPLIST_FILE: NO
 
   # Draws the pairing Live Activity: the code Settings asks for, in the Dynamic

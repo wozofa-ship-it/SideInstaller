@@ -111,6 +111,11 @@ enum EnterpriseCertStore {
         let teamID: String
         let expiration: Date?
         let uuid: String
+        /// ProvisionedDevices 数组长度：企业描述文件通常没有这一项
+        ///（0 = 不限设备）；开发/AdHoc 描述文件有，长度就是限定台数。
+        /// 本机 UDID 在公开 API 里拿不到，所以证书页只能提示“限定了
+        /// 设备”，不能像轻松签那样断言本机在不在列表里（见证书页）。
+        let provisionedDeviceCount: Int
     }
 
     static var provisionInfo: ProvisionInfo? {
@@ -124,7 +129,8 @@ enum EnterpriseCertStore {
                              teamName: dict["TeamName"] as? String ?? "",
                              teamID: (dict["TeamIdentifier"] as? [String])?.first ?? "",
                              expiration: dict["ExpirationDate"] as? Date,
-                             uuid: dict["UUID"] as? String ?? "")
+                             uuid: dict["UUID"] as? String ?? "",
+                             provisionedDeviceCount: (dict["ProvisionedDevices"] as? [String])?.count ?? 0)
     }
 
     /// 删除已导入的证书材料（证书页的「移除证书」）。

@@ -25,6 +25,8 @@ struct CertTabView: View {
     @State private var certInfo = EnterpriseCertStore.certInfo
     @State private var showP12Picker = false
     @State private var showProvisionPicker = false
+    // 轻松签式“导入证书库”：一次选 .p12 + 描述文件，配对才进。
+    @State private var showCertLibraryPicker = false
     @State private var importError: String?
     @State private var confirmingRemoveCert = false
 
@@ -44,6 +46,12 @@ struct CertTabView: View {
     @State private var signBusy = false
     @State private var signOnlyMessage: String?
     @State private var signOnlyFailed = false
+    // 轻松签式“签名后立即安装”开关：开 = 开始签名后直接装，
+    // 关 = 开始签名只签存已签名；“仅签名”按钮仍在下面。
+    @AppStorage("CZFEnterpriseInstallWhenSign") private var installWhenSign = true
+    // 选中 IPA 的脱壳预检结果（nil = 还没算出来）：加密的在表单上
+    // 直接提示；真正签的时候 startSign 还会再算一次 gate。
+    @State private var selectedCryptid: Int?
 
     // 多开：数量与起始序号（只对「仅签名」生效，见 multiOpenSection）
     @State private var multiCountText = "1"
@@ -208,6 +216,15 @@ struct CertTabView: View {
                         }
                         .font(.footnote)
                     }
+                    // 轻松签式设备提示：描述文件限定了设备台数时提醒。
+                    // 本机 UDID 公开 API 拿不到，只能提示“限定了设备”，
+                    // 不能断言本机在不在列表里（企业证书通常不限设备，
+                    // 这一行也就不出现）。
+                    if info.provisionedDeviceCount > 0 {
+                        Text(L("描述文件限定了设备（共 %d 台）：如果是开发证书且本机不在列表里，签名后装不上；企业证书通常不限设备。", info.provisionedDeviceCount))
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 if let cert = certInfo, !cert.name.isEmpty {
                     infoRow(L("证书"), cert.name)
@@ -255,6 +272,19 @@ struct CertTabView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                // 轻松签式“导入证书库”：一次选 .p12 + 描述文件两个，
+                // 配对才进；缺描述文件按轻松签原文报错（单导 p12 走上面）。
+                HStack(spacing: 10) {
+                    Button {
+                        showCertLibraryPicker = true
+                    } label: {
+                        Text(L("导入证书库"))
+                    }
+                }
+                .buttonStyle(.bordered)
+                Text(L("证书库一次选 .p12 和描述文件两个，配不上会报错；单导 p12 走上面那个按钮。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 // 导出给 LiveContainer：只发 .p12 文件和描述文件本身，
                 // 密码不一起导出，LiveContainer 导入时再填一次密码。
                 // 这样同一张企业证书不用再找原文件就能在另一边用。
@@ -349,6 +379,36 @@ struct CertTabView: View {
                 }
             }
         }
+        .sheet(isPresented: $showCertLibraryPicker) {
+            FileImporterRepresentableView(
+                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .data,
+                                      UTType(filenameExtension: "mobileprovision") ?? .data],
+                allowsMultipleSelection: true
+            ) { urls in
+                importCertLibrary(urls)
+            }
+        }
+    }
+
+    /// 轻松签式“导入证书库”：一次选 .p12 + 描述文件，配对才进；
+    /// 只给一个（缺描述文件）就按轻松签原文报错，不单吞 p12
+    ///（单导 p12 走上面那个“导入 .p12 证书”按钮）。多选了几个
+    /// 时只取每种的第一个，不猜配对。
+    private func importCertLibrary(_ urls: [URL]) {
+        let p12 = urls.first { $0.pathExtension.lowercased() == "p12" }
+        let provision = urls.first { $0.pathExtension.lowercased() == "mobileprovision" }
+        guard let p12, let provision else {
+            importError = L("未找到与本证书相匹配的mobileprovision文件，请将mobileprovision文件放在与p12文件相同的目录下。")
+            return
+        }
+        do {
+            try EnterpriseCertStore.importP12(from: p12)
+            try EnterpriseCertStore.importProvision(from: provision)
+            importError = nil
+        } catch {
+            importError = L("证书库导入失败：%@", error.localizedDescription)
+        }
+        refreshCertState()
     }
 
     private func infoRow(_ title: String, _ value: String) -> some View {
@@ -435,12 +495,24 @@ struct CertTabView: View {
                     pluginSection
                     multiOpenSection
                     Divider()
+                    // 轻松签式脱壳提示：选好 IPA 就预检，加密的直接在
+                    // 表单上提示（签时 startSign 还会再算一次 gate）。
+                    if let cryptid = selectedCryptid, cryptid != 0 {
+                        Text(L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。"))
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                    // 轻松签式：一个“开始签名” + “签名后立即安装”开关
+                    //（开 = 签完直接装，关 = 只签存已签名）；下面“仅签名”
+                    // 按钮仍在，两个去向都是一键直达。
+                    Toggle(L("签名后立即安装"), isOn: $installWhenSign)
+                        .font(.footnote)
                     Button {
-                        startSign(kind: .signAndInstall)
+                        startSign(kind: installWhenSign ? .signAndInstall : .signOnly)
                     } label: {
                         HStack {
                             if signBusy { ProgressView() }
-                            Text(L("签名并安装"))
+                            Text(L("开始签名"))
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -562,7 +634,7 @@ struct CertTabView: View {
                 Spacer()
             }
             if multiCount > 1 {
-                Text(L("会签出 %d 个副本（Bundle ID 加 .序号区分），多开只对「仅签名」生效；签名并安装仍只签 1 个。", multiCount))
+                Text(L("会签出 %d 个副本（Bundle ID 加 .序号区分），多开只对「仅签名」生效；开着「签名后立即安装」时「开始签名」仍只签 1 个。", multiCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -791,6 +863,7 @@ struct CertTabView: View {
         pluginError = nil
         multiCountText = "1"
         multiStartText = "1"
+        selectedCryptid = nil
     }
 
     private func select(_ url: URL) {
@@ -808,6 +881,16 @@ struct CertTabView: View {
             mods.bundleID = info.bundleID
             mods.version = info.version ?? ""
             mods.minOS = info.minOS ?? ""
+        }
+        // 脱壳预检（轻松签式）：选好就在后台算 cryptid，加密的
+        // 直接在表单上提示；选中的还是这个 IPA 才写，免得切走后
+        // 旧结果盖住新表单。签时 startSign 还会再算一次 gate。
+        selectedCryptid = nil
+        Task.detached(priority: .userInitiated) {
+            let cryptid = IPADecryptionCheck.cryptid(of: url)
+            await MainActor.run {
+                if self.selectedIPA == url { self.selectedCryptid = cryptid }
+            }
         }
     }
 
