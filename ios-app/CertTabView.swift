@@ -1164,6 +1164,9 @@ struct CertTabView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// if 两分支是两种不同 View，普通函数必须加 @ViewBuilder
+    ///（跟 libraryContent 的 switch 同例，不加编不过）。
+    @ViewBuilder
     private func unsignedRow(_ item: LocalFileItem) -> some View {
         if batchingUnsigned {
             Button {
