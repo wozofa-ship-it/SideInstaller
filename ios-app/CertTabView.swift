@@ -6,16 +6,15 @@ import UniformTypeIdentifiers
 /// 证书页：企业证书管理（导入/信息/移除/吊销检查）、选 IPA 改
 /// 信息后签名（名称/Bundle ID/版本/最低系统版本/图标/多开）、
 /// 应用库（未签名/已签名切栏）。
-/// 安装默认走本地直装（LocalHTTPInstallServer，明文 HTTP 回环），
-/// 配对老路（Engine）只在直装失败时弹出来当兜底。
+/// 安装走配对老路（Engine 设备链路）：企业证书安装不弹回环
+/// 直装、不连回环服务。LocalHTTPInstallServer.swift 文件留着
+/// 不用（与 HTTPS 旧版 OTAInstallServer 同例）。
 struct CertTabView: View {
     @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
 
-    // 本地直装服务（HTTP 回环，默认安装路径）
-    @StateObject private var httpServer = LocalHTTPInstallServer()
 
     // 证书材料状态
     @State private var hasP12 = EnterpriseCertStore.hasP12
@@ -56,14 +55,7 @@ struct CertTabView: View {
     @State private var pendingSignMods = CertSignMods()
     @State private var showingWarningAlert = false
 
-    // 安装确认与兜底：直装拉起前先确认（说明回桌面看进度）；
-    // 直装起不来才弹配对安装兜底，不常驻额外按钮。
-    @State private var installRecord: SignedIPARecord?
-    @State private var showingInstallConfirm = false
-    @State private var directInstallRecord: SignedIPARecord?
-    @State private var fallbackRecord: SignedIPARecord?
-    @State private var showingFallbackAlert = false
-    // 配对兜底进行中：用来在 Engine 跑完后认成功（finished 才算）。
+    // 配对安装进行中：用来在 Engine 跑完后认成功（finished 才算）。
     @State private var engineInstallInFlight = false
     @State private var showingEngineSuccessAlert = false
 
@@ -123,14 +115,6 @@ struct CertTabView: View {
                 unsignedIPAs = unsignedItems()
                 ensureUnsignedInfo()
             }
-        }
-        .onChange(of: httpServer.failedToStart) { _, failed in
-            // 直装起不来：把信号转成本地兜底弹框（直接绑 server 的
-            // 标志会被后来的一次 stop 清掉，弹框可能没等用户看就没了）。
-            guard failed else { return }
-            httpServer.consumeFailedToStart()
-            fallbackRecord = directInstallRecord
-            showingFallbackAlert = true
         }
         .onChange(of: engine.isRunning) { old, new in
             // 配对兜底跑完：finished 置位才算成功（取消不算）。
@@ -444,22 +428,6 @@ struct CertTabView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    if httpServer.isRunning {
-                        VStack(alignment: .leading, spacing: 6) {
-                            if let status = httpServer.status {
-                                Text(status)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Button {
-                                httpServer.stop()
-                            } label: {
-                                Text(L("停止本地安装服务"))
-                                    .font(.footnote)
-                            }
-                        }
-                    }
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
                             .font(.footnote)
@@ -529,40 +497,6 @@ struct CertTabView: View {
             }
         } message: {
             Text(pendingWarnings.joined(separator: "\n"))
-        }
-        .alert(L("去系统安装"), isPresented: $showingInstallConfirm) {
-            Button(L("安装")) {
-                if let record = installRecord {
-                    directInstallRecord = record
-                    httpServer.install(record: record)
-                    installRecord = nil
-                }
-            }
-            Button(L("先不装"), role: .cancel) {
-                installRecord = nil
-            }
-        } message: {
-            Text(L("签好了，拉起系统安装后可以回桌面查看安装进度。"))
-        }
-        .alert(L("本地安装起不来，改用配对安装？"), isPresented: $showingFallbackAlert) {
-            Button(L("配对安装")) {
-                if let record = fallbackRecord {
-                    engineInstallInFlight = true
-                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
-                    // Engine 的前置检查（配对文件、隧道）不过时会
-                    // 直接返回、isRunning 根本没置位：这时就别留着
-                    // 标志，否则之后别的 tab 一次成功安装也会误弹。
-                    if !engine.isRunning {
-                        engineInstallInFlight = false
-                    }
-                }
-                fallbackRecord = nil
-            }
-            Button(L("取消"), role: .cancel) {
-                fallbackRecord = nil
-            }
-        } message: {
-            Text(L("配对安装要配对文件和隧道，比本地直装慢一截；签好的文件已经在「已签名」里，不用重签。"))
         }
     }
 
@@ -862,15 +796,21 @@ struct CertTabView: View {
         case .signAndInstall:
             Task {
                 do {
-                    // 先签好存进「已签名」，再走 HTTP 本地直装；
-                    // 直装失败时兜底弹框里装的就是这个已签好的文件，
-                    // 不用重签一次。
+                    // 先签好存进「已签名」，再走配对安装（Engine 设备
+                    // 链路）：不弹回环直装、不连回环服务。装完 Engine
+                    // finished 置位后弹“装好了”回桌面提示。
                     let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
                     ensureUnsignedInfo()
-                    installRecord = record
-                    showingInstallConfirm = true
+                    engineInstallInFlight = true
+                    engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+                    // Engine 前置检查（配对文件、隧道）不过时会直接
+                    // 返回、isRunning 根本没置位：这时就别留着标志，
+                    // 否则之后别的 tab 一次成功安装也会误弹。
+                    if !engine.isRunning {
+                        engineInstallInFlight = false
+                    }
                 } catch {
                     signOnlyMessage = (error as? LocalizedError)?.errorDescription
                         ?? String(describing: error)
@@ -881,11 +821,16 @@ struct CertTabView: View {
         }
     }
 
-    /// 已签名行「安装」：默认走 HTTP 本地直装，拉起前先确认
-    /// （确认里说明回桌面看进度）；直装起不来再弹配对兜底。
+    /// 已签名行「安装」：走配对安装（Engine 设备链路），不弹
+    /// 回环直装。装完 Engine finished 置位后弹“装好了”提示。
     private func installSigned(_ record: SignedIPARecord) {
-        installRecord = record
-        showingInstallConfirm = true
+        engineInstallInFlight = true
+        engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+        // Engine 前置检查不过时直接返回、isRunning 没置位：别留
+        // 着标志，否则之后别的 tab 一次成功安装也会误弹。
+        if !engine.isRunning {
+            engineInstallInFlight = false
+        }
     }
 
     // MARK: 应用库（未签名/已签名切栏）
