@@ -301,6 +301,7 @@ struct CertTabView: View {
                         .foregroundStyle(.green)
                 }
             }
+            expiryWarning
             if let info = provisionInfo {
                 signGroup(title: L("描述文件")) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -314,7 +315,7 @@ struct CertTabView: View {
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
-                                    .foregroundStyle(expiration < Date() ? .red : .primary)
+                                    .foregroundStyle(expirySoon(expiration) ? .red : .primary)
                             }
                             .font(.footnote)
                         }
@@ -559,6 +560,37 @@ struct CertTabView: View {
         if days < 0 { return L("（已过期）") }
         if days == 0 { return L("（今天到期）") }
         return L("（剩 %d 天）", days)
+    }
+
+    /// 剩余天数 ≤7 天（已过期也算）即提醒；跟 remainingText 同一套算法。
+    private func expirySoon(_ expiration: Date) -> Bool {
+        (Calendar.current.dateComponents([.day], from: Date(), to: expiration).day ?? 0) <= 7
+    }
+
+    /// 描述文件 7 天内到期（或已过期）时证书管理顶部的红条：
+    /// 按 provisionInfo.expiration 实际日期算，永不硬编码。
+    /// 纯展示——企业证书 App 内续不了，只能重新导入，所以不给动作。
+    @ViewBuilder
+    private var expiryWarning: some View {
+        if let expiration = provisionInfo?.expiration, expirySoon(expiration) {
+            CalloutCard(tint: .red) {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(expiration < Date() ? L("描述文件已过期") : L("描述文件快到期了"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(expiration < Date()
+                             ? L("签出来的包装上去也是闪退。先换一张没过期的描述文件，重新导入。")
+                             : L("到期日 %@%@，请及时重新导入。", expiration.formatted(date: .abbreviated, time: .omitted), remainingText(expiration)))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
     }
 
     private func refreshCertState() {

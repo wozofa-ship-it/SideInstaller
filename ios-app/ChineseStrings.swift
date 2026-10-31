@@ -121,6 +121,7 @@ let chineseStrings: [String: String] = [
 
     "Tunnel connected": "隧道已连接",
     "Tunnel off": "隧道已关闭",
+    "Tunnel standby": "隧道待启动",
     "Update available": "有可用更新",
     "SideInstaller %@ is available — you're on %@.":
         "SideInstaller %@ 已发布 —— 你当前使用的是 %@。",
@@ -1156,6 +1157,9 @@ let chineseStrings: [String: String] = [
     "Tunnel peer (device IP)": "隧道对端（设备 IP）",
     "Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects.":
         "内置隧道默认接口 10.7.1.1/32、对端 10.7.0.1/32，地址改动下次隧道连接时生效。",
+    "Auto-enable tunnel on Wi-Fi": "Wi-Fi 下自动启用隧道",
+    "When on, the Install tab preconnects the built-in tunnel on Wi-Fi and reconnects it if it drops. Off leaves the tunnel fully manual; a run still starts it when needed.":
+        "打开后，安装页在 Wi-Fi 下自动预连内置隧道，隧道中途掉了也会自动重连。关掉则全手动——安装需要时仍会自动启动。",
     "Refresh apps automatically in background": "后台自动续签应用",
     "Auto Refresh": "自动续签",
     "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":

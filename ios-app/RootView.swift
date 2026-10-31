@@ -631,6 +631,7 @@ struct ToolsView: View {
                     // 设置页本就存在，只是以前只在各页 toolbar 里
                     // 弹 sheet，这里在工具 tab 给一个固定行。
                     Button {
+                        CZFHaptics.impact()
                         showSettings = true
                     } label: {
                         ToolRow(icon: "gearshape", color: .indigo, title: L("设置"))

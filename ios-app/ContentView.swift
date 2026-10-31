@@ -26,6 +26,19 @@ struct ContentView: View {
     /// Shows the "install LocalDevVPN first" prompt when Install is tapped
     /// with no tunnel and no LocalDevVPN on the phone.
     @State private var showInstallLOCPrompt = false
+    /// Shows the pre-install checklist sheet (v0.9.19).
+    @State private var showPrecheck = false
+    /// Shows the "LocalDevVPN's tunnel can only be closed from LocalDevVPN"
+    /// note when the pill is tapped with a LOC tunnel up.
+    @State private var showLOCStopNote = false
+    /// The tunnel was closed by hand from the pill: preconnect and
+    /// auto-reconnect must not pull it back up until it comes up again.
+    @State private var tunnelManualOff = false
+    /// Last auto-reconnect attempt, so a flapping tunnel doesn't hammer start.
+    @State private var lastTunnelReconnect = Date.distantPast
+    /// Same key the Settings toggle writes; a missing key reads as on, so the
+    /// v70 preconnect behaviour is kept unless the user turns it off.
+    @AppStorage("CZFAutoTunnelPreconnect") private var autoTunnel = true
     /// Text in the IPA download-link field.
     @State private var ipaLink = ""
     @FocusState private var linkFieldFocused: Bool
@@ -116,6 +129,15 @@ struct ContentView: View {
                 }
                 .ignoresSafeArea()
             }
+            .sheet(isPresented: $showPrecheck) {
+                PrecheckSheet(onContinue: continueAfterPrecheck)
+            }
+            .alert(L("LocalDevVPN 隧道"), isPresented: $showLOCStopNote) {
+                Button(L("打开 LocalDevVPN")) { engine.startLocalDevVPN() }
+                Button(L("Cancel"), role: .cancel) { }
+            } message: {
+                Text(L("LocalDevVPN 的隧道只能在 LocalDevVPN 里关。过去关掉后，回到这里 pill 会自动变回关闭态。"))
+            }
             .scrollDismissesKeyboard(.interactively)
             // WiFi 下安装页出现即预连隧道（见 preconnectTunnelIfNeeded）：
             // v67 删预连是怕纯企业会话带着隧道跑（v65 localhost 嫌疑）；
@@ -126,6 +148,20 @@ struct ContentView: View {
             .task { await preconnectTunnelIfNeeded() }
             .onChange(of: engine.wifiConnected) { _, isOn in
                 if isOn { Task { await preconnectTunnelIfNeeded() } }
+            }
+            .onChange(of: engine.vpnConnected) { _, isUp in
+                if isUp {
+                    // 回升即清手动关闭：下次预连/重连恢复正常。
+                    tunnelManualOff = false
+                } else if autoTunnel, !tunnelManualOff, !engine.isRunning,
+                          engine.wifiConnected, BuiltinTunnel.useBuiltinDirectly,
+                          Date().timeIntervalSince(lastTunnelReconnect) > 30 {
+                    // 隧道中途掉了：只走内置直连（绝不无操作跳去
+                    // LocalDevVPN），30 秒内只试一次；运行中隧道
+                    // 归操作方 ensureNetwork 管，这里不插手。
+                    lastTunnelReconnect = Date()
+                    Task { _ = await engine.tunnelUp() }
+                }
             }
         }
     }
@@ -144,9 +180,11 @@ struct ContentView: View {
     /// 启动；Engine 从不停隧道，预连上的不会被自家流程掐掉。
     /// 首次会弹一次系统 VPN 许可，之后静默自动连；pill 读的
     /// vpnConnected 由状态监控刷新，隧道一起 pill 自动变绿。
+    /// 受“Wi-Fi 下自动启用隧道”开关与 pill 手动关闭约束
+    ///（v0.9.19）：开关关了、或刚手动关掉，都不预连。
     private func preconnectTunnelIfNeeded() async {
-        guard !engine.isRunning, engine.wifiConnected, !engine.vpnConnected,
-              BuiltinTunnel.useBuiltinDirectly else { return }
+        guard autoTunnel, !tunnelManualOff, !engine.isRunning, engine.wifiConnected,
+              !engine.vpnConnected, BuiltinTunnel.useBuiltinDirectly else { return }
         _ = await engine.tunnelUp()
     }
 
@@ -197,20 +235,59 @@ struct ContentView: View {
 
     /// A stable identity so the pill cross-fades when its meaning changes.
     private var statusPillID: String {
-        engine.deviceSummary ?? (engine.vpnConnected ? "up" : "down")
+        engine.deviceSummary ?? (engine.vpnConnected ? "up"
+            : (engine.startsVPNWhenNeeded || BuiltinTunnel.useBuiltinDirectly ? "standby" : "down"))
     }
 
+    /// Tunnel pill, tappable (v0.9.19): connected stops it, off starts it.
+    /// The device pill stays information-only. Orange no longer reads
+    /// "Tunnel off" like the red problem state: "standby" means Install
+    /// will start it on demand, red means nothing will.
     @ViewBuilder
     private var statusPill: some View {
         if let summary = engine.deviceSummary {
             StatusPill(text: summary, systemImage: "iphone", color: .green)
         } else if engine.vpnConnected {
-            StatusPill(text: L("Tunnel connected"), systemImage: "checkmark.shield.fill", color: .green)
+            Button(action: stopTunnelFromTap) {
+                StatusPill(text: L("Tunnel connected"), systemImage: "checkmark.shield.fill", color: .green)
+            }
+            .buttonStyle(.plain)
         } else if engine.startsVPNWhenNeeded || BuiltinTunnel.useBuiltinDirectly {
-            // Install starts it, so this isn't a problem to flag.
-            StatusPill(text: L("Tunnel off"), systemImage: "shield.slash.fill", color: .orange, glass: true)
+            Button(action: startTunnelFromTap) {
+                StatusPill(text: L("Tunnel standby"), systemImage: "shield.slash.fill", color: .orange, glass: true)
+            }
+            .buttonStyle(.plain)
         } else {
-            StatusPill(text: L("Tunnel off"), systemImage: "shield.slash.fill", color: .red)
+            Button(action: startTunnelFromTap) {
+                StatusPill(text: L("Tunnel off"), systemImage: "shield.slash.fill", color: .red)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// Pill 点按：已连时关。内置隧道直接停；LOC 的隧道是另一个 App 的，
+    /// 本 App 停不掉，只提示去 LocalDevVPN 里关。
+    private func stopTunnelFromTap() {
+        CZFHaptics.impact()
+        guard BuiltinTunnel.useBuiltinDirectly else {
+            showLOCStopNote = true
+            return
+        }
+        tunnelManualOff = true
+        Task { await BuiltinTunnel.stop() }
+    }
+
+    /// Pill 点按：未连时开。内置直接拉；LOC 装了就交接过去；
+    /// 都没有时弹已有的安装提示（跟点安装同一处）。
+    private func startTunnelFromTap() {
+        CZFHaptics.impact()
+        tunnelManualOff = false
+        if BuiltinTunnel.useBuiltinDirectly {
+            Task { _ = await engine.tunnelUp() }
+        } else if engine.localDevVPNInstalled {
+            engine.startLocalDevVPN()
+        } else {
+            showInstallLOCPrompt = true
         }
     }
 
@@ -509,11 +586,12 @@ struct ContentView: View {
                 .opacity(surfacePressed ? 0.92 : 1)
         }
         .alert(L("Cancel the install?"), isPresented: $confirmingCancel) {
-            Button(L("Yes"), role: .destructive) { engine.cancelOneClick() }
+            Button(L("Yes"), role: .destructive) { CZFHaptics.impact(.light); engine.cancelOneClick() }
             Button(L("No"), role: .cancel) { }
         }
         .alert(L("未安装 LocalDevVPN"), isPresented: $showInstallLOCPrompt) {
             Button(L("去安装")) {
+                CZFHaptics.impact(.light)
                 if let url = URL(string: "https://xiaofang-source.pages.dev/localdevvpn.ipa") {
                     openURL(url)
                 }
@@ -535,8 +613,21 @@ struct ContentView: View {
 
     /// Starts the run straight from the tap. The surface reshapes because the
     /// run is going, so nothing waits on the animation.
+    /// 点安装先弹一屏检查清单（v0.9.19），清单只做提醒、不拦安装；
+    /// 真正的门禁仍在 continueAfterPrecheck 与 runOneClick 里。
     private func startInstall() {
         installPressed = false
+        CZFHaptics.impact(.medium)
+        engine.refreshNetworkStatus()
+        showPrecheck = true
+    }
+
+    /// 清单点“继续安装”后走原 startInstall 的路：先过隧道门禁
+    ///（没隧道 + 没内置 + 没装 LOC 时弹安装提示、不进 run），
+    /// 再进 runOneClick（它自己的门禁照常跑）。
+    private func continueAfterPrecheck() {
+        CZFHaptics.impact(.medium)
+        showPrecheck = false
         // 点安装先检查隧道：没通也不再查 WiFi（2026-10-29，
         // 跟续签同理：回环隧道不出设备，WiFi 与它无关；
         // 只有第一次配对才要 WiFi，那是引擎 ensureNetwork
@@ -545,10 +636,11 @@ struct ContentView: View {
         // tunnelUp() 会自己把内置隧道拉起来（首次弹一次系统
         // 许可）；签名带不了隧道（个人 ID 等）就按老规矩查
         // LocalDevVPN、缺了才提示。
-        engine.refreshNetworkStatus()
         if !engine.vpnConnected {
             if !BuiltinTunnel.useBuiltinDirectly, !engine.localDevVPNInstalled {
-                showInstallLOCPrompt = true
+                // sheet 正在收起时直接弹 alert 会被吞掉：先让
+                // 收起提交，下一个主队列回合再弹。
+                Task { @MainActor in showInstallLOCPrompt = true }
                 return
             }
         }
@@ -630,7 +722,7 @@ struct ContentView: View {
     /// sends it back, and the import asks before replacing anything.
     private var sideStorePairingButton: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button { engine.requestSideStorePairing() } label: {
+            Button { CZFHaptics.impact(); engine.requestSideStorePairing() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.uturn.backward.circle")
                         .foregroundStyle(.secondary)
@@ -670,7 +762,7 @@ struct ContentView: View {
 
     /// Import button, labelled with the imported file's name once one is in.
     private var pairingImportButton: some View {
-        Button { showPairingImporter = true } label: {
+        Button { CZFHaptics.impact(); showPairingImporter = true } label: {
             HStack(spacing: 8) {
                 if engine.isImportingPairing {
                     ProgressView().controlSize(.small)
@@ -925,6 +1017,7 @@ struct ContentView: View {
     /// once the run is stopping, which waits for the step in flight.
     private var cancelButton: some View {
         Button {
+            CZFHaptics.impact()
             confirmingCancel = true
         } label: {
             Image(systemName: "xmark")
@@ -1032,6 +1125,205 @@ struct ContentView: View {
         } icon: {
             Image(systemName: systemImage)
                 .foregroundStyle(Theme.brand)
+        }
+    }
+}
+
+// MARK: - Pre-install checklist
+
+/// 点安装前一屏的检查清单（v0.9.19）：Wi-Fi、隧道、配对文件、
+/// 签名身份（Apple ID）、安装包（仅自定义 IPA）逐项列出来，
+/// 缺啥直接指出来。只做提醒，不拦安装：点“继续安装”后，
+/// 原有隧道门禁与 runOneClick 自己的门禁照常跑。
+/// 行读的都是 engine 的实时状态，行内修复（启动隧道、
+/// 导入配对文件/安装包）做完行自己变绿，不用重开清单。
+private struct PrecheckSheet: View {
+    @EnvironmentObject private var engine: Engine
+    @Environment(\.dismiss) private var dismiss
+    let onContinue: () -> Void
+
+    @State private var showPairingPicker = false
+    @State private var showIPAPicker = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(L("绿的是已齐，红的是缺了会卡住，橙的是安装时会自动启动；行内能修的直接点右边的按钮。"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    wifiRow
+                    tunnelRow
+                    pairingRow
+                    accountRow
+                    if engine.installSource == .custom {
+                        packageRow
+                    }
+                    VStack(spacing: 10) {
+                        Button(action: onContinue) {
+                            Text(L("继续安装"))
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        Button(L("取消")) { CZFHaptics.impact(); dismiss() }
+                            .buttonStyle(.bordered, sound: .tap)
+                            .tint(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(20)
+            }
+            .background(AppBackground())
+            .navigationTitle(L("安装前检查"))
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showPairingPicker) {
+                FileImporterRepresentableView(allowedContentTypes: UTType.pairingFileTypes) { urls in
+                    guard let url = urls.first else { return }   // empty means cancelled
+                    Task { await engine.importPairingFile(from: url) }
+                }
+                .ignoresSafeArea()
+            }
+            .sheet(isPresented: $showIPAPicker) {
+                FileImporterRepresentableView(allowedContentTypes: [.ipa]) { urls in
+                    guard let url = urls.first else { return }   // empty means cancelled
+                    Task { await engine.importCustomIPA(from: url) }
+                }
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    /// Wi-Fi 只在本次要自配对时才阻塞：已有配对文件、
+    /// 或本机不能自配对（走文件导入）时都不需要 Wi-Fi。
+    @ViewBuilder
+    private var wifiRow: some View {
+        if engine.wifiConnected {
+            precheckRow(title: L("Wi-Fi"), state: .ok, detail: L("已连接"))
+        } else if engine.needsFreshPairing, engine.canSelfPair {
+            precheckRow(title: L("Wi-Fi"), state: .blocked, detail: L("未连接——本次配对需要 Wi-Fi"))
+        } else {
+            precheckRow(title: L("Wi-Fi"), state: .na, detail: L("不需要 Wi-Fi"))
+        }
+    }
+
+    /// 隧道：已连绿；未连但安装时会启动橙（行内可先拉起）；
+    /// 未连且不会启动红（LOC 装了可直接打开，没装则点
+    /// 继续安装时会弹安装提示）。
+    @ViewBuilder
+    private var tunnelRow: some View {
+        if engine.vpnConnected {
+            precheckRow(title: L("隧道"), state: .ok, detail: L("已连接"))
+        } else if engine.tunnelAvailable {
+            if BuiltinTunnel.useBuiltinDirectly || engine.localDevVPNInstalled {
+                precheckRow(title: L("隧道"), state: .warn, detail: L("未连接，安装时自动启动"),
+                            fixTitle: L("立即启动"), fix: startTunnel)
+            } else {
+                precheckRow(title: L("隧道"), state: .warn, detail: L("未连接，安装时自动启动（需先装 LocalDevVPN）"))
+            }
+        } else if engine.localDevVPNInstalled {
+            precheckRow(title: L("隧道"), state: .blocked, detail: L("未连接，且不会自动启动"),
+                        fixTitle: L("打开 LocalDevVPN"), fix: { engine.startLocalDevVPN() })
+        } else {
+            precheckRow(title: L("隧道"), state: .blocked, detail: L("未连接，且不会自动启动——点继续安装时会提示安装 LocalDevVPN"))
+        }
+    }
+
+    /// 配对文件：本机能自配对就不需要；否则以磁盘上的
+    /// 文件为准（名字没记下来也算已导入）。
+    @ViewBuilder
+    private var pairingRow: some View {
+        if engine.canSelfPair {
+            precheckRow(title: L("配对文件"), state: .ok, detail: L("本机可自配对，不需要文件"))
+        } else if let name = engine.importedPairingName {
+            precheckRow(title: L("配对文件"), state: .ok, detail: L("已导入：%@", name))
+        } else if engine.hasPairingFile {
+            precheckRow(title: L("配对文件"), state: .ok, detail: L("已导入配对文件"))
+        } else {
+            precheckRow(title: L("配对文件"), state: .blocked, detail: L("未导入"),
+                        fixTitle: L("导入配对文件"), fix: { showPairingPicker = true })
+        }
+    }
+
+    /// 签名身份对应 runOneClick 的 Apple ID + 密码门禁，
+    /// 不是证书页的企业证书（企业安装不走这条路，故不列入）。
+    @ViewBuilder
+    private var accountRow: some View {
+        if !engine.normalizedAppleID.isEmpty, !engine.applePassword.isEmpty {
+            precheckRow(title: L("Apple ID（签名身份）"), state: .ok, detail: engine.normalizedAppleID)
+        } else {
+            precheckRow(title: L("Apple ID（签名身份）"), state: .blocked, detail: L("去设置页登录 Apple ID 并填好密码"))
+        }
+    }
+
+    /// 仅自定义 IPA 有这一行，对应 runOneClick 的已导入门禁。
+    @ViewBuilder
+    private var packageRow: some View {
+        if let name = engine.customIPAName {
+            precheckRow(title: L("安装包"), state: .ok, detail: name)
+        } else {
+            precheckRow(title: L("安装包"), state: .blocked, detail: L("还没导入 .ipa"),
+                        fixTitle: L("导入安装包"), fix: { showIPAPicker = true })
+        }
+    }
+
+    /// 行内启动隧道：跟 pill 点按同一路（内置直拉，
+    /// 否则交接 LOC）；两样都没有时本行不给修复按钮。
+    private func startTunnel() {
+        if BuiltinTunnel.useBuiltinDirectly {
+            Task { _ = await engine.tunnelUp() }
+        } else if engine.localDevVPNInstalled {
+            engine.startLocalDevVPN()
+        }
+    }
+}
+
+/// 检查清单一行的状态：绿已齐、橙安装时自动启动、
+/// 红缺了会卡住、灰不需要。
+private enum PrecheckState {
+    case ok, warn, blocked, na
+
+    var systemImage: String {
+        switch self {
+        case .ok: return "checkmark.circle.fill"
+        case .warn: return "exclamationmark.circle.fill"
+        case .blocked: return "xmark.circle.fill"
+        case .na: return "minus.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ok: return .green
+        case .warn: return .orange
+        case .blocked: return .red
+        case .na: return .secondary
+        }
+    }
+}
+
+/// 检查清单的一行：状态色 + 标题 + 说明，右边可选一个修复按钮。
+/// 单一 PanelCard 表达式，行内 if 只在 HStack 的 ViewBuilder 里，
+/// 不触发普通函数多类型分支问题。
+private func precheckRow(title: String, state: PrecheckState, detail: String,
+                         fixTitle: String? = nil, fix: (() -> Void)? = nil) -> some View {
+    PanelCard {
+        HStack(spacing: 12) {
+            Image(systemName: state.systemImage)
+                .foregroundStyle(state.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let fixTitle, let fix {
+                Button(fixTitle) { CZFHaptics.impact(); fix() }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.bordered, sound: .tap)
+            }
         }
     }
 }

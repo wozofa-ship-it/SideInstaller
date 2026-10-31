@@ -28,6 +28,11 @@ struct SettingsView: View {
 
     /// 内置隧道本端地址，与 BuiltinTunnel 共用同一 UserDefaults 键。
     @AppStorage("CZFBuiltinTunnelIfaceIP") private var builtinTunnelIfaceIP = "10.7.1.1/32"
+    /// Wi-Fi 下自动启用隧道（v0.9.19）：与安装页预连共用同一键，
+    /// 缺省（键不存在）= 开，保住 v70 行为；只管自动行为
+    ///（页面预连 + 断线重连），不管操作时 tunnelUp 的内置直起，
+    /// 也不管 pill 手动点按。
+    @AppStorage("CZFAutoTunnelPreconnect") private var autoTunnelPreconnect = true
     /// Buttons, switches and messages make sounds; see `SoundEffects`.
     @AppStorage(SoundEffects.enabledKey) private var soundEffects = true
 
@@ -248,11 +253,13 @@ struct SettingsView: View {
                     .multilineTextAlignment(.trailing)
                     .foregroundStyle(.secondary)
             }
+            Toggle(L("Auto-enable tunnel on Wi-Fi"), isOn: $autoTunnelPreconnect)
         } header: {
             Text(L("Tunnel"))
         } footer: {
             // 只留内置隧道：说明地址默认值与生效时机。
             Text(L("Built-in tunnel: interface 10.7.1.1/32 and peer 10.7.0.1/32 by default. Address changes take effect the next time the tunnel connects."))
+            Text(L("When on, the Install tab preconnects the built-in tunnel on Wi-Fi and reconnects it if it drops. Off leaves the tunnel fully manual; a run still starts it when needed."))
         }
     }
 
