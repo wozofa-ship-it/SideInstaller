@@ -612,6 +612,7 @@ struct CertTabView: View {
                     .buttonStyle(.bordered)
                     .disabled(signBusy || localInstall.isRunning || !certReady)
                     enterpriseInstallStatus
+                    enterpriseStepProgress
                     installDiagnosticLogSection
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
@@ -1041,6 +1042,11 @@ struct CertTabView: View {
 
     private func executeSign(kind: CertSignKind, url: URL, mods: CertSignMods) {
         signBusy = true
+        // 步骤日志（只加可见性，不改签名逻辑）：签名开始行进同一份
+        // diagnosticLog，后面成功/失败/拉起各补一行，轻松签式一步步
+        // 就在这份日志里看；install() 本身的起服/取清单/取包行已由
+        // server 自己记。
+        localInstall.appendStepLog(L("开始签名：%@", selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent))
         switch kind {
         case .signOnly:
             Task {
@@ -1071,6 +1077,7 @@ struct CertTabView: View {
                             appName: baseName, kind: .signOnly, success: true,
                             detail: L("已签出 %d 个副本，存到「已签名」。", multiCount)))
                         signOnlyMessage = L("已签出 %d 个副本，存到「应用库 → 已签名」，逐个点安装。", multiCount)
+                        localInstall.appendStepLog(L("签名成功：%@（%d 个副本）", baseName, multiCount))
                         signOnlyFailed = false
                     } else {
                         let record = try await CertSigner.signToFile(ipa: url, mods: mods)
@@ -1081,6 +1088,7 @@ struct CertTabView: View {
                             appName: record.appName, kind: .signOnly, success: true,
                             detail: L("已存到「已签名」")))
                         signOnlyMessage = L("签好了，已存到「应用库 → 已签名」。")
+                        localInstall.appendStepLog(L("签名成功：%@", record.appName))
                         signOnlyFailed = false
                     }
                 } catch {
@@ -1089,6 +1097,7 @@ struct CertTabView: View {
                     let friendly = friendlySignError(message)
                     signOnlyMessage = friendly
                     signOnlyFailed = true
+                    localInstall.appendStepLog(L("签名失败：%@", friendly))
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
                         kind: .signOnly, success: false, detail: friendly))
@@ -1109,6 +1118,7 @@ struct CertTabView: View {
                     unsignedIPAs = unsignedItems()
                     ensureUnsignedInfo()
                     await MainActor.run {
+                        self.localInstall.appendStepLog(L("签名成功：%@", record.appName))
                         self.startEnterpriseInstall(record: record)
                     }
                 } catch {
@@ -1117,6 +1127,7 @@ struct CertTabView: View {
                     let friendly = friendlySignError(message)
                     signOnlyMessage = friendly
                     signOnlyFailed = true
+                    localInstall.appendStepLog(L("签名失败：%@", friendly))
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
                         kind: .signAndInstall, success: false, detail: friendly))
@@ -1160,12 +1171,14 @@ struct CertTabView: View {
             enterpriseInstallInFlight = false
             if ok {
                 showingEnterpriseInstallSuccessAlert = true
+                localInstall.appendStepLog(L("已拉起系统安装：%@", record.appName))
                 CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                     appName: record.appName, kind: .signAndInstall, success: true,
                     detail: L("已拉起系统安装，进度回桌面看。")))
             } else {
                 let reason = message ?? L("本地安装没能启动，点重试。")
                 enterpriseInstallErrorText = reason
+                localInstall.appendStepLog(L("安装失败：%@", reason))
                 CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                     appName: record.appName, kind: .signAndInstall, success: false,
                     detail: reason))
@@ -1711,13 +1724,14 @@ struct CertTabView: View {
 
     /// 安装诊断日志（只读展示，不动行为）：读单例 localInstall
     /// .diagnosticLog 原样展示（不解析、不重排、不过滤；
-    /// 最新行在最下，往下翻）。默认收起；失败后点开看有
-    /// 没有 manifest 命中 / IPA 命中 / 无命中，就是阶段证据。
-    /// 复制按钮把全文贴到剪贴板。签名段与应用库段各放一
-    /// 处、共用同一个展开态与同一份数据；三段切栏一次只
-    /// 显示一段，不会同时出现两个。
+    /// 最新行在最下，往下翻）。签名/安装进行中强制展开，日志
+    /// 当场可见（不再只藏在收起的组里）；平时跟随用户手动开关；
+    /// 失败后仍可点开看全文（步骤区另有复制按钮，不展开也能复制）。
+    /// 失败后看有没有 manifest 命中 / IPA 命中 / 无命中，就是阶段证据。
+    /// 签名段与应用库段各放一处、共用同一个展开态与同一份数据；
+    /// 三段切栏一次只显示一段，不会同时出现两个。
     private var installDiagnosticLogSection: some View {
-        DisclosureGroup(isExpanded: $showInstallDiagnosticLog) {
+        DisclosureGroup(isExpanded: diagnosticLogExpanded) {
             VStack(alignment: .leading, spacing: 8) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
@@ -1751,9 +1765,113 @@ struct CertTabView: View {
         }
     }
 
+    /// 诊断日志展开态：签名/安装进行中强制展开（get 为 true），
+    /// 用户此时点收起也 snap 回展开——进行中日志必须当场可见；
+    /// 进行结束恢复用户手动开关（set 只写 showInstallDiagnosticLog）。
+    private var diagnosticLogExpanded: Binding<Bool> {
+        Binding(
+            get: { showInstallDiagnosticLog || signBusy || localInstall.isRunning || enterpriseInstallInFlight },
+            set: { showInstallDiagnosticLog = $0 }
+        )
+    }
+
+    /// 安装进行中的阶段文案（从 diagnosticLog 现推，不另起状态）：
+    /// 只看本次安装（最后一次 server started 之后的行）：日志帽
+    /// 100 行、上次安装的命中行还留在里面时，直接 contains 全
+    /// 量查会把上次的取包当成这次的阶段。没有起服行 = 刚拉起
+    /// （inFlight 已置、起服行还在主队列路上）或旧行已被帽顶掉，
+    /// 一律回通用文案，不猜具体阶段。
+    /// 企业页状态区已显示服务 status 文案，这里不重复贴 status，
+    /// 只给取包阶段（这才是轻松签日志里一步步的那部分）。
+    private var installStageText: String {
+        let log = localInstall.diagnosticLog
+        guard let idx = log.lastIndex(where: { $0.contains("server started") }) else {
+            return L("本地安装进行中…")
+        }
+        let session = log[idx...]
+        if session.contains(where: { $0.contains("/app.ipa") }) {
+            return L("安装包下载中…")
+        }
+        if session.contains(where: { $0.contains("/manifest.plist") }) {
+            return L("安装清单已取，等待安装包下载…")
+        }
+        return L("本地服务已启动，等待系统取清单…")
+    }
+
+    /// 企业步骤进度（v65，轻松签式一步步，只加可见性）：
+    /// 签名 / 打包 / 安装尝试三行常显（不是收起的组），签名与
+    /// 打包随同一调用完成（signToFile 签 + 打包一体，故两行状态
+    /// 相同，是实话不是造两个进度）；安装行进行中显示取包阶段
+    /// （从 diagnosticLog 现推，不重复状态区文案），拉起成功 /
+    /// 失败显示结果。平时无操作、无结果时整组隐藏（不占表单地方）；
+    /// 进行中与失败后都可见，失败后步骤区可直接复制日志（不展开
+    /// 也能复制）。签名失败本身仍由原有 signOnlyMessage 红条显示，
+    /// 这里不重复贴（免得同一失败出现两处）。顶层 if 返回
+    /// VStack/EmptyView 两种类型，故必须 @ViewBuilder（见 AGENTS.md）。
+    @ViewBuilder
+    private var enterpriseStepProgress: some View {
+        if signBusy || localInstall.isRunning || enterpriseInstallInFlight
+            || enterpriseInstallErrorText != nil || showingEnterpriseInstallSuccessAlert {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if signBusy {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Text(signBusy ? L("签名中…") : L("签名已完成"))
+                        .font(.footnote)
+                }
+                HStack(spacing: 6) {
+                    if signBusy {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Text(signBusy ? L("打包中…") : L("打包已完成"))
+                        .font(.footnote)
+                }
+                HStack(spacing: 6) {
+                    if localInstall.isRunning || enterpriseInstallInFlight {
+                        ProgressView()
+                        Text(installStageText)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else if showingEnterpriseInstallSuccessAlert {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text(L("已拉起系统安装，进度回桌面看"))
+                            .font(.footnote)
+                    } else if let error = enterpriseInstallErrorText {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    } else {
+                        Image(systemName: "circle")
+                            .foregroundStyle(.secondary)
+                        Text(L("安装未开始"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if !localInstall.diagnosticLog.isEmpty {
+                    Button(L("复制日志")) {
+                        UIPasteboard.general.string = localInstall.diagnosticLog.joined(separator: "\n")
+                    }
+                    .font(.footnote)
+                }
+            }
+        }
+    }
+
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             enterpriseInstallStatus
+            enterpriseStepProgress
             installDiagnosticLogSection
             if signedRecords.isEmpty {
                 Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))

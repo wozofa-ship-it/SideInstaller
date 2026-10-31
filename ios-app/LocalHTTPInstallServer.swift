@@ -69,14 +69,15 @@ final class LocalHTTPInstallServer: ObservableObject {
     /// 服务在跑都算忙。不是 @Published——按钮禁用仍用 isRunning
     /// + 页内 inFlight（那两个会刷新），这个只作点按时的一次判断。
     var isBusy: Bool { installActive || isRunning }
-    /// 安装期间的独立静音音频（轻松签式）：Playback 类别、循环播
-    /// 1 秒静音，靠 audio 后台模式无限时保活，不受 background
-    /// task 到期限制。必须独立起，不能只依赖全局 keepAlive——
-    /// 全局那只是 App 起动时起一次（起动失败/路由变化/静态计数
-    /// 被别的实例耗到 0 都会悄悄死掉，安装时早已不在跑，v59
-    /// 仍弹的另一半原因就在这）。这个 keeper 是实例私有的：
-    /// start/stop 只动自己的 engine，stop 时不动 AVAudioSession
-    ///（不 setActive(false)、不改类别），免得把全局 keepAlive 踩掉。
+    /// 安装期间的独立静音音频（轻松签式）：Playback 类别、
+    /// AVAudioPlayer 循环播包内置真实静音文件，靠 audio 后台
+    /// 模式无限时保活，不受 background task 到期限制。必须独立
+    /// 起，不能只依赖全局 keepAlive——全局那只是 App 起动时起
+    /// 一次（起动失败/路由变化/静态计数被别的实例耗到 0 都会
+    /// 悄悄死掉，安装时早已不在跑，v59 仍弹的另一半原因就在这）。
+    /// 这个 keeper 是实例私有的：start/stop 只动自己的 player，
+    /// stop 时不动 AVAudioSession（不 setActive(false)、不改类别），
+    /// 免得把全局 keepAlive 踩掉。
     private let installAudio = InstallAudioKeeper()
     private var installID = ""
     private var ipaURL: URL?
@@ -369,6 +370,14 @@ final class LocalHTTPInstallServer: ObservableObject {
         }
     }
 
+    /// 企业页步骤日志：签名/安装阶段行也进同一份 diagnosticLog
+    ///（不另起一套日志系统，轻松签式一步步就在这份日志里看）。
+    /// 只追加一行，不动安装流程；log() 本身走主队列追加，任何
+    /// 线程调都安全。
+    func appendStepLog(_ message: String) {
+        log(message)
+    }
+
     /// handler 的 Range 头描述（日志用）：有 Range 头就原样贴出
     ///（如 bytes=0-1023、bytes=-500），没有就是 range=none。
     /// 不用 byteRange.location 判断：无 Range 时 GCDWebServer 填
@@ -385,29 +394,31 @@ final class LocalHTTPInstallServer: ObservableObject {
         DispatchQueue.main.async { self.status = text }
     }
 
-    /// 安装期间的独立静音音频（v63 起恢复：企业安装改回回环，
-    /// 这个 keeper 重新保活；v62 停用期间类留着没删）：
-    /// Playback 类别、循环播 1 秒静音。跟全局 KeepAlive 同款 engine 写法
-    ///（本仓已验证的路子），但 engine 是实例私有的；session 则
-    /// 不再私有：start 成功时向全局 KeepAlive 计数 +1（只动计数、
-    /// 不启动全局 engine），这样全局最后一个 holder 停掉时不会
-    /// 误调 releaseSession() 把安装音频的 session 一起杀掉；stop
-    /// 时计数 -1，归零才释放。stop 时仍不动 session 的类别/激活
-    ///（除非计数归零走全局释放），互不踩。
+    /// 安装期间的独立静音音频（v65 起换轻松签同款：AVAudioPlayer
+    /// 循环播包内置真实静音文件 InstallSilence.wav，替代 v63 的
+    /// AVAudioEngine 合成 1 秒静音——合成静音无渲染校验，中途停摆
+    /// 无人知道，是 v58—v64 五代同弹窗的头号候选（第二阶段 installd
+    /// 取包时后台死掉）；真实文件 + isPlaying 校验 + 前后台复核，
+    /// 停了能发现、能重起。session 不再私有：start 成功时向全局
+    /// KeepAlive 计数 +1（只动计数、不启动全局 engine），这样全局
+    /// 最后一个 holder 停掉时不会误调 releaseSession() 把安装音频
+    /// 的 session 一起杀掉；stop 时计数 -1，归零才释放。stop 时仍
+    /// 不动 session 的类别/激活（除非计数归零走全局释放），互不踩。
     /// 调用纪律：start/stop 只在主队列上跑（install()/stop() 里
-    /// 都已排主队列），不在后台队列直接碰 engine；也因此这里用
+    /// 都已排主队列），不在后台队列直接碰 player；也因此这里用
     /// MainActor.assumeIsolated 调全局计数（KeepAlive 是 @MainActor
     /// 类），主队列上必成立。
-    /// start() 返回 Bool：失败不再静默置 false 了事，调用方
-    ///（install()）据此写 lastError，页内可见。
+    /// start() 返回 Bool：文件缺失、建 player 失败、play() 回 false、
+    /// play 后 isPlaying 仍 false 都算失败，调用方（install()）据此
+    /// 写 lastError，页内可见，不再静默。前后台/中断复核只是尽力
+    /// 恢复（失败不写 lastError，下次复核或下次 install() 再起）。
     private final class InstallAudioKeeper {
-        private let engine = AVAudioEngine()
-        private let player = AVAudioPlayerNode()
+        private var player: AVAudioPlayer?
         private var running = false
-        private var interruptionObserver: NSObjectProtocol?
+        private var observers: [NSObjectProtocol] = []
 
         deinit {
-            if let observer = interruptionObserver {
+            for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
             }
         }
@@ -419,50 +430,69 @@ final class LocalHTTPInstallServer: ObservableObject {
                 let session = AVAudioSession.sharedInstance()
                 try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
                 try session.setActive(true)
-                let format = engine.outputNode.inputFormat(forBus: 0)
-                engine.attach(player)
-                engine.connect(player, to: engine.mainMixerNode, format: format)
-                let frames = AVAudioFrameCount(format.sampleRate)
-                guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else {
-                    // 已 attach 但没起：先 detach，免得下次 start() 重复 attach。
-                    engine.detach(player)
+                // 包内置真实静音文件（InstallSilence.wav，2 秒全零 PCM，
+                // 循环无断点）：文件缺失就失败，不静默用合成顶替。
+                guard let url = Bundle.main.url(forResource: "InstallSilence", withExtension: "wav") else {
                     return false
                 }
-                buffer.frameLength = frames
-                try engine.start()
-                player.scheduleBuffer(buffer, at: nil, options: .loops)
-                player.play()
-                running = true
-                // 中断监听：电话/Siri 打断后，中断结束要重起引擎，
-                // 否则安装期静音一断就不再保活（后台挂起 → installd
-                // 连不上）。observer 在 stop()/deinit 时移除。
-                if interruptionObserver == nil {
-                    interruptionObserver = NotificationCenter.default.addObserver(
-                        forName: AVAudioSession.interruptionNotification,
-                        object: session, queue: .main) { [weak self] note in
-                        self?.handleInterruption(note)
-                    }
+                let newPlayer = try AVAudioPlayer(contentsOf: url)
+                newPlayer.numberOfLoops = -1
+                _ = newPlayer.prepareToPlay()
+                // 校验渲染：play() 回 false 或 play 后仍不在播，都算
+                // 失败（v63 合成路子缺的正是这一校验——起了个寂寞，
+                // 调用方还以为保活在跑）。
+                guard newPlayer.play(), newPlayer.isPlaying else {
+                    return false
                 }
+                player = newPlayer
+                running = true
+                // 复核监听：中断结束 + 前后台切换 + 音频路由变化时，
+                // 停了就重起。v63 只有中断监听，且 engine 停摆（路由
+                // 变化、媒体服务重置、其他音频会话干扰）除中断外无人
+                // 重起；这里前后台切换与路由变化也复核——安装期 App
+                // 在后台（用户在系统安装屏），只靠回前台复核不够，
+                // 路由变化必须当场复核。observer 在 stop()/deinit 时
+                // 移除。resumeIfNeeded 是幂等的：已在播就是空操作，
+                // 多触发一次无害。
+                let center = NotificationCenter.default
+                observers.append(center.addObserver(
+                    forName: AVAudioSession.interruptionNotification,
+                    object: session, queue: .main) { [weak self] note in
+                    self?.handleInterruption(note)
+                })
+                observers.append(center.addObserver(
+                    forName: UIApplication.willEnterForegroundNotification,
+                    object: nil, queue: .main) { [weak self] _ in
+                    self?.resumeIfNeeded()
+                })
+                observers.append(center.addObserver(
+                    forName: UIApplication.didBecomeActiveNotification,
+                    object: nil, queue: .main) { [weak self] _ in
+                    self?.resumeIfNeeded()
+                })
+                observers.append(center.addObserver(
+                    forName: AVAudioSession.routeChangeNotification,
+                    object: session, queue: .main) { [weak self] _ in
+                    self?.resumeIfNeeded()
+                })
                 // 先占全局计数：此后全局 holder 停掉也不会释放 session。
                 MainActor.assumeIsolated { KeepAlive.retainAudioSession() }
                 return true
             } catch {
+                player = nil
                 running = false
-                engine.stop()
-                engine.detach(player)
                 return false
             }
         }
 
         func stop() {
             guard running else { return }
-            if let observer = interruptionObserver {
+            for observer in observers {
                 NotificationCenter.default.removeObserver(observer)
-                interruptionObserver = nil
             }
-            player.stop()
-            engine.stop()
-            engine.detach(player)
+            observers = []
+            player?.stop()
+            player = nil
             running = false
             // 计数 -1：归零时全局释放 session；不归零时不动 session，
             // 全局 keepAlive 若在跑不受影响。
@@ -472,8 +502,18 @@ final class LocalHTTPInstallServer: ObservableObject {
             // 一起踩掉；若没在跑，App 挂起时系统自会收回。
         }
 
-        /// 中断结束：engine 可能已停，重起（player 仍在 schedule，
-        /// 没在播就再 play）。中断类型不是 .ended 不管；running
+        /// 播放态复核：在播就不动；停了就重激活 session 再播。
+        /// 尽力恢复：重起失败不抛、不写 lastError（start() 的失败
+        /// 才写），下次复核或下次 install() 再起。
+        private func resumeIfNeeded() {
+            guard running, let current = player else { return }
+            if !current.isPlaying {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                _ = current.play()
+            }
+        }
+
+        /// 中断结束才复核：中断类型不是 .ended 不管；running
         /// 已是 false（停服中）也不管。
         private func handleInterruption(_ note: Notification) {
             guard running else { return }
@@ -481,14 +521,7 @@ final class LocalHTTPInstallServer: ObservableObject {
                   let typeRaw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
                   let type = AVAudioSession.InterruptionType(rawValue: typeRaw),
                   type == .ended else { return }
-            do {
-                if !engine.isRunning { try engine.start() }
-                if !player.isPlaying { player.play() }
-            } catch {
-                // 重起失败不静默吞掉：下次 install() 的 start() 会重新
-                // 建 engine 并把失败写进 lastError；这里 engine 已 attach
-                // 过，重起只是尽力恢复，不断言。
-            }
+            resumeIfNeeded()
         }
     }
 
