@@ -110,10 +110,20 @@ struct FilesTabView: View {
     @State private var detailItem: LocalFileItem?
     /// 系统文件组是否展开（默认折叠，文件页先只看用户文件）。
     @State private var showSystemFiles = false
+    /// 文件页搜索（轻松签文件列表顶部搜索条同款）：按名字过滤当前视图。
+    @State private var fileSearchText = ""
+    /// 当前进的文件夹（相对 Documents 的路径，"" = 根目录）：
+    /// 点文件夹行就进，返回条回上级；删了当前文件夹就回根目录。
+    @State private var currentDir = ""
+    /// 新建文件夹：名字输入（alert 里填）+ 是否弹出。
+    @State private var newFolderName = ""
+    @State private var showNewFolderAlert = false
+    /// 要移动的文件/文件夹（sheet 的 item，nil 就不弹）。
+    @State private var moveItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
     /// 文件页已签名安装：本地回环服务（企业签的包专用，
     /// 不走共用 Engine、不走隧道、不要 WiFi）。
-    @StateObject private var localInstall = LocalHTTPInstallServer()
+    @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
     /// 文件页回环失败后重试用的记录（装时记下）。
     @State private var fileInstallRecord: SignedIPARecord?
     /// 局域网地址点按复制后的短暂「已复制」提示。
@@ -123,6 +133,29 @@ struct FilesTabView: View {
     private var others: [LocalFileItem] { files.filter { !$0.isIPA && !$0.isSystem } }
     private var systemFiles: [LocalFileItem] { files.filter { $0.isSystem } }
     private var totalSize: Int { files.reduce(0) { $0 + $1.size } }
+
+    /// 搜索过滤（当前视图）：名字含查询串就算，不区分大小写。
+    private func matching(_ items: [LocalFileItem]) -> [LocalFileItem] {
+        guard !fileSearchText.isEmpty else { return items }
+        let query = fileSearchText.lowercased()
+        return items.filter { $0.name.lowercased().contains(query) }
+    }
+
+    /// 当前文件夹的直接子项（文件夹 + 文件同一列表，扫描顺序）。
+    private var currentDirItems: [LocalFileItem] {
+        matching(files.filter { $0.relativeDir == currentDir })
+    }
+
+    /// 文件夹的相对路径（进文件夹用）：根目录下的文件夹就是名字，
+    /// 深层的就是“父目录/名字”。
+    private func folderPath(_ item: LocalFileItem) -> String {
+        item.relativeDir.isEmpty ? item.name : "\(item.relativeDir)/\(item.name)"
+    }
+
+    /// 当前文件夹的显示名（返回条用）。
+    private var currentDirName: String {
+        (currentDir as NSString).lastPathComponent
+    }
 
     /// 文件页已签名 IPA 安装：只走本地回环（企业签的包），
     /// 不碰配对/共享「安装」页；记录找得到就用记录，
@@ -146,6 +179,9 @@ struct FilesTabView: View {
     }
 
     /// 文件页回环安装状态：只在文件页内显示，不碰共享「安装」页。
+    /// 以前只在 !isRunning 时显示失败，安装一卡住页内就没有任何
+    /// 按钮能停它——现在 isRunning 时也显示“取消安装”（调 stop()），
+    /// 停掉后 lastError 若有就显示重试（与证书页同一规则）。
     @ViewBuilder
     private var fileInstallStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -154,7 +190,16 @@ struct FilesTabView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            if let error = localInstall.lastError, !localInstall.isRunning {
+            if localInstall.isRunning {
+                HStack(spacing: 8) {
+                    Text(L("安装服务运行中"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L("取消安装")) { localInstall.stop() }
+                        .font(.footnote)
+                }
+            } else if let error = localInstall.lastError {
                 HStack(spacing: 8) {
                     Text(error)
                         .font(.footnote)
@@ -179,16 +224,25 @@ struct FilesTabView: View {
                     if selecting {
                         selectionBar.cascadeItem(2)
                     }
-                    if files.isEmpty {
+                    fileSearchBar
+                    fileActionRow
+                    if !currentDir.isEmpty {
+                        currentDirBar
+                        if currentDirItems.isEmpty {
+                            emptyCard.cascadeItem(2)
+                        } else {
+                            folderSection(items: currentDirItems).cascadeItem(2)
+                        }
+                    } else if files.isEmpty {
                         emptyCard.cascadeItem(2)
                     } else {
-                        if !ipas.isEmpty {
-                            fileSection(title: L("IPA 文件"), items: ipas).cascadeItem(2)
+                        if !matching(ipas).isEmpty {
+                            fileSection(title: L("IPA 文件"), items: matching(ipas)).cascadeItem(2)
                         }
-                        if !others.isEmpty {
-                            fileSection(title: L("其他文件"), items: others).cascadeItem(3)
+                        if !matching(others).isEmpty {
+                            fileSection(title: L("其他文件"), items: matching(others)).cascadeItem(3)
                         }
-                        if !systemFiles.isEmpty {
+                        if !matching(systemFiles).isEmpty {
                             systemSection.cascadeItem(4)
                         }
                     }
@@ -212,11 +266,64 @@ struct FilesTabView: View {
         } message: {
             Text(L("扩展名别改错，不然文件可能打不开。"))
         }
+        .alert(L("新建文件夹"), isPresented: $showNewFolderAlert) {
+            TextField(L("请输入文件夹名字"), text: $newFolderName)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button(L("取消"), role: .cancel) { showNewFolderAlert = false }
+            Button(L("创建")) {
+                showNewFolderAlert = false
+                createFolder()
+            }
+        }
         .sheet(item: $machoItem) { item in
             MachOView(url: item.url, fileName: item.name)
         }
         .sheet(item: $detailItem) { item in
-            FileDetailSheet(item: item)
+            FileDetailSheet(item: item, onDelete: {
+                detailItem = nil
+                delete(item)
+            }, onRename: {
+                detailItem = nil
+                renameText = item.name
+                renameItem = item
+            }, onMove: {
+                detailItem = nil
+                moveItem = item
+            }, onDuplicate: {
+                detailItem = nil
+                duplicate(item)
+            })
+        }
+        .sheet(item: $moveItem) { item in
+            NavigationStack {
+                List {
+                    if moveDestinations(for: item).isEmpty {
+                        Text(L("没有可移动到的文件夹，先新建一个。"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(moveDestinations(for: item), id: \.dir) { dest in
+                        Button {
+                            moveItem = nil
+                            moveItemToFolder(item, dest.dir)
+                        } label: {
+                            HStack {
+                                Image(systemName: dest.dir.isEmpty ? "house" : "folder")
+                                Text(dest.name)
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .navigationTitle(L("移动到"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(L("取消")) { moveItem = nil }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showImporter) {
             FileImporterRepresentableView(
@@ -403,6 +510,87 @@ struct FilesTabView: View {
         }
     }
 
+    /// 文件页顶部搜索条（轻松签文件列表同款浅灰搜索框）：
+    /// 按名字过滤当前视图（根目录各组、或当前文件夹内）。
+    private var fileSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L("搜索"), text: $fileSearchText)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.12))
+        .cornerRadius(8)
+    }
+
+    /// 文件页操作行（轻松签文件列表同款动作入口）：新建文件夹 +
+    /// 手动刷新（平时列表只在进页/操作后重扫，手动刷新兜底）。
+    private var fileActionRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                newFolderName = ""
+                showNewFolderAlert = true
+            } label: {
+                Label(L("新建文件夹"), systemImage: "folder.badge.plus")
+                    .font(.footnote)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button {
+                files = AppFileLibrary.scan()
+                resetCurrentDirIfNeeded()
+            } label: {
+                Label(L("刷新"), systemImage: "arrow.clockwise")
+                    .font(.footnote)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Spacer()
+        }
+    }
+
+    /// 当前文件夹返回条：点回上级（根目录就回文件组）。
+    private var currentDirBar: some View {
+        PanelCard {
+            HStack(spacing: 8) {
+                Button {
+                    currentDir = (currentDir as NSString).deletingLastPathComponent
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text(L("返回"))
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                Text(currentDirName)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Text(L("%d 项", currentDirItems.count))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 当前文件夹内的直接子项（文件夹 + 文件同一列表，轻松签式）：
+    /// 行格式跟根目录 fileRow 一模一样，不另起一套。
+    private func folderSection(items: [LocalFileItem]) -> some View {
+        PanelCard {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(items) { item in
+                    fileRow(item)
+                    if item.id != items.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
     private func fileSection(title: String, items: [LocalFileItem]) -> some View {
         PanelCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -429,6 +617,7 @@ struct FilesTabView: View {
     /// 系统文件组：默认折叠，只露一行标题和个数；点开后和别的
     /// 文件一样看详情、分享、删除。DDI 挂载走自己的路径，不靠
     /// 文件列表找文件，所以收起来不影响 DDI，只是不让它 clutter。
+    /// 搜索时也按名字过滤（跟别的组一样）。
     private var systemSection: some View {
         PanelCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -439,7 +628,7 @@ struct FilesTabView: View {
                         Text(L("系统文件"))
                             .font(.headline)
                         Spacer()
-                        Text("\(systemFiles.count)")
+                        Text("\(matching(systemFiles).count)")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         Image(systemName: showSystemFiles ? "chevron.up" : "chevron.down")
@@ -449,9 +638,9 @@ struct FilesTabView: View {
                 }
                 .buttonStyle(.plain)
                 if showSystemFiles {
-                    ForEach(systemFiles) { item in
+                    ForEach(matching(systemFiles)) { item in
                         fileRow(item)
-                        if item.id != systemFiles.last?.id {
+                        if item.id != matching(systemFiles).last?.id {
                             Divider()
                         }
                     }
@@ -500,6 +689,12 @@ struct FilesTabView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if item.isDirectory {
+                    // 文件夹入口标识：点行就进，ⓘ 仍是详情。
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                        .font(.footnote)
+                }
                 Button {
                     detailItem = item
                 } label: {
@@ -556,16 +751,21 @@ struct FilesTabView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard selecting else { return }
-            if selection.contains(item.id) {
-                selection.remove(item.id)
-            } else {
-                selection.insert(item.id)
+            if selecting {
+                if selection.contains(item.id) {
+                    selection.remove(item.id)
+                } else {
+                    selection.insert(item.id)
+                }
+            } else if item.isDirectory {
+                // 点文件夹行就进文件夹（轻松签文件列表同款入口，
+                // 不藏在详情或长按里）；文件行点着没事（操作在行内按钮）。
+                currentDir = folderPath(item)
             }
         }
         .contextMenu {
             // 文件夹是新增的行：分享/Mach-O/压缩/解压/签名/安装都是
-            // 文件的操作，文件夹只留重命名和删除。
+            // 文件的操作，文件夹是重命名/移动/复制/删除。
             if !item.isDirectory {
                 ShareLink(item: item.url) {
                     Label(L("分享"), systemImage: "square.and.arrow.up")
@@ -581,6 +781,16 @@ struct FilesTabView: View {
                 renameItem = item
             } label: {
                 Label(L("重命名"), systemImage: "pencil")
+            }
+            Button {
+                moveItem = item
+            } label: {
+                Label(L("移动"), systemImage: "folder")
+            }
+            Button {
+                duplicate(item)
+            } label: {
+                Label(L("复制"), systemImage: "doc.on.doc")
             }
             if !item.isDirectory {
                 Button {
@@ -619,6 +829,15 @@ struct FilesTabView: View {
         }
     }
 
+    /// 当前文件夹不存在了就回根目录（删/改名/移走当前文件夹后都调，
+    /// 免得停在一个不存在的目录里）。
+    private func resetCurrentDirIfNeeded() {
+        if !currentDir.isEmpty,
+           !files.contains(where: { $0.isDirectory && folderPath($0) == currentDir }) {
+            currentDir = ""
+        }
+    }
+
     private func delete(_ item: LocalFileItem) {
         if item.isInSignedDir,
            let record = SignedIPAStore.load().first(where: { $0.fileName == item.name }) {
@@ -627,6 +846,89 @@ struct FilesTabView: View {
             try? FileManager.default.removeItem(at: item.url)
         }
         files = AppFileLibrary.scan()
+        resetCurrentDirIfNeeded()
+    }
+
+    /// 在当前目录（根目录或进的文件夹里）新建文件夹（轻松签
+    /// 新建文件夹同款）：重名就拒，不覆盖。
+    private func createFolder() {
+        let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !name.contains("/") else { return }
+        let root = IPALibrary.documentsDir
+        let parent = currentDir.isEmpty ? root : root.appendingPathComponent(currentDir)
+        let dest = parent.appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: dest.path) else {
+            opMessage = L("已有同名文件")
+            opFailed = true
+            return
+        }
+        do {
+            try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: false)
+            files = AppFileLibrary.scan()
+            opMessage = L("已创建文件夹 %@", name)
+            opFailed = false
+        } catch {
+            opMessage = error.localizedDescription
+            opFailed = true
+        }
+    }
+
+    /// 移动的目的地（根目录 + 全部文件夹，排除三类：自己当前所在
+    /// 目录（移了等于没移）、自己、自己的子文件夹（移进去就丢了）。
+    private func moveDestinations(for item: LocalFileItem) -> [(dir: String, name: String)] {
+        var out: [(dir: String, name: String)] = []
+        if !item.relativeDir.isEmpty {
+            out.append(("", L("根目录")))
+        }
+        let selfPath = item.isDirectory ? folderPath(item) : nil
+        for folder in files.filter({ $0.isDirectory }) {
+            let path = folderPath(folder)
+            if path == item.relativeDir { continue }
+            if let selfPath, (path == selfPath || path.hasPrefix(selfPath + "/")) { continue }
+            out.append((path, path))
+        }
+        return out
+    }
+
+    /// 把文件/文件夹移到目标目录（轻松签移动文件同款）：同名就拒，
+    /// 移完重扫 + 当前目录复位；已签名 IPA 移出 Signed 目录时，
+    /// 清单下次 load 会自动滤掉无文件记录，不用这里手动删。
+    private func moveItemToFolder(_ item: LocalFileItem, _ destDir: String) {
+        let root = IPALibrary.documentsDir
+        let parent = destDir.isEmpty ? root : root.appendingPathComponent(destDir)
+        let dest = parent.appendingPathComponent(item.name)
+        guard !FileManager.default.fileExists(atPath: dest.path) else {
+            opMessage = L("目标文件夹里已有同名文件")
+            opFailed = true
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: item.url, to: dest)
+            files = AppFileLibrary.scan()
+            resetCurrentDirIfNeeded()
+            opMessage = L("已移动到 %@", destDir.isEmpty ? L("根目录") : destDir)
+            opFailed = false
+        } catch {
+            opMessage = error.localizedDescription
+            opFailed = true
+        }
+    }
+
+    /// 复制文件/文件夹（轻松签复制同款）：同目录下起不重名的新名字，
+    /// 文件夹整目录拷；已签名 IPA 的副本只是文件，不自动进已签名
+    /// 清单（清单是记录制，跟手动拷进 Signed 目录同例）。
+    private func duplicate(_ item: LocalFileItem) {
+        let stem = item.url.deletingPathExtension().lastPathComponent
+        let dest = uniqueSibling(of: item, stem: stem, ext: item.url.pathExtension)
+        do {
+            try FileManager.default.copyItem(at: item.url, to: dest)
+            files = AppFileLibrary.scan()
+            opMessage = L("已复制为 %@", dest.lastPathComponent)
+            opFailed = false
+        } catch {
+            opMessage = error.localizedDescription
+            opFailed = true
+        }
     }
 
     private func deleteSelection() {
@@ -668,6 +970,7 @@ struct FilesTabView: View {
                 SignedIPAStore.renameFile(from: item.name, to: newName)
             }
             files = AppFileLibrary.scan()
+            resetCurrentDirIfNeeded()
             opMessage = L("已改名")
             opFailed = false
         } catch {
@@ -739,10 +1042,16 @@ struct FilesTabView: View {
     }
 }
 
-/// 文件详情（轻松签文件列表右边的 ⓘ）：名字、大小、修改时间、路径。
+/// 文件详情（轻松签文件列表右边的 ⓘ）：名字、大小、修改时间、路径，
+/// 下面是操作（分享只对文件，文件夹是重命名/移动/复制/删除，
+/// 跟行内菜单同例）。
 /// 文件夹没有字节大小可言，大小那行显示“共 n 项”。
 private struct FileDetailSheet: View {
     let item: LocalFileItem
+    var onDelete: () -> Void
+    var onRename: () -> Void
+    var onMove: () -> Void
+    var onDuplicate: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -754,6 +1063,33 @@ private struct FileDetailSheet: View {
                           : ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))
                 detailRow(L("修改时间"), item.modified?.formatted(date: .abbreviated, time: .standard) ?? L("未知"))
                 detailRow(L("路径"), item.url.path)
+                Section {
+                    if !item.isDirectory {
+                        ShareLink(item: item.url) {
+                            Label(L("分享"), systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    Button {
+                        onRename()
+                    } label: {
+                        Label(L("重命名"), systemImage: "pencil")
+                    }
+                    Button {
+                        onMove()
+                    } label: {
+                        Label(L("移动"), systemImage: "folder")
+                    }
+                    Button {
+                        onDuplicate()
+                    } label: {
+                        Label(L("复制"), systemImage: "doc.on.doc")
+                    }
+                    Button(role: .destructive) {
+                        onDelete()
+                    } label: {
+                        Label(L("删除"), systemImage: "trash")
+                    }
+                }
             }
             .navigationTitle(L("详情"))
             .navigationBarTitleDisplayMode(.inline)

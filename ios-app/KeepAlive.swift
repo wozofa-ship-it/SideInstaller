@@ -51,6 +51,19 @@ final class KeepAlive: NSObject {
         if Self.audioHolders == 0 { Self.releaseSession() }
     }
 
+    /// 外部静音音频（安装期的 InstallAudioKeeper）持有 session 的计数：
+    /// 只动计数、不启动全局 engine；调用方须成对调用（start 成功时
+    /// retain、stop 时 release）。归零时才释放 session，避免全局
+    /// 最后一个 holder 停掉时误杀正在跑的安装音频。
+    static func retainAudioSession() {
+        audioHolders += 1
+    }
+
+    static func releaseAudioSession() {
+        audioHolders -= 1
+        if audioHolders == 0 { releaseSession() }
+    }
+
     /// Deactivates the session and puts it back in a category that Silent
     /// Mode mutes: `.playback` would let `SoundEffects` play through it.
     private static func releaseSession() {

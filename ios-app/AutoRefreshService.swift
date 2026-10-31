@@ -11,7 +11,10 @@ final class AutoRefreshService {
     static let shared = AutoRefreshService()
 
     /// 设置页开关的 UserDefaults 键（SettingsView 的 @AppStorage 用同一键）。
-    static let enabledKey = "SIDAutoRefreshEnabled"
+    /// nonisolated：常量字符串，不碰任何 actor 状态，BG 任务的非隔离
+    /// 上下文（SIDAutoRefresh.isEnabled）读它才不会在 Swift 6 模式下
+    /// 报错；原来是 warning（Engine.swift:4104），Swift 6 下会变 error。
+    nonisolated static let enabledKey = "SIDAutoRefreshEnabled"
     private static let lastRoundKey = "SIDAutoRefreshLastRound"
     private static let lastAlertKey = "SIDAutoRefreshLastAlert"
 

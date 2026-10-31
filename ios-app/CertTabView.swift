@@ -1,3 +1,4 @@
+import Darwin
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -66,7 +67,7 @@ struct CertTabView: View {
 
     // 企业独立安装：本地回环服务（不走共用 Engine）。
     // 回环失败后重试用的记录，就是这次要装的包。
-    @StateObject private var localInstall = LocalHTTPInstallServer()
+    @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
     @State private var localFallbackRecord: SignedIPARecord?
 
     // 应用库
@@ -78,6 +79,14 @@ struct CertTabView: View {
     @State private var unsignedInfo: [String: IPALibrary.AppInfo] = [:]
     /// 已经试过的路径（含解析失败），避免重复读盘。
     @State private var unsignedInfoTried: Set<String> = []
+    /// 应用库图标缓存（路径 → IPA 里取的真实图标，大圆角显示）。
+    /// 已尝试集合存“路径#指纹”（大小 + 修改时间），文件变了
+    /// （重签覆盖、删了重导同名）就换 key 重取，不沿用旧图。
+    /// 加载是行内 .task 触发（只取可见行），不在列表刷新时批量跑。
+    @State private var unsignedIcons: [String: UIImage] = [:]
+    @State private var unsignedIconsTried: Set<String> = []
+    @State private var signedIcons: [String: UIImage] = [:]
+    @State private var signedIconsTried: Set<String> = []
     @State private var signedRecords = SignedIPAStore.load()
     @State private var selectingSigned = false
     @State private var selectedSignedIDs: Set<String> = []
@@ -216,14 +225,30 @@ struct CertTabView: View {
                         }
                         .font(.footnote)
                     }
-                    // 轻松签式设备提示：描述文件限定了设备台数时提醒。
-                    // 本机 UDID 公开 API 拿不到，只能提示“限定了设备”，
-                    // 不能断言本机在不在列表里（企业证书通常不限设备，
-                    // 这一行也就不出现）。
+                    // 轻松签式设备提示：描述文件限定了设备时，拿本机 UDID
+                    //（MGCopyAnswer，轻松签同款办法）跟列表比对，能断言
+                    // 就断言；读不到 UDID 或列表为空才回落到只提示台数。
+                    // 企业证书通常不限设备，这一行也就不出现。
                     if info.provisionedDeviceCount > 0 {
-                        Text(L("描述文件限定了设备（共 %d 台）：如果是开发证书且本机不在列表里，签名后装不上；企业证书通常不限设备。", info.provisionedDeviceCount))
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
+                        if let udid = Self.localDeviceUDID, !info.provisionedDevices.isEmpty {
+                            if info.provisionedDevices.contains(udid) {
+                                Text(L("本机在描述文件设备列表里，签名后能装。"))
+                                    .font(.footnote)
+                                    .foregroundStyle(.green)
+                            } else {
+                                Text(L("此签名证书不包含当前设备，签名后无法在当前设备安装！！！"))
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
+                            Text(udid)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        } else {
+                            Text(L("描述文件限定了设备（共 %d 台）：如果是开发证书且本机不在列表里，签名后装不上；企业证书通常不限设备。", info.provisionedDeviceCount))
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
                 if let cert = certInfo, !cert.name.isEmpty {
@@ -949,6 +974,16 @@ struct CertTabView: View {
         pendingSignMods = CertSignMods()
     }
 
+    /// 签名失败文案：p12 打不开基本就是密码不对（Rust 侧原话就是
+    /// “a wrong password reads the same”），按轻松签原文给中文提示，
+    /// 其他错误原样透传；日志和界面用同一句，不两张皮。
+    private func friendlySignError(_ message: String) -> String {
+        if message.contains("PKCS#12") {
+            return L("密码错误，请重新输入")
+        }
+        return message
+    }
+
     private func executeSign(kind: CertSignKind, url: URL, mods: CertSignMods) {
         signBusy = true
         switch kind {
@@ -996,11 +1031,12 @@ struct CertTabView: View {
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
                         ?? String(describing: error)
-                    signOnlyMessage = message
+                    let friendly = friendlySignError(message)
+                    signOnlyMessage = friendly
                     signOnlyFailed = true
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
-                        kind: .signOnly, success: false, detail: message))
+                        kind: .signOnly, success: false, detail: friendly))
                 }
                 logEntries = CertSignLogStore.load()
                 signBusy = false
@@ -1024,11 +1060,12 @@ struct CertTabView: View {
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
                         ?? String(describing: error)
-                    signOnlyMessage = message
+                    let friendly = friendlySignError(message)
+                    signOnlyMessage = friendly
                     signOnlyFailed = true
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
-                        kind: .signAndInstall, success: false, detail: message))
+                        kind: .signAndInstall, success: false, detail: friendly))
                 }
                 logEntries = CertSignLogStore.load()
                 signBusy = false
@@ -1144,7 +1181,7 @@ struct CertTabView: View {
                         batchingUnsigned.toggle()
                         if !batchingUnsigned { selectedUnsignedIDs.removeAll() }
                     } label: {
-                        Text(batchingUnsigned ? L("完成") : L("批量"))
+                        Text(batchingUnsigned ? L("完成") : L("选择"))
                             .font(.footnote)
                     }
                     .disabled(batchBusy)
@@ -1239,20 +1276,26 @@ struct CertTabView: View {
                     selectedUnsignedIDs.insert(item.id)
                 }
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: selectedUnsignedIDs.contains(item.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selectedUnsignedIDs.contains(item.id) ? Color.accentColor : Color.secondary)
+                    libraryIcon(for: item.url.path, signed: false)
                     unsignedRowTexts(item)
                 }
             }
             .buttonStyle(.plain)
+            .task(id: "\(item.url.path)#\(iconFingerprint(for: item.url.path))") { loadLibraryIcon(for: item.url.path, signed: false) }
         } else {
             Button {
                 select(item.url)
             } label: {
-                unsignedRowTexts(item)
+                HStack(spacing: 10) {
+                    libraryIcon(for: item.url.path, signed: false)
+                    unsignedRowTexts(item)
+                }
             }
             .buttonStyle(.plain)
+            .task(id: "\(item.url.path)#\(iconFingerprint(for: item.url.path))") { loadLibraryIcon(for: item.url.path, signed: false) }
         }
     }
 
@@ -1434,11 +1477,87 @@ struct CertTabView: View {
         }
     }
 
-    /// 企业安装失败提示 + 回环重试：只在企业页内显示，
-    /// 不弹配对兜底、不碰共享「安装」页。
+    /// 应用库行图标：IPA 里取的真实图标（大圆角 52pt）；还没取到或
+    /// 取不到时显示中性灰圆角方块（不是假 App 图，只占位）。
+    @ViewBuilder
+    private func libraryIcon(for path: String, signed: Bool) -> some View {
+        if let image = signed ? signedIcons[path] : unsignedIcons[path] {
+            Image(uiImage: image)
+                .resizable()
+                .frame(width: 52, height: 52)
+                .cornerRadius(13)
+        } else {
+            RoundedRectangle(cornerRadius: 13)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(width: 52, height: 52)
+        }
+    }
+
+    /// 行内图标加载（只取可见行，行 .task 触发）：key 已尝试直接跳过
+    /// （含取失败，不重复解包）；文件变了 key 就变，先清旧图再取，
+    /// 不让旧图标冒充新文件。解包只取图标文件，不整包解压。
+    private func loadLibraryIcon(for path: String, signed: Bool) {
+        let key = "\(path)#\(iconFingerprint(for: path))"
+        if signed {
+            guard !signedIconsTried.contains(key) else { return }
+            signedIconsTried.insert(key)
+            signedIcons[path] = nil
+        } else {
+            guard !unsignedIconsTried.contains(key) else { return }
+            unsignedIconsTried.insert(key)
+            unsignedIcons[path] = nil
+        }
+        let url = URL(fileURLWithPath: path)
+        Task.detached(priority: .userInitiated) {
+            guard let data = IPALibrary.iconData(at: url),
+                  let image = UIImage(data: data) else { return }
+            await MainActor.run {
+                if signed { self.signedIcons[path] = image }
+                else { self.unsignedIcons[path] = image }
+            }
+        }
+    }
+
+    /// 图标指纹：文件大小 + 修改时间（重签覆盖同路径时变）。
+    /// 文件没了就返回空串，key 照样唯一，不会死循环重取。
+    private func iconFingerprint(for path: String) -> String {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? Int,
+              let modified = attrs[.modificationDate] as? Date else { return "" }
+        return "\(size)-\(modified.timeIntervalSince1970)"
+    }
+
+    /// 本机 UDID（轻松签同款办法：MobileGestalt 的 MGCopyAnswer，
+    /// ESign 二进制里实证有 libMobileGestalt + MGCopyAnswer）。
+    /// dlsym 运行时找，找不到或被系统 gate 住返回空就得 nil，
+    /// 证书页回落到只提示台数，不崩、不假断言。UDID 在设备上
+    /// 不变，进程内只算一次。Side 是侧载包，不走 App Store
+    /// 审核，调私有 API 不会被拒。
+    private static let localDeviceUDID: String? = {
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "MGCopyAnswer") else { return nil }
+        typealias MGCopyAnswerFn = @convention(c) (CFStringRef) -> Unmanaged<AnyObject>?
+        let fn = unsafeBitCast(sym, to: MGCopyAnswerFn.self)
+        guard let value = fn("UniqueDeviceID" as CFString)?.takeRetainedValue() else { return nil }
+        return value as? String
+    }()
+
+    /// 企业安装失败提示 + 回环重试/取消：只在企业页内显示，
+    /// 不弹配对兜底、不碰共享「安装」页。以前只在 !isRunning 时
+    /// 显示，安装一卡住（isRunning 永真、lastError 仍 nil）页内
+    /// 就没有任何按钮能停它、能重试——现在 isRunning 时也显示
+    /// “取消安装”（调 stop()），停掉后 lastError 若有就显示重试。
     @ViewBuilder
     private var enterpriseInstallError: some View {
-        if let error = localInstall.lastError, !localInstall.isRunning {
+        if localInstall.isRunning {
+            HStack(spacing: 8) {
+                Text(L("安装服务运行中"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(L("取消安装")) { localInstall.stop() }
+                    .font(.footnote)
+            }
+        } else if let error = localInstall.lastError {
             HStack(spacing: 8) {
                 Text(error)
                     .font(.footnote)
@@ -1518,39 +1637,49 @@ struct CertTabView: View {
     }
 
     private func signedRow(_ record: SignedIPARecord) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        let iconPath = SignedIPAStore.url(for: record).path
+        return VStack(alignment: .leading, spacing: 6) {
+            // 点行直装（轻松签已签名行同款）；选择模式下点行改选。
+            Button {
                 if selectingSigned {
-                    Button {
-                        if selectedSignedIDs.contains(record.id) {
-                            selectedSignedIDs.remove(record.id)
-                        } else {
-                            selectedSignedIDs.insert(record.id)
-                        }
-                    } label: {
+                    if selectedSignedIDs.contains(record.id) {
+                        selectedSignedIDs.remove(record.id)
+                    } else {
+                        selectedSignedIDs.insert(record.id)
+                    }
+                } else {
+                    installSigned(record)
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if selectingSigned {
                         Image(systemName: selectedSignedIDs.contains(record.id)
                               ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(selectedSignedIDs.contains(record.id) ? Color.accentColor : Color.secondary)
                     }
-                    .buttonStyle(.plain)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(record.appName)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(1)
-                    Text(signedSecondLine(record))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if let certLine = signedCertLine(record) {
-                        Text(certLine)
+                    libraryIcon(for: iconPath, signed: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(record.appName)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(signedSecondLine(record))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(record.fileName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(signedMetaLine(record))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    Spacer()
                 }
-                Spacer()
             }
+            .buttonStyle(.plain)
+            .task(id: "\(iconPath)#\(iconFingerprint(for: iconPath))") { loadLibraryIcon(for: iconPath, signed: true) }
             if !selectingSigned {
                 HStack(spacing: 14) {
                     Button {
@@ -1588,16 +1717,32 @@ struct CertTabView: View {
         }
     }
 
-    /// 轻松签已签名行第二行：v版本 - 签名时间:yyyy-MM-dd HH:mm:ss。
+    /// 已签名行第二行（轻松签应用库同款）：V版本 | 大小 | Bundle ID；
+    /// 版本缺了就省掉 V 那段（跟未签名行同例）。
     private func signedSecondLine(_ record: SignedIPARecord) -> String {
-        let time = Self.esignDateFormatter.string(from: record.date)
+        let size = ByteCountFormatter.string(fromByteCount: Int64(record.size), countStyle: .file)
+        var parts: [String] = []
         if let version = record.version, !version.isEmpty {
-            return L("v%@ - 签名时间:%@", version, time)
+            parts.append("V\(version)")
+        }
+        parts.append(size)
+        if !record.bundleID.isEmpty {
+            parts.append(record.bundleID)
+        }
+        return parts.joined(separator: " | ")
+    }
+
+    /// 已签名行第四行：签名时间 + 证书（Side 原有信息挪到这里，
+    /// 前三行按轻松签格式来，签名时间/证书不丢）。
+    private func signedMetaLine(_ record: SignedIPARecord) -> String {
+        let time = Self.esignDateFormatter.string(from: record.date)
+        if let certLine = signedCertLine(record) {
+            return L("签名时间:%@ · %@", time, certLine)
         }
         return L("签名时间:%@", time)
     }
 
-    /// 轻松签已签名行第三行：iPhone Distribution: 证书名 (团队ID)。
+    /// 已签名行第四行里的证书部分：iPhone Distribution: 证书名 (团队ID)。
     /// 老记录没这两个字段就不显示这一行；团队 ID 没有就只显示证书名。
     private func signedCertLine(_ record: SignedIPARecord) -> String? {
         guard let certName = record.certName, !certName.isEmpty else { return nil }

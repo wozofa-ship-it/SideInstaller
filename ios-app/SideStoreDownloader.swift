@@ -1686,6 +1686,93 @@ extension IPALibrary {
                        minOS: dict["MinimumOSVersion"] as? String)
     }
 
+    /// The .app's icon PNG bytes, or nil. Reads only the central directory
+    /// + the one icon entry (no full unpack, same mechanism as appInfo).
+    /// Prefers the highest-resolution CFBundleIconFiles entry (@3x, then
+    /// @2x, then base); falls back to the largest AppIcon/Icon PNG in the
+    /// .app root. IPAs whose icons live only in Assets.car (no loose PNG)
+    /// return nil — the caller shows a neutral square for those, not a
+    /// fake app icon. Verified on real IPAs: Side's own IPA and ESign
+    /// 5.0.0 both carry loose AppIcon60x60@2x.png in the .app root.
+    static func iconData(at url: URL) -> Data? {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int,
+              size > 22,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let directory = centralDirectory(handle, fileSize: size),
+              let plistEntry = mainInfoPlist(in: directory) else { return nil }
+        let parts = plistEntry.name.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0] == "Payload", parts[1].hasSuffix(".app") else { return nil }
+        let appPrefix = "Payload/\(parts[1])/"
+        var iconBases: [String] = []
+        if let raw = contents(of: plistEntry, handle),
+           let plist = try? PropertyListSerialization.propertyList(from: raw, format: nil),
+           let dict = plist as? [String: Any] {
+            if let icons = dict["CFBundleIcons"] as? [String: Any],
+               let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+               let files = primary["CFBundleIconFiles"] as? [String] {
+                iconBases = files
+            }
+            if iconBases.isEmpty,
+               let single = dict["CFBundleIconFile"] as? String, !single.isEmpty {
+                iconBases = [single]
+            }
+        }
+        // 同名条目只留第一个：Dictionary(uniqueKeysWithValues:) 遇到
+        // 重复名会直接 trap，坏包/畸形包不能因此闪退。
+        var byPath: [String: ZipEntry] = [:]
+        byPath.reserveCapacity(directory.count)
+        for entry in directory where byPath[entry.name] == nil {
+            byPath[entry.name] = entry
+        }
+        // CFBundleIconFiles entries are base names without suffix
+        // (e.g. "AppIcon60x60"); the files are base@3x/@2x/.png.
+        // If a base already carries @2x/@3x, try it exact first.
+        var candidates: [String] = []
+        for base in iconBases {
+            let stem = (base as NSString).deletingPathExtension
+            if stem.hasSuffix("@2x") || stem.hasSuffix("@3x") {
+                candidates.append("\(appPrefix)\(stem).png")
+                let plain = stem.replacingOccurrences(of: "@2x", with: "").replacingOccurrences(of: "@3x", with: "")
+                candidates.append("\(appPrefix)\(plain)@3x.png")
+                candidates.append("\(appPrefix)\(plain)@2x.png")
+                candidates.append("\(appPrefix)\(plain).png")
+            } else {
+                candidates.append("\(appPrefix)\(stem)@3x.png")
+                candidates.append("\(appPrefix)\(stem)@2x.png")
+                candidates.append("\(appPrefix)\(stem).png")
+            }
+        }
+        for path in candidates {
+            if let entry = byPath[path], let data = contents(of: entry, handle) {
+                return data
+            }
+        }
+        // Fallback: largest AppIcon/Icon PNG in the .app root.
+        let fallbacks = directory.filter { entry in
+            guard entry.name.hasPrefix(appPrefix) else { return false }
+            let rest = entry.name.dropFirst(appPrefix.count)
+            guard !rest.contains("/"), rest.lowercased().hasSuffix(".png") else { return false }
+            let lower = rest.lowercased()
+            return lower.hasPrefix("appicon") || lower.hasPrefix("icon")
+        }.sorted { a, b in
+            func rank(_ name: String) -> Int {
+                if name.contains("@3x") { return 3 }
+                if name.contains("@2x") { return 2 }
+                return 1
+            }
+            let ra = rank(a.name), rb = rank(b.name)
+            if ra != rb { return ra > rb }
+            return a.uncompressedSize > b.uncompressedSize
+        }
+        for entry in fallbacks {
+            if let data = contents(of: entry, handle) {
+                return data
+            }
+        }
+        return nil
+    }
+
     /// One file inside an IPA, for copying it out without unpacking the rest.
     struct ArchiveFile {
         /// Path inside the archive, e.g. "Payload/SideStore.app/Assets.car".

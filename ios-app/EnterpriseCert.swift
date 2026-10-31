@@ -113,9 +113,12 @@ enum EnterpriseCertStore {
         let uuid: String
         /// ProvisionedDevices 数组长度：企业描述文件通常没有这一项
         ///（0 = 不限设备）；开发/AdHoc 描述文件有，长度就是限定台数。
-        /// 本机 UDID 在公开 API 里拿不到，所以证书页只能提示“限定了
-        /// 设备”，不能像轻松签那样断言本机在不在列表里（见证书页）。
+        /// ProvisionedDevices 数组本身：证书页拿它跟本机 UDID 比对，
+        /// 断言本机在不在列表里（轻松签同款）；本机 UDID 用
+        /// MobileGestalt 的 MGCopyAnswer 读（轻松签二进制实证同款
+        /// 办法），读不到就回落到只提示台数，不假断言。
         let provisionedDeviceCount: Int
+        let provisionedDevices: [String]
     }
 
     static var provisionInfo: ProvisionInfo? {
@@ -130,7 +133,8 @@ enum EnterpriseCertStore {
                              teamID: (dict["TeamIdentifier"] as? [String])?.first ?? "",
                              expiration: dict["ExpirationDate"] as? Date,
                              uuid: dict["UUID"] as? String ?? "",
-                             provisionedDeviceCount: (dict["ProvisionedDevices"] as? [String])?.count ?? 0)
+                             provisionedDeviceCount: (dict["ProvisionedDevices"] as? [String])?.count ?? 0,
+                             provisionedDevices: dict["ProvisionedDevices"] as? [String] ?? [])
     }
 
     /// 删除已导入的证书材料（证书页的「移除证书」）。
