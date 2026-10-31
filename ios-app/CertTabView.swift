@@ -66,6 +66,9 @@ struct CertTabView: View {
     // 轻松签式“签名后立即安装”开关：开 = 开始签名后直接装，
     // 关 = 开始签名只签存已签名；“仅签名”按钮仍在下面。
     @AppStorage("CZFEnterpriseInstallWhenSign") private var installWhenSign = true
+    // 轻松签式“更多设置”展开态：默认收起，点底部大蓝按钮展开
+    // 预设/插件注入/多开/仅签名（功能全在，不砍，只是收起来）。
+    @State private var showMoreSettings = false
     // 选中 IPA 的脱壳预检结果（nil = 还没算出来）：加密的在表单上
     // 直接提示；真正签的时候 startSign 还会再算一次 gate。
     @State private var selectedCryptid: Int?
@@ -580,104 +583,219 @@ struct CertTabView: View {
 
     // MARK: 签名与修改
 
+    /// 轻松签签名页式分组：标题是卡片上面一行小灰字，内容在卡片里
+    ///（PanelCard 的 content 本来就是 @ViewBuilder，组内多行、单行
+    /// 都行，不触发普通函数多类型分支问题）。
+    private func signGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            PanelCard {
+                content()
+            }
+        }
+    }
+
+    /// “选择证书”行显示的当前证书：证书名 + 团队 ID（轻松签签名页
+    /// 同款格式）；都没导入就明说去证书页导入，点行切到证书段。
+    private var certRowText: String {
+        if let name = certInfo?.name, !name.isEmpty {
+            if let teamID = provisionInfo?.teamID, !teamID.isEmpty {
+                return "\(name) (\(teamID))"
+            }
+            return name
+        }
+        if let name = provisionInfo?.name, !name.isEmpty {
+            return name
+        }
+        return L("未导入，去证书页导入")
+    }
+
+    /// “打包文件名”行显示的输出名：跟 signToFile 同例，源文件主名
+    /// +“-已签.ipa”（改名只改包内名字，不改输出文件名；重名时
+    /// 签名那一刻自动加序号，见 uniqueOutputURL）。
+    private var predictedOutputName: String {
+        guard let url = selectedIPA else { return "" }
+        return "\(url.deletingPathExtension().lastPathComponent)-已签.ipa"
+    }
+
+    /// 签名段：轻松签签名页式分组列表（v68 UI）。分组标题 + 行：
+    /// App 名字 / Bundle Identifier / 版本号 / 最低系统版本 /
+    /// 新图标 / 签名后立即安装（开关行）/ 选择证书 / 打包文件名；
+    /// 底部两个通栏大按钮：大红“立即签名”、大蓝“更多设置”。
+    /// 功能一个不少，只是换版式：框里还是原值、改了才生效；
+    /// 预设/插件注入/多开/仅签名收进“更多设置”里，点蓝按钮展开。
+    /// 步骤进度/诊断日志/安装状态/提示文案位置跟原来一样，在按钮下面。
     private var signCard: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "signature")
-                        .foregroundStyle(.secondary)
-                    Text(L("签名 IPA"))
-                        .font(.headline)
-                }
-                // 导入失败明说（源导入/文件库选择的文件找不到了时）：
-                // 段内绝不静默空白——有错就露出来，进口按钮就在下面。
-                if let signError {
-                    Text(signError)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                if let url = selectedIPA {
+        VStack(alignment: .leading, spacing: 16) {
+            // 导入失败明说（源导入/文件库选择的文件找不到了时）：
+            // 段内绝不静默空白——有错就露出来，进口按钮就在下面。
+            if let signError {
+                Text(signError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+            if let url = selectedIPA {
+                PanelCard {
                     selectedIPASummary(url)
-                    Divider()
-                    Text(L("修改（框里是原值，改了才生效）"))
-                        .font(.subheadline.weight(.semibold))
-                    modField(L("名称"), text: $mods.name,
-                             placeholder: selectedInfo?.name ?? "")
-                    modField(L("Bundle ID"), text: $mods.bundleID,
-                             placeholder: selectedInfo?.bundleID ?? "")
-                    modField(L("版本号"), text: $mods.version,
-                             placeholder: selectedInfo?.version ?? "")
-                    modField(L("最低系统版本"), text: $mods.minOS,
-                             placeholder: "如 15.0")
+                }
+                signGroup(title: L("App 名字")) {
+                    TextField(selectedInfo?.name ?? "", text: $mods.name)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                signGroup(title: L("Bundle Identifier")) {
+                    TextField(selectedInfo?.bundleID ?? "", text: $mods.bundleID)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                signGroup(title: L("版本号")) {
+                    TextField(selectedInfo?.version ?? "", text: $mods.version)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                signGroup(title: L("最低系统版本")) {
+                    TextField("如 15.0", text: $mods.minOS)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                signGroup(title: L("新图标")) {
                     iconRow
-                    presetSection
-                    pluginSection
-                    multiOpenSection
-                    Divider()
-                    // 轻松签式脱壳提示：选好 IPA 就预检，加密的直接在
-                    // 表单上提示（签时 startSign 还会再算一次 gate）。
-                    if let cryptid = selectedCryptid, cryptid != 0 {
-                        Text(L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。"))
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                    // 轻松签式：一个“开始签名” + “签名后立即安装”开关
-                    //（开 = 签完直接装，关 = 只签存已签名）；下面“仅签名”
-                    // 按钮仍在，两个去向都是一键直达。
+                }
+                signGroup(title: L("签名后立即安装")) {
+                    // 开 = 签完直接走配对安装，关 = 只签存已签名；
+                    // 跟原来 Toggle 同例，只是挪进分组行里。
                     Toggle(L("签名后立即安装"), isOn: $installWhenSign)
-                        .font(.footnote)
+                }
+                signGroup(title: L("选择证书")) {
                     Button {
-                        startSign(kind: installWhenSign ? .signAndInstall : .signOnly)
+                        certPage = .certificate
                     } label: {
                         HStack {
-                            if signBusy { ProgressView() }
-                            Text(L("开始签名"))
+                            Text(certRowText)
+                                .lineLimit(1)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote)
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(signBusy || engine.isRunning || !certReady)
-                    Button {
-                        startSign(kind: .signOnly)
-                    } label: {
-                        HStack {
-                            if signBusy { ProgressView() }
-                            Text(L("仅签名（存到已签名）"))
-                        }
-                        .frame(maxWidth: .infinity)
+                    .buttonStyle(.plain)
+                }
+                signGroup(title: L("打包文件名")) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(predictedOutputName)
+                            .lineLimit(1)
+                        Text(L("重名自动加序号"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(signBusy || engine.isRunning || !certReady)
-                    enterpriseInstallStatus
-                    enterpriseStepProgress
-                    installDiagnosticLogSection
-                    if let signOnlyMessage {
-                        Text(signOnlyMessage)
-                            .font(.footnote)
-                            .foregroundStyle(signOnlyFailed ? .red : .green)
-                    }
-                    if !certReady {
-                        Text(L("先去「证书」页把证书、描述文件和密码备齐。"))
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                } else {
-                    Text(L("选一个 IPA，可以先改名称、Bundle ID、版本、最低系统版本和图标，再用企业证书签名。"))
+                }
+                // 轻松签式脱壳提示：选好 IPA 就预检，加密的直接在
+                // 表单上提示（签时 startSign 还会再算一次 gate）。
+                if let cryptid = selectedCryptid, cryptid != 0 {
+                    Text(L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。"))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        Button {
-                            showIPAPicker = true
-                        } label: {
-                            Text(L("从文件导入"))
-                        }
-                        Button {
-                            showLibraryPicker = true
-                        } label: {
-                            Text(L("从文件库选择"))
+                        .foregroundStyle(.orange)
+                }
+                // 底部两个通栏大按钮（轻松签签名页同款）：大红立即签名
+                //（走开关：开 = 签名并安装，关 = 仅签名），大蓝更多设置
+                //（展开预设/插件/多开/仅签名）。禁用时半透明，免得看着
+                // 能点实际点不了（plain 样式本身不做禁用变灰）。
+                Button {
+                    startSign(kind: installWhenSign ? .signAndInstall : .signOnly)
+                } label: {
+                    HStack {
+                        if signBusy { ProgressView().tint(.white) }
+                        Text(L("立即签名"))
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.plain)
+                .background(Color.red)
+                .foregroundStyle(.white)
+                .cornerRadius(12)
+                .opacity(signBusy || engine.isRunning || !certReady ? 0.5 : 1)
+                .disabled(signBusy || engine.isRunning || !certReady)
+                Button {
+                    showMoreSettings.toggle()
+                } label: {
+                    HStack {
+                        Text(L("更多设置"))
+                            .font(.headline)
+                        Image(systemName: showMoreSettings ? "chevron.up" : "chevron.down")
+                            .font(.footnote)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                }
+                .buttonStyle(.plain)
+                .background(Color.blue)
+                .foregroundStyle(.white)
+                .cornerRadius(12)
+                if showMoreSettings {
+                    PanelCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            presetSection
+                            Divider()
+                            pluginSection
+                            Divider()
+                            multiOpenSection
+                            Divider()
+                            Button {
+                                startSign(kind: .signOnly)
+                            } label: {
+                                HStack {
+                                    if signBusy { ProgressView() }
+                                    Text(L("仅签名（存到已签名）"))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(signBusy || engine.isRunning || !certReady)
                         }
                     }
-                    .buttonStyle(.bordered)
+                }
+                enterpriseInstallStatus
+                enterpriseStepProgress
+                installDiagnosticLogSection
+                if let signOnlyMessage {
+                    Text(signOnlyMessage)
+                        .font(.footnote)
+                        .foregroundStyle(signOnlyFailed ? .red : .green)
+                }
+                if !certReady {
+                    Text(L("先去「证书」页把证书、描述文件和密码备齐。"))
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
+            } else {
+                PanelCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(L("选一个 IPA，可以先改名称、Bundle ID、版本、最低系统版本和图标，再用企业证书签名。"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            Button {
+                                showIPAPicker = true
+                            } label: {
+                                Text(L("从文件导入"))
+                            }
+                            Button {
+                                showLibraryPicker = true
+                            } label: {
+                                Text(L("从文件库选择"))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
             }
         }
@@ -920,24 +1038,10 @@ struct CertTabView: View {
         }
     }
 
-    private func modField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .font(.footnote)
-                .frame(width: 92, alignment: .leading)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .font(.footnote)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-        }
-    }
-
+    /// 新图标行（分组里用，标题已在组上面，不再另起 92 宽标签）：
+    /// 没选显示相册选择，选了显示 40 图 + 清除。
     private var iconRow: some View {
         HStack(spacing: 10) {
-            Text(L("新图标"))
-                .font(.footnote)
-                .frame(width: 92, alignment: .leading)
             if let icon = mods.icon, let image = UIImage(data: icon) {
                 Image(uiImage: image)
                     .resizable()

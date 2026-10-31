@@ -85,10 +85,14 @@ enum AppFileLibrary {
 /// 文件页：管理 App 沙盒 Documents 里的文件——导入、分享、删除，
 /// IPA 可以直接去企业证书签名或（已签名的）直接安装。
 struct FilesTabView: View {
-    // 注意：这里不再声明 engine（v63 起文件页不观察 Engine 了——
-    // 企业安装走本地服务，安装 tab 的 ID 线与文件页彻底脱钩；
-    // 要动 Engine 请去安装 tab 那边，勿往回加）。
-    /// 企业本地安装服务（单例，与证书页共用同一实例，状态不分裂）。
+    // 文件页企业安装走 Engine 配对链路（v68 回退，证书页同款）：
+    // 这里重新观察 Engine（v63 曾拿掉，v68 拿回来，只为企业已
+    // 签名安装；安装 tab 的 ID 线与文件页仍是各认各次安装的状
+    // 态，不串台——结果判定只看 fileInstallInFlight 期间的变化）。
+    @EnvironmentObject private var engine: Engine
+    /// 步骤日志存放处（单例，与证书页共用同一份 diagnosticLog）：
+    /// 文件页安装的传输不再走它的 install()，只用 appendStepLog
+    /// 记配对安装开始/完成/失败，证书页的诊断日志里能看到。
     @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
     /// IPA 文件行图标缓存（路径 → 图标数据）与已试集合（键 =
     /// 路径#大小#修改时间，文件换了就重取，不死循环重试）。
@@ -121,6 +125,17 @@ struct FilesTabView: View {
     @State private var showSystemFiles = false
     /// 文件页搜索（轻松签文件列表顶部搜索条同款）：按名字过滤当前视图。
     @State private var fileSearchText = ""
+    /// 轻松签文件列表式切栏：未签名 = 不在 Signed 目录的 IPA，
+    /// 已签名 = 在 Signed 目录的 IPA；只过滤 IPA 行，其他文件、
+    /// 文件夹、系统文件不受切栏影响。
+    @State private var fileTab = FileListTab.unsigned
+    /// IPA 行信息缓存（路径 → Info.plist 解析结果）：行格式第二行
+    /// 要版本/Bundle ID，文件页以前只取图标不解析，这里按行在后台
+    /// 解析一次；键带大小 + 修改时间，文件换了就重解析。
+    @State private var fileIPAInfo: [String: IPALibrary.AppInfo] = [:]
+    @State private var fileIPAInfoTried: Set<String> = []
+    /// 点行弹出的底部动作菜单正在操作的行（nil = 不弹）。
+    @State private var actionItem: LocalFileItem?
     /// 当前进的文件夹（相对 Documents 的路径，"" = 根目录）：
     /// 点文件夹行就进，返回条回上级；删了当前文件夹就回根目录。
     @State private var currentDir = ""
@@ -130,12 +145,12 @@ struct FilesTabView: View {
     /// 要移动的文件/文件夹（sheet 的 item，nil 就不弹）。
     @State private var moveItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
-    /// 文件页已签名安装：走轻松签式本地安装（LocalHTTPInstallServer，
-    /// v63 起，企业签的包专用）。进行中标志 + 拉起成功弹框
-    ///（证书页同款，inFlight 隔离：两页的 completion 各只认自己
-    /// 起的安装）；重试用的记录/文件地址（装时记下，无记录的
-    /// 现解析安装记地址）；失败原因快照（证书页同款，不直接读
-    /// localInstall 全局量，免得别的页的失败串到这里）。
+    /// 文件页已签名安装：走 Engine 配对链路（v68 回退，证书页
+    /// startEngineInstall 同款）。进行中标志 + 完成弹框（inFlight
+    /// 隔离：结果判定只看 fileInstallInFlight 期间 engine.isRunning
+    /// 的变化，ID 线的安装跑完不会误弹到这里）；重试用的记录/
+    /// 文件地址（装时记下）；失败原因快照（证书页同款，不直接
+    /// 读 engine 的全局 lastError，免得别的页的失败串到这里）。
     @State private var fileInstallInFlight = false
     @State private var showingFileInstallSuccessAlert = false
     @State private var fileInstallRecord: SignedIPARecord?
@@ -148,6 +163,91 @@ struct FilesTabView: View {
     private var others: [LocalFileItem] { files.filter { !$0.isIPA && !$0.isSystem } }
     private var systemFiles: [LocalFileItem] { files.filter { $0.isSystem } }
     private var totalSize: Int { files.reduce(0) { $0 + $1.size } }
+
+    /// 切栏是否命中这行 IPA：已签名的判定跟行内「安装」按钮同例
+    ///（在 Signed 目录里），跟证书页已签名清单的落点一致。
+    private func fileTabMatches(_ item: LocalFileItem) -> Bool {
+        switch fileTab {
+        case .unsigned: return !item.isInSignedDir
+        case .signed: return item.isInSignedDir
+        }
+    }
+
+    /// 切栏 + 搜索过滤后的 IPA 列表（根目录视图用，递归扫描的全量）。
+    private var filteredIPAs: [LocalFileItem] {
+        matching(ipas).filter { fileTabMatches($0) }
+    }
+
+    /// 当前文件夹视图里切栏过滤后的可见项：非 IPA 行不受切栏影响，
+    /// IPA 行按切栏过滤（搜不到/切栏外就不显示，不进空文件夹误判）。
+    private var visibleDirItems: [LocalFileItem] {
+        currentDirItems.filter { !$0.isIPA || fileTabMatches($0) }
+    }
+
+    /// IPA 行显示名：解析出的 App 名优先，解析不到回落文件名去后缀。
+    private func ipaDisplayName(_ item: LocalFileItem) -> String {
+        if let name = fileIPAInfo[item.url.path]?.name, !name.isEmpty {
+            return name
+        }
+        return (item.name as NSString).deletingPathExtension
+    }
+
+    /// IPA 行第二行（轻松签文件列表同款）：V版本 | 大小 | Bundle ID；
+    /// 版本缺了就省掉 V 那段，解析失败只显示大小，不造假。
+    private func ipaSecondLine(_ item: LocalFileItem) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)
+        guard let info = fileIPAInfo[item.url.path] else { return size }
+        var parts: [String] = []
+        if let version = info.version, !version.isEmpty {
+            parts.append("V\(version)")
+        }
+        parts.append(size)
+        if !info.bundleID.isEmpty {
+            parts.append(info.bundleID)
+        }
+        return parts.joined(separator: " | ")
+    }
+
+    /// IPA 行信息解析（只取可见行，行 .task 触发）：键里带大小 +
+    /// 修改时间，文件被覆盖换了就重解析；解析失败也记已尝试，
+    /// 不重复读盘。跟证书页未签名栏同例，只解析 Info.plist。
+    private func loadFileIPAInfo(for item: LocalFileItem) {
+        guard item.isIPA else { return }
+        let key = "\(item.url.path)#\(item.size)#\(item.modified?.timeIntervalSince1970 ?? 0)"
+        guard !fileIPAInfoTried.contains(key) else { return }
+        fileIPAInfoTried.insert(key)
+        // 显式捕获（loadFileIcon 同例）：不把整个 item 隐式带进
+        // detached 任务，免得 Swift 6 并发检查找麻烦。
+        Task.detached(priority: .userInitiated) { [url = item.url, path = item.url.path] in
+            guard let info = IPALibrary.appInfo(at: url) else { return }
+            await MainActor.run { self.fileIPAInfo[path] = info }
+        }
+    }
+
+    /// 动作菜单里的分享：系统分享面板（ReportProblemView 同例，
+    /// UIActivityViewController + topViewController，iPad 锚点居中）。
+    /// present 包一层 main.async：菜单按钮点按时菜单本身正在收起，
+    /// 下一轮再 present，免得两个 presented 控制器抢窗口层级。
+    private func shareFile(_ item: LocalFileItem) {
+        DispatchQueue.main.async {
+            let sheet = UIActivityViewController(activityItems: [item.url], applicationActivities: nil)
+            guard let top = UIApplication.shared.topViewController else { return }
+            sheet.popoverPresentationController?.sourceView = top.view
+            sheet.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY,
+                                                                     width: 0, height: 0)
+            top.present(sheet, animated: true)
+        }
+    }
+
+    /// 动作菜单里的查看文件位置：切到这行 IPA 所在的切栏 + 文件夹，
+    /// 清掉搜索，让这一行在当前视图里直接可见；位置在操作提示里明说。
+    private func locateFile(_ item: LocalFileItem) {
+        fileTab = item.isInSignedDir ? .signed : .unsigned
+        currentDir = item.relativeDir
+        fileSearchText = ""
+        opMessage = L("已定位到：%@", item.relativeDir.isEmpty ? L("根目录") : item.relativeDir)
+        opFailed = false
+    }
 
     /// 搜索过滤（当前视图）：名字含查询串就算，不区分大小写。
     private func matching(_ items: [LocalFileItem]) -> [LocalFileItem] {
@@ -186,75 +286,74 @@ struct FilesTabView: View {
         startEnterpriseInstall(ipaURL: item.url, record: nil)
     }
 
-    /// 文件页安装统一入口（证书页 startEnterpriseInstall 同款）：
-    /// 调本地安装服务（本机 HTTP + itms-services），全程只在
-    /// 文件页内反馈——进行中显示服务状态 +“取消安装”，拉起
-    /// 成功弹框，失败快照原因 +“重试安装”。绝不调
-    /// engine.runInstallSignedIPA（那是 ID/Engine 路）。无记录
-    /// 时 Bundle ID/版本现解析（见 installSignedFile）；有记录
-    /// 时直接用记录值。文件页安装不写 CertSignLogStore（v62
-    /// 也不写；日志的 kind 没有“仅安装”一项，硬记会把一次
-    /// 只装没签的说成“签名并安装”，误导——文件页自己的
-    /// 状态条 + 成功弹框就是反馈）。
+    /// 文件页安装统一入口（证书页 startEngineInstall 同款）：
+    /// 调 Engine 的 runInstallSignedIPA（配对设备链路，v45 那套），
+    /// 全程只在文件页内反馈——进行中显示 Engine 进度 +“取消安装”，
+    /// 跑完成功弹框，失败快照原因 +“重试安装”。前置检查（配对文件、
+    /// 隧道、设备 IP）不过时 Engine 直接返回、isRunning 根本没置位，
+    /// 这时就别留着进行中标志，并把原因快照到页内（证书页同款：
+    /// 优先用 Engine 的前置向导，向导没变或是上一次跑剩的旧向导时
+    /// 给通用提示，不读 lastError——前置失败不置它）。名字只用于
+    /// 步骤日志：有记录用记录名，没记录现解析，解析不到就用文件名，
+    /// Engine 安装本身不需要 Bundle ID，不再因解析不到而拒装。
+    /// 文件页安装不写 CertSignLogStore（v62 也不写；日志的 kind
+    /// 没有“仅安装”一项，硬记会把一次只装没签的说成“签名并安装”，
+    /// 误导——文件页自己的状态条 + 成功弹框就是反馈）。
     private func startEnterpriseInstall(ipaURL: URL, record: SignedIPARecord?) {
         fileInstallRecord = record
         fileInstallURL = ipaURL
         fileInstallErrorText = nil
-        let appName: String
-        let bundleID: String
-        let version: String?
-        if let record {
-            appName = record.appName
-            bundleID = record.bundleID
-            version = record.version
-        } else if let info = IPALibrary.appInfo(at: ipaURL) {
-            appName = info.name
-            bundleID = info.bundleID
-            version = info.version
-        } else {
-            fileInstallErrorText = L("这个 IPA 解析不到 Bundle ID，装不了，请重新签名或换个包。")
+        let appName = record?.appName
+            ?? IPALibrary.appInfo(at: ipaURL)?.name
+            ?? ipaURL.deletingPathExtension().lastPathComponent
+        // 别的 tab 的安装在跑时不新起（Engine 单管线）：只显错误
+        // 文本，不进 runInstallSignedIPA、不记失败。
+        guard !engine.isRunning else {
+            fileInstallErrorText = L("已有安装在进行，先等当前安装完成再试。")
             return
         }
-        // isBusy（同步）不用 isRunning（异步置位）：理由见证书页
-        // 同款 guard——启动窗口里的第二次点按在这里就挡住，只显
-        // 错误文本，不进 install()、不记失败。
-        guard !localInstall.isBusy else {
-            fileInstallErrorText = L("已有本地安装在进行，先取消当前安装再试。")
-            return
-        }
+        let guideBefore = engine.guide
         fileInstallInFlight = true
-        localInstall.install(ipaURL: ipaURL, appName: appName, bundleID: bundleID, version: version ?? "1.0") { [self] ok, message in
+        localInstall.appendStepLog(L("配对安装开始：%@", appName))
+        engine.runInstallSignedIPA(ipaURL: ipaURL)
+        if !engine.isRunning {
             fileInstallInFlight = false
-            if ok {
-                showingFileInstallSuccessAlert = true
+            if let guide = engine.guide,
+               guide != guideBefore
+               || guide == Guides.importPairing || guide == Guides.vpn
+               || guide == Guides.deviceIPMismatch {
+                fileInstallErrorText = ([guide.title] + guide.steps).joined(separator: "\n")
             } else {
-                fileInstallErrorText = message ?? L("本地安装没能启动，点重试。")
+                fileInstallErrorText = L("配对安装没能启动：请检查配对文件与隧道是否就绪，或去「安装」页看日志。")
             }
+            localInstall.appendStepLog(L("配对安装失败：%@", fileInstallErrorText ?? ""))
         }
     }
 
-    /// 文件页本地安装状态：只在文件页内显示，不碰共享「安装」页。
-    /// 进行中显示服务状态 +“取消安装”（停本地服务；取消不记
-    /// 成功也不记失败，inFlight 由这里直接清，不等 completion）；
-    /// 失败时显示快照的原因 +“重试安装”（原因来自
-    /// startEnterpriseInstall 的 completion，不直接读 localInstall
-    /// 的全局 lastError，免得别的页的失败串到这里）。
+    /// 文件页配对安装状态：只在文件页内显示，不碰共享「安装」页。
+    /// 进行中显示 Engine 进度 +“取消安装”（调 Engine 的
+    /// cancelOneClick，中止 pipelineTask；取消后 isRunning 落下触发
+    /// onChange 清 inFlight，取消不算成功也不记失败）；失败时显示
+    /// 快照的原因 +“重试安装”（原因来自 startEnterpriseInstall /
+    /// onChange 的快照，不直接读 engine 的全局 lastError，免得别的
+    /// 页的失败串到这里）。进行中只认 fileInstallInFlight（ID 线
+    /// 的安装跑起来时这里不跟着亮，免得串台）。
     @ViewBuilder
     private var fileInstallStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // 进行中 = 服务在跑或刚调 install、异步块还没跑到
-            //（证书页同款，启动窗口里也显示状态 + 取消）。
-            if localInstall.isRunning || fileInstallInFlight {
+            if fileInstallInFlight {
                 HStack(spacing: 8) {
-                    Text(localInstall.status ?? L("本地安装进行中"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(L("取消安装")) {
-                        localInstall.stop()
-                        fileInstallInFlight = false
-                        fileInstallErrorText = nil
+                    if engine.installProgress > 0 {
+                        Text(L("配对安装进行中（%d%%）", Int(engine.installProgress * 100)))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L("配对安装进行中"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
+                    Spacer()
+                    Button(L("取消安装")) { engine.cancelOneClick() }
                     .font(.footnote)
                 }
             } else if let error = fileInstallErrorText {
@@ -285,21 +384,33 @@ struct FilesTabView: View {
                     if selecting {
                         selectionBar.cascadeItem(2)
                     }
+                    // 轻松签文件列表式切栏（只过滤 IPA 行）：放搜索框上面，
+                    // 跟证书页应用库切栏同例，segmented 样式。
+                    Picker("", selection: $fileTab) {
+                        Text(L("未签名")).tag(FileListTab.unsigned)
+                        Text(L("已签名")).tag(FileListTab.signed)
+                    }
+                    .pickerStyle(.segmented)
                     fileSearchBar
                     fileActionRow
                     if !currentDir.isEmpty {
                         currentDirBar
                         if currentDirItems.isEmpty {
                             emptyCard.cascadeItem(2)
+                        } else if visibleDirItems.isEmpty {
+                            Text(L("没有匹配的 IPA。"))
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         } else {
-                            folderSection(items: currentDirItems).cascadeItem(2)
+                            folderSection(items: visibleDirItems).cascadeItem(2)
                         }
                     } else if files.isEmpty {
                         emptyCard.cascadeItem(2)
                     } else {
-                        if !matching(ipas).isEmpty {
-                            fileSection(title: L("IPA 文件"), items: matching(ipas)).cascadeItem(2)
-                        }
+                        // IPA 行不再单开「IPA 文件」组：切栏 + 搜索过滤
+                        // 后的 ipaList 就是全部 IPA（轻松签文件列表式，
+                        // 无卡片头）；其他文件、系统文件仍用旧组。
+                        ipaList.cascadeItem(2)
                         if !matching(others).isEmpty {
                             fileSection(title: L("其他文件"), items: matching(others)).cascadeItem(3)
                         }
@@ -315,13 +426,87 @@ struct FilesTabView: View {
             .background(AppBackground())
         }
         .onAppear { files = AppFileLibrary.scan() }
-        // 文件页安装不再走 Engine：结果由 startEnterpriseInstall
-        // 的 completion 直接回（拉起成功弹框、失败快照原因），
-        // 不再监听 engine.isRunning（那是 ID 线的全局量）。
-        .alert(L("安装已拉起"), isPresented: $showingFileInstallSuccessAlert) {
+        // 配对安装跑完：finished 置位才算成功（取消不算）。只认
+        // fileInstallInFlight 期间的变化，ID 线的安装跑完不会误弹
+        // 到这里；失败原因快照到页内本地量，不直接绑 engine 的
+        // 全局量。文件页安装不写签名日志（见 startEnterpriseInstall）。
+        .onChange(of: engine.isRunning) { old, new in
+            if old && !new && fileInstallInFlight {
+                fileInstallInFlight = false
+                if engine.finished {
+                    showingFileInstallSuccessAlert = true
+                    localInstall.appendStepLog(L("配对安装完成"))
+                } else if let error = engine.lastError {
+                    fileInstallErrorText = error
+                    localInstall.appendStepLog(L("配对安装失败：%@", error))
+                }
+            }
+        }
+        .alert(L("安装完成"), isPresented: $showingFileInstallSuccessAlert) {
             Button(L("知道了"), role: .cancel) {}
         } message: {
-            Text(L("已拉起系统安装，点「安装」后回桌面查看安装进度。"))
+            Text(L("装好了，可以回桌面查看安装进度。"))
+        }
+        // 点 IPA 行弹出的底部动作菜单（轻松签文件列表同款顺序）：
+        // 签名 / 安装（仅已签名行）/ 提取库 / 详情 / 分享 / 查看文件
+        // 位置 / 删除 / 取消。提取库在 Side 没有同名功能，映射到现
+        // 有的 Mach-O 依赖查看（看包里带了哪些库）；详情是原有的
+        // FileDetailSheet；分享走系统分享面板；查看文件位置切到该
+        // 行所在的切栏 + 文件夹并清搜索，让行直接可见。
+        .confirmationDialog("", isPresented: Binding(
+            get: { actionItem != nil },
+            set: { if !$0 { actionItem = nil } }
+        )) {
+            if let item = actionItem, item.isIPA {
+                Button {
+                    workspace.selectedIPA = item.url
+                    onGoCert()
+                    actionItem = nil
+                } label: {
+                    Text(L("签名"))
+                }
+                if item.isInSignedDir {
+                    Button {
+                        installSignedFile(item)
+                        actionItem = nil
+                    } label: {
+                        Text(L("安装"))
+                    }
+                }
+                Button {
+                    machoItem = item
+                    actionItem = nil
+                } label: {
+                    Text(L("提取库"))
+                }
+                Button {
+                    detailItem = item
+                    actionItem = nil
+                } label: {
+                    Text(L("详情"))
+                }
+                Button {
+                    shareFile(item)
+                    actionItem = nil
+                } label: {
+                    Text(L("分享"))
+                }
+                Button {
+                    locateFile(item)
+                    actionItem = nil
+                } label: {
+                    Text(L("查看文件位置"))
+                }
+                Button(role: .destructive) {
+                    delete(item)
+                    actionItem = nil
+                } label: {
+                    Text(L("删除"))
+                }
+            }
+            Button(L("取消"), role: .cancel) {
+                actionItem = nil
+            }
         }
         .alert(L("重命名"), isPresented: Binding(
             get: { renameItem != nil },
@@ -660,6 +845,29 @@ struct FilesTabView: View {
         }
     }
 
+    /// 轻松签文件列表式 IPA 列表（切栏 + 搜索过滤后）：行格式见
+    /// fileRow 的 IPA 分支（图标 + 名 + 版本|大小|Bundle ID + 文件名），
+    /// 点行弹底部动作菜单；空态按切栏/搜索区分文案，不空白。
+    /// 无卡片头（参考图里列表就是平铺的），跟其他文件组区分开。
+    private var ipaList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if filteredIPAs.isEmpty {
+                Text(fileSearchText.isEmpty
+                     ? (fileTab == .unsigned ? L("还没有未签名的 IPA。") : L("还没有已签名的 IPA。"))
+                     : L("没有匹配的 IPA。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(filteredIPAs) { item in
+                    fileRow(item)
+                    if item.id != filteredIPAs.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
     private func fileSection(title: String, items: [LocalFileItem]) -> some View {
         PanelCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -797,14 +1005,35 @@ struct FilesTabView: View {
                 // 文件夹蓝色、其他文件灰色文档图标。图标区统一
                 // 52×52 框，行高对齐，不晃。
                 fileIcon(for: item)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(2)
-                    Text(fileSecondLine(item))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                if item.isIPA {
+                    // IPA 行三行格式（轻松签文件列表同款）：解析出的
+                    // App 名 / V版本 | 大小 | Bundle ID / 文件名。
+                    // 行内不再放分享/去签名/安装/删除按钮——点行弹
+                    // 底部动作菜单，菜单里全有；ⓘ 也不放，菜单里
+                    // 有详情。
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(ipaDisplayName(item))
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(1)
+                        Text(ipaSecondLine(item))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Text(item.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(2)
+                        Text(fileSecondLine(item))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer()
                 if item.isDirectory {
@@ -813,15 +1042,17 @@ struct FilesTabView: View {
                         .foregroundStyle(.secondary)
                         .font(.footnote)
                 }
-                Button {
-                    detailItem = item
-                } label: {
-                    Image(systemName: "info.circle")
-                        .foregroundStyle(.blue)
+                if !item.isIPA {
+                    Button {
+                        detailItem = item
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
-            if !selecting {
+            if !selecting && !item.isIPA {
             HStack(spacing: 14) {
                 if item.isDirectory {
                     // 文件夹是新增的行：分享/签名/安装都是文件的操作，
@@ -838,24 +1069,6 @@ struct FilesTabView: View {
                         Text(L("分享"))
                             .font(.footnote)
                     }
-                    if item.isIPA {
-                        Button {
-                            workspace.selectedIPA = item.url
-                            onGoCert()
-                        } label: {
-                            Text(L("去签名"))
-                                .font(.footnote.weight(.semibold))
-                        }
-                        if item.isInSignedDir {
-                            Button {
-                                installSignedFile(item)
-                            } label: {
-                                Text(L("安装"))
-                                    .font(.footnote.weight(.semibold))
-                            }
-                            .disabled(localInstall.isRunning || fileInstallInFlight)
-                        }
-                    }
                     Spacer()
                     Button(role: .destructive) {
                         delete(item)
@@ -871,6 +1084,9 @@ struct FilesTabView: View {
         // IPA 行图标：行出现时触发一次取图（文件换了就重取，
         // 键里带大小 + 修改时间；取不到也记 tried，不死循环）。
         .task(id: fileIconKey(item)) { loadFileIcon(for: item) }
+        // IPA 行信息：行出现时触发一次解析（版本/Bundle ID 用），
+        // 非 IPA 行直接跳过（loadFileIPAInfo 里 guard）。
+        .task(id: "\(item.url.path)#\(item.size)#\(item.modified?.timeIntervalSince1970 ?? 0)") { loadFileIPAInfo(for: item) }
         .onTapGesture {
             if selecting {
                 if selection.contains(item.id) {
@@ -880,8 +1096,13 @@ struct FilesTabView: View {
                 }
             } else if item.isDirectory {
                 // 点文件夹行就进文件夹（轻松签文件列表同款入口，
-                // 不藏在详情或长按里）；文件行点着没事（操作在行内按钮）。
+                // 不藏在详情或长按里）；非 IPA 文件行点着没事
+                //（操作在行内按钮 / 长按菜单里）。
                 currentDir = folderPath(item)
+            } else if item.isIPA {
+                // 点 IPA 行弹底部动作菜单（轻松签文件列表同款），
+                // 不再是点着没事；长按菜单仍在，更多操作走长按。
+                actionItem = item
             }
         }
         .contextMenu {
@@ -1161,6 +1382,12 @@ struct FilesTabView: View {
             }
         }
     }
+}
+
+/// 文件页 IPA 切栏：未签名 / 已签名（轻松签文件列表同款）。
+private enum FileListTab: Hashable {
+    case unsigned
+    case signed
 }
 
 /// 文件详情（轻松签文件列表右边的 ⓘ）：名字、大小、修改时间、路径，
