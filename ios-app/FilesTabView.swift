@@ -85,7 +85,15 @@ enum AppFileLibrary {
 /// 文件页：管理 App 沙盒 Documents 里的文件——导入、分享、删除，
 /// IPA 可以直接去企业证书签名或（已签名的）直接安装。
 struct FilesTabView: View {
-    @EnvironmentObject private var engine: Engine
+    // 注意：这里不再声明 engine（v63 起文件页不观察 Engine 了——
+    // 企业安装走本地服务，安装 tab 的 ID 线与文件页彻底脱钩；
+    // 要动 Engine 请去安装 tab 那边，勿往回加）。
+    /// 企业本地安装服务（单例，与证书页共用同一实例，状态不分裂）。
+    @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
+    /// IPA 文件行图标缓存（路径 → 图标数据）与已试集合（键 =
+    /// 路径#大小#修改时间，文件换了就重取，不死循环重试）。
+    @State private var fileIcons: [String: Data] = [:]
+    @State private var fileIconsTried: Set<String> = []
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
@@ -122,13 +130,14 @@ struct FilesTabView: View {
     /// 要移动的文件/文件夹（sheet 的 item，nil 就不弹）。
     @State private var moveItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
-    /// 文件页已签名安装：走配对安装（Engine 设备链路，v45 那套，
-    /// 企业签的包专用）。进行中标志 + 成功弹框（证书页同款，
-    /// inFlight 隔离：两页的 onChange 各只认自己起的安装）；
-    /// 重试用的记录/文件地址（装时记下，无记录的现解安装记地址）；
-    /// 失败原因快照（证书页同款，不直接读 engine 全局量）。
-    @State private var engineInstallInFlight = false
-    @State private var showingEngineSuccessAlert = false
+    /// 文件页已签名安装：走轻松签式本地安装（LocalHTTPInstallServer，
+    /// v63 起，企业签的包专用）。进行中标志 + 拉起成功弹框
+    ///（证书页同款，inFlight 隔离：两页的 completion 各只认自己
+    /// 起的安装）；重试用的记录/文件地址（装时记下，无记录的
+    /// 现解析安装记地址）；失败原因快照（证书页同款，不直接读
+    /// localInstall 全局量，免得别的页的失败串到这里）。
+    @State private var fileInstallInFlight = false
+    @State private var showingFileInstallSuccessAlert = false
     @State private var fileInstallRecord: SignedIPARecord?
     @State private var fileInstallURL: URL?
     @State private var fileInstallErrorText: String?
@@ -163,66 +172,90 @@ struct FilesTabView: View {
         (currentDir as NSString).lastPathComponent
     }
 
-    /// 文件页已签名 IPA 安装：只走配对安装（Engine 设备链路，
-    /// v45 那套，企业签的包），不碰回环/共享「安装」页；记录
-    /// 找得到就用记录，找不到（手动拷进已签名目录的）就直接
-    /// 按文件地址装——Engine 自己解包取包名，不再预先解
-    /// Info.plist 卡一道（解包失败时 Engine 的失败原因会显示
-    /// 出来，不静默失败）。
+    /// 文件页已签名 IPA 安装：只走轻松签式本地安装（v63 起），
+    /// 不碰 Engine/共享「安装」页；记录找得到就用记录里的
+    /// 包名/Bundle ID/版本，找不到（手动拷进已签名目录的）就
+    /// 现解析 Info.plist（只读 central directory + 单条目，不整
+    /// 包解压，主线程也快）——解析不到 Bundle ID 就明说装不了，
+    /// 不静默失败、不拿空 Bundle ID 去拼清单。
     private func installSignedFile(_ item: LocalFileItem) {
         if let record = SignedIPAStore.load().first(where: { SignedIPAStore.url(for: $0) == item.url }) {
-            startEngineInstall(ipaURL: item.url, record: record)
+            startEnterpriseInstall(ipaURL: item.url, record: record)
             return
         }
-        startEngineInstall(ipaURL: item.url, record: nil)
+        startEnterpriseInstall(ipaURL: item.url, record: nil)
     }
 
-    /// 文件页安装统一入口（证书页 startEngineInstall 同款）：
-    /// 调 Engine 的 runInstallSignedIPA；前置检查不过时 Engine
-    /// 直接返回、isRunning 没置位——清进行中标志并把原因快照
-    /// 到页内（向导判新旧的规则见证书页，不把旧向导当原因）。
-    private func startEngineInstall(ipaURL: URL, record: SignedIPARecord?) {
+    /// 文件页安装统一入口（证书页 startEnterpriseInstall 同款）：
+    /// 调本地安装服务（本机 HTTP + itms-services），全程只在
+    /// 文件页内反馈——进行中显示服务状态 +“取消安装”，拉起
+    /// 成功弹框，失败快照原因 +“重试安装”。绝不调
+    /// engine.runInstallSignedIPA（那是 ID/Engine 路）。无记录
+    /// 时 Bundle ID/版本现解析（见 installSignedFile）；有记录
+    /// 时直接用记录值。文件页安装不写 CertSignLogStore（v62
+    /// 也不写；日志的 kind 没有“仅安装”一项，硬记会把一次
+    /// 只装没签的说成“签名并安装”，误导——文件页自己的
+    /// 状态条 + 成功弹框就是反馈）。
+    private func startEnterpriseInstall(ipaURL: URL, record: SignedIPARecord?) {
         fileInstallRecord = record
         fileInstallURL = ipaURL
         fileInstallErrorText = nil
-        let guideBefore = engine.guide
-        engineInstallInFlight = true
-        engine.runInstallSignedIPA(ipaURL: ipaURL)
-        if !engine.isRunning {
-            engineInstallInFlight = false
-            if let guide = engine.guide,
-               guide != guideBefore
-               || guide == Guides.importPairing || guide == Guides.vpn
-               || guide == Guides.deviceIPMismatch {
-                fileInstallErrorText = ([guide.title] + guide.steps).joined(separator: "\n")
+        let appName: String
+        let bundleID: String
+        let version: String?
+        if let record {
+            appName = record.appName
+            bundleID = record.bundleID
+            version = record.version
+        } else if let info = IPALibrary.appInfo(at: ipaURL) {
+            appName = info.name
+            bundleID = info.bundleID
+            version = info.version
+        } else {
+            fileInstallErrorText = L("这个 IPA 解析不到 Bundle ID，装不了，请重新签名或换个包。")
+            return
+        }
+        // isBusy（同步）不用 isRunning（异步置位）：理由见证书页
+        // 同款 guard——启动窗口里的第二次点按在这里就挡住，只显
+        // 错误文本，不进 install()、不记失败。
+        guard !localInstall.isBusy else {
+            fileInstallErrorText = L("已有本地安装在进行，先取消当前安装再试。")
+            return
+        }
+        fileInstallInFlight = true
+        localInstall.install(ipaURL: ipaURL, appName: appName, bundleID: bundleID, version: version) { [self] ok, message in
+            fileInstallInFlight = false
+            if ok {
+                showingFileInstallSuccessAlert = true
             } else {
-                fileInstallErrorText = L("配对安装没能启动：请检查配对文件与隧道是否就绪，或去「安装」页看日志。")
+                fileInstallErrorText = message ?? L("本地安装没能启动，点重试。")
             }
         }
     }
 
-    /// 文件页配对安装状态：只在文件页内显示，不碰共享「安装」页。
-    /// isRunning 时显示进度 +“取消安装”（调 Engine 的
-    /// cancelOneClick，中止 pipelineTask）；跑完失败时显示快照
-    /// 的原因 +“重试配对安装”（原因来自 startEngineInstall /
-    /// onChange 的快照，不直接读 engine 全局量）。
+    /// 文件页本地安装状态：只在文件页内显示，不碰共享「安装」页。
+    /// 进行中显示服务状态 +“取消安装”（停本地服务；取消不记
+    /// 成功也不记失败，inFlight 由这里直接清，不等 completion）；
+    /// 失败时显示快照的原因 +“重试安装”（原因来自
+    /// startEnterpriseInstall 的 completion，不直接读 localInstall
+    /// 的全局 lastError，免得别的页的失败串到这里）。
     @ViewBuilder
     private var fileInstallStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if engine.isRunning {
+            // 进行中 = 服务在跑或刚调 install、异步块还没跑到
+            //（证书页同款，启动窗口里也显示状态 + 取消）。
+            if localInstall.isRunning || fileInstallInFlight {
                 HStack(spacing: 8) {
-                    if engine.installProgress > 0 {
-                        Text(L("配对安装进行中（%d%%）", Int(engine.installProgress * 100)))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(L("配对安装进行中"))
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button(L("取消安装")) { engine.cancelOneClick() }
+                    Text(localInstall.status ?? L("本地安装进行中"))
                         .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(L("取消安装")) {
+                        localInstall.stop()
+                        fileInstallInFlight = false
+                        fileInstallErrorText = nil
+                    }
+                    .font(.footnote)
                 }
             } else if let error = fileInstallErrorText {
                 HStack(spacing: 8) {
@@ -231,10 +264,10 @@ struct FilesTabView: View {
                         .foregroundStyle(.red)
                     Spacer()
                     if let record = fileInstallRecord {
-                        Button(L("重试配对安装")) { startEngineInstall(ipaURL: SignedIPAStore.url(for: record), record: record) }
+                        Button(L("重试安装")) { startEnterpriseInstall(ipaURL: SignedIPAStore.url(for: record), record: record) }
                             .font(.footnote)
                     } else if let url = fileInstallURL {
-                        Button(L("重试配对安装")) { startEngineInstall(ipaURL: url, record: nil) }
+                        Button(L("重试安装")) { startEnterpriseInstall(ipaURL: url, record: nil) }
                             .font(.footnote)
                     }
                 }
@@ -282,22 +315,13 @@ struct FilesTabView: View {
             .background(AppBackground())
         }
         .onAppear { files = AppFileLibrary.scan() }
-        .onChange(of: engine.isRunning) { old, new in
-            // 证书页 onChange 同款：finished 才算成功（取消不算）；
-            // 失败原因快照到页内本地量，不直接读 engine 全局量。
-            if old && !new && engineInstallInFlight {
-                engineInstallInFlight = false
-                if engine.finished {
-                    showingEngineSuccessAlert = true
-                } else if let error = engine.lastError {
-                    fileInstallErrorText = error
-                }
-            }
-        }
-        .alert(L("安装完成"), isPresented: $showingEngineSuccessAlert) {
+        // 文件页安装不再走 Engine：结果由 startEnterpriseInstall
+        // 的 completion 直接回（拉起成功弹框、失败快照原因），
+        // 不再监听 engine.isRunning（那是 ID 线的全局量）。
+        .alert(L("安装已拉起"), isPresented: $showingFileInstallSuccessAlert) {
             Button(L("知道了"), role: .cancel) {}
         } message: {
-            Text(L("装好了，可以回桌面查看安装进度。"))
+            Text(L("已拉起系统安装，点「安装」后回桌面查看安装进度。"))
         }
         .alert(L("重命名"), isPresented: Binding(
             get: { renameItem != nil },
@@ -712,6 +736,54 @@ struct FilesTabView: View {
         return date.formatted(date: .numeric, time: .omitted)
     }
 
+    /// 文件行图标：IPA 真图 / 文件夹蓝标 / 其他灰标，三路不同
+    /// View 类型，函数前必须加 @ViewBuilder（AGENTS.md 血泪）。
+    /// 真图 52×52 圆角填满；系统标放 52×52 框里居中，行高对齐。
+    @ViewBuilder
+    private func fileIcon(for item: LocalFileItem) -> some View {
+        if item.isDirectory {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(.blue)
+                .font(.title3)
+                .frame(width: 52, height: 52)
+        } else if item.isIPA,
+                  let data = fileIcons[item.id],
+                  let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            // IPA 还没取到图、取图失败、非 IPA 文件：一律中性占位，
+            // 不造假图、不空框（IPA 占位与应用库同款灰色文档标）。
+            Image(systemName: "doc")
+                .foregroundStyle(.secondary)
+                .font(.title3)
+                .frame(width: 52, height: 52)
+        }
+    }
+
+    /// 图标取图键：路径 + 大小 + 修改时间——文件被覆盖换了就重取。
+    private func fileIconKey(_ item: LocalFileItem) -> String {
+        "\(item.id)#\(item.size)#\(item.modified?.timeIntervalSince1970 ?? 0)"
+    }
+
+    /// IPA 行图标解析：复用应用库那套 IPALibrary.iconData（只读
+    /// central directory + 单个图标条目，不整包解压），不为文件页
+    /// 单开一套；耗时放 Task.detached，取到回主线程写缓存；
+    /// Assets.car 独占图标时 iconData 返回 nil，行里显示中性占位。
+    private func loadFileIcon(for item: LocalFileItem) {
+        guard item.isIPA else { return }
+        let key = fileIconKey(item)
+        guard !fileIconsTried.contains(key) else { return }
+        fileIconsTried.insert(key)
+        Task.detached { [url = item.url, id = item.id] in
+            guard let data = IPALibrary.iconData(at: url) else { return }
+            await MainActor.run { fileIcons[id] = data }
+        }
+    }
+
     private func fileRow(_ item: LocalFileItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -720,10 +792,11 @@ struct FilesTabView: View {
                           ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(selection.contains(item.id) ? Color.accentColor : .secondary)
                 }
-                // 轻松签文件列表式：文件夹蓝色、文件灰色文档图标。
-                Image(systemName: item.isDirectory ? "folder.fill" : "doc")
-                    .foregroundStyle(item.isDirectory ? .blue : .secondary)
-                    .font(.title3)
+                // 轻松签文件列表式：IPA 有真实图标就显示真图（应用库
+                // 同款解析，见 loadFileIcon），没取到就中性占位；
+                // 文件夹蓝色、其他文件灰色文档图标。图标区统一
+                // 52×52 框，行高对齐，不晃。
+                fileIcon(for: item)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
                         .font(.subheadline.weight(.medium))
@@ -780,7 +853,7 @@ struct FilesTabView: View {
                                 Text(L("安装"))
                                     .font(.footnote.weight(.semibold))
                             }
-                            .disabled(engine.isRunning)
+                            .disabled(localInstall.isRunning || fileInstallInFlight)
                         }
                     }
                     Spacer()
@@ -795,6 +868,9 @@ struct FilesTabView: View {
             }
         }
         .contentShape(Rectangle())
+        // IPA 行图标：行出现时触发一次取图（文件换了就重取，
+        // 键里带大小 + 修改时间；取不到也记 tried，不死循环）。
+        .task(id: fileIconKey(item)) { loadFileIcon(for: item) }
         .onTapGesture {
             if selecting {
                 if selection.contains(item.id) {

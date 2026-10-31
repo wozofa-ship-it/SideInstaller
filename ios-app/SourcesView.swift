@@ -110,6 +110,12 @@ struct SourceAppsView: View {
     @EnvironmentObject private var engine: Engine
     /// Observed so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
+    /// 企业页共享工作区（RootView 在 TabView 层注入，证书页与
+    /// 安装 tab 的来源页都在它里面，声明安全）：企业路径成功后
+    /// 把刚导入的 IPA 写到这里，企业页 onChange 接住 → select()
+    /// → 签名表单预填——v63 前这条交接根本没有，签名段拿不到
+    /// 刚导入的 App，才显得“空白卡死”。
+    @EnvironmentObject private var certWorkspace: CertWorkspace
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var store: SourceStore
     let sourceURL: URL
@@ -117,6 +123,11 @@ struct SourceAppsView: View {
     @StateObject private var downloader = IPADownloader()
     /// Row states by app id; an absent entry is idle.
     @State private var states: [String: RowState] = [:]
+    /// 企业路径失败过的 app id（仅 startCertInstall 的 catch 写，
+    /// startInstall 的 catch 永不写）：失败行的“Try again”按它
+    /// 分流——企业失败重试企业路，ID 失败重试 ID 路，不串路。
+    /// 任一路成功就清掉（成功即复位，下次失败重新定性）。
+    @State private var certFailedIDs: Set<String> = []
     /// The app currently downloading, if any: one download at a time, so its
     /// row can show the downloader's progress and the others stay disabled.
     @State private var activeID: String?
@@ -207,8 +218,16 @@ struct SourceAppsView: View {
             }
         case .failed(let message):
             VStack(alignment: .trailing, spacing: 4) {
-                Button(L("Try again")) { startInstall(app) }
-                    .disabled(activeID != nil)
+                // 失败重试走原路：企业失败重试企业路（清 flag 后
+                // startCertInstall 里失败会重写），ID 失败维持原样。
+                Button(L("Try again")) {
+                    if certFailedIDs.contains(app.id) {
+                        startCertInstall(app)
+                    } else {
+                        startInstall(app)
+                    }
+                }
+                .disabled(activeID != nil)
                 Text(message)
                     .font(.caption2)
                     .foregroundStyle(.red)
@@ -287,6 +306,7 @@ struct SourceAppsView: View {
                 engine.downloadedIPAPath = nil
                 activeID = nil
                 states[app.id] = nil
+                certFailedIDs.remove(app.id)
                 engine.runOneClick()
                 dismiss()
             } catch {
@@ -296,14 +316,23 @@ struct SourceAppsView: View {
         }
     }
 
-    /// Download the app's IPA like `startInstall`, but sign and install
-    /// it with the imported enterprise certificate instead of an
-    /// Apple ID. The download lands in the custom-IPA slot first, so
-    /// the file outlives this view.
+    /// Download the app's IPA like `startInstall`, but hand it to the
+    /// enterprise certificate page instead of an Apple ID install.
+    /// v63 改道（源导入卡死修复）：下载 → 导入 custom 槽 → 校验
+    /// 这三步不动；成功后不再调 engine.runEnterpriseCertInstall
+    ///（那路前置失败只写 Engine 日志、企业页全程无反馈，且从
+    /// 不写 selectedIPA，签名段拿不到刚导入的 App——“空白卡死”
+    /// 的成因链），改为把文件写进 certWorkspace.selectedIPA，
+    /// 企业页 onChange 接住 → select() → 签名表单预填该 App，
+    /// 用户点“开始签名”走企业页自己的本地安装（进度在企业页）。
+    /// dismiss 前的 Task.isCancelled 守卫：用户若已在下载完成前
+    /// 手动离开（onDisappear 已取消任务），不 dismiss——否则会
+    /// 多 pop 一层（次要竞态，顺手堵上）。
     private func startCertInstall(_ app: AltApp) {
         guard activeID == nil, let url = app.downloadLink else { return }
         activeID = app.id
         states[app.id] = .downloading
+        certFailedIDs.remove(app.id)
         let expectedName = Engine.importFileName(for: url)
         downloadTask = Task {
             do {
@@ -317,13 +346,19 @@ struct SourceAppsView: View {
                                   userInfo: [NSLocalizedDescriptionKey:
                                                 engine.lastError ?? L("Import failed")])
                 }
+                guard !Task.isCancelled else {
+                    activeID = nil
+                    states[app.id] = nil
+                    return
+                }
+                certWorkspace.selectedIPA = entry.url
                 activeID = nil
                 states[app.id] = nil
-                engine.runEnterpriseCertInstall(ipaURL: entry.url, mods: CertSignMods())
                 dismiss()
             } catch {
                 activeID = nil
                 states[app.id] = .failed(error.localizedDescription)
+                certFailedIDs.insert(app.id)
             }
         }
     }

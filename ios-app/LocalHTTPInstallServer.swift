@@ -23,11 +23,24 @@ import UIKit
 /// - 只能装企业证书签好的包（个人 ID 签的包走这条路装不上，
 ///   系统安装器验签名那关就过不了，仍走配对安装）。
 /// - 服务只在安装期间跑，装完自动停；路径带随机 ID，不猜到。
-/// v62 起停用：企业安装改走配对安装（Engine 设备链路，v45 那套），
-/// 证书页/文件页不再调这里；文件留着不用（与 OTAInstallServer 同例）。
-/// 看门狗与 diagnosticLog 已同步停用：scheduleNoHitWatchdog 不再
-/// 排期（见该函数），diagnosticLog 自此不再追加（服务不起，handler
-/// 永不命中，数组恒为空，仅留着不删、免得以后接线又要重写）。
+/// v63 起重新启用：企业安装改回轻松签式（本机 HTTP + itms-services），
+/// 不再走 Engine 配对路；证书页/文件页/源导入的企业安装全走这里，
+/// 企业页自己显示进度，绝不弹到安装 tab、绝不出现“登录 Apple ID”。
+/// 与 v60 的不同（逐项对过轻松签分析，静态能核的都核了）：
+/// - 防重入：install() 时 isRunning 直接拒绝，不停掉已在跑的服务
+///   再起新口（v60 无此 guard，二次触发会杀掉第一个服务、旧清单
+///   URL 立刻拒连，正好是“无法连接 localhost”的样子）。
+/// - 无 20 秒看门狗：v61 的无连接看门狗会在 installd 慢连（用户在
+///   系统安装确认上犹豫超 20 秒）时杀服务，轻松签根本没有这种
+///   杀法；服务只走 600 秒硬停、手动取消、下次安装的 stop()。
+/// - 音频失败可见：保活起失败仍写 lastError（不静默），企业页的
+///   安装状态区会把它露出来，不再是只有 Console 能看到的暗线。
+/// - IPA 响应显式 Accept-Ranges: bytes（FileResponse 本就处理
+///   Range/206，这里再明写一遍，跟轻松签定制 FileResponse 同款）。
+/// 其余与轻松签实证对齐项（v60 已有，沿用）：GCDWebServer 双栈
+///（库内 v4/v6 同端口，见 GCDWebServer.m _start:）、Port=0 动态
+/// 端口、manifest application/xml、IPA FileResponse + byteRange、
+/// audio 后台模式 + background task 双保险、随机 installID 路径。
 final class LocalHTTPInstallServer: ObservableObject {
     /// 全局唯一：证书页与文件页共用同一实例，isRunning/status/
     /// lastError 不再两边分裂（以前各 @StateObject 一个，A 页起的
@@ -40,13 +53,22 @@ final class LocalHTTPInstallServer: ObservableObject {
     /// 最近一次失败原因：企业页/文件页据此在页内显示 + 重试回环，
     /// 不弹兜底、不碰配对/共享安装页；下次 install() 时清掉。
     @Published private(set) var lastError: String?
-    /// 接线诊断日志（v62 起停用：企业安装改走 Engine，服务不起，
-    /// handler 永不命中，此数组恒为空；仅留着不删，免得以后
-    /// 接线又要重写。以前的用法：handler 命中、起服端口记一行，
-    /// Console 可见，页内也可直接读这个数组展示，只留最近 100 行）。
+    /// 接线诊断日志（v63 起恢复：服务重新跑，handler 命中、起服
+    /// 端口记一行，Console 可见，页内也可直接读这个数组展示，
+    /// 只留最近 100 行。v62 停用期间恒为空是服务没跑，不是日志
+    /// 本身坏了）。
     @Published private(set) var diagnosticLog: [String] = []
 
     private var webServer: GCDWebServer?
+    /// 同步防重入标志：isRunning 是 @Published、经主队列异步置位，
+    /// 连续两次 install() 之间有空窗（第一次的 isRunning=true 还没
+    /// 跑到，第二次就进了门）；这个标志只在主线程同步置位/清掉，
+    /// 堵住空窗。stop() 入口同步清、install() 占位后同步置。
+    private var installActive = false
+    /// 同步忙标志（供页内 guard 在点按那一刻读一次）：占位中或
+    /// 服务在跑都算忙。不是 @Published——按钮禁用仍用 isRunning
+    /// + 页内 inFlight（那两个会刷新），这个只作点按时的一次判断。
+    var isBusy: Bool { installActive || isRunning }
     /// 安装期间的独立静音音频（轻松签式）：Playback 类别、循环播
     /// 1 秒静音，靠 audio 后台模式无限时保活，不受 background
     /// task 到期限制。必须独立起，不能只依赖全局 keepAlive——
@@ -60,32 +82,65 @@ final class LocalHTTPInstallServer: ObservableObject {
     private var ipaURL: URL?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var hardStopWork: DispatchWorkItem?
-    /// 20 秒无连接看门狗：起服后 20 秒内没有任何 handler 被命中就
-    /// 触发（见 handleNoHitTimeout）。handler 命中即取消；stop()
-    /// 时取消 + 置 nil（所有权点只在 stop()/install()，handler 线程
-    /// 上只 cancel、不置 nil，幂等、无竞态后果）。
-    private var noHitWatchdog: DispatchWorkItem?
+    /// v63 起无看门狗：服务活到 600 秒硬停、手动取消或下次安装，
+    /// installd 慢连也不杀（见文件头注释，轻松签无此杀法）。
     private let queue = DispatchQueue(label: "czf.localhttp.install")
 
-    /// 对一个已签好的记录拉起本地安装。
-    func install(record: SignedIPARecord) {
+    /// 对一个已签好的记录拉起本地安装。completion 在主线程恰好
+    /// 调一次：true = itms-services 已拉起（系统接管，进度回桌面
+    /// 看）；false + 文案 = 服务没起来/链接没拉起，可重试。
+    func install(record: SignedIPARecord, completion: ((Bool, String?) -> Void)? = nil) {
         lastError = nil
         guard !record.bundleID.isEmpty else {
-            setStatus(L("这个已签名记录没有 Bundle ID，装不了，先重签一次。"))
+            let msg = L("这个已签名记录没有 Bundle ID，装不了，先重签一次。")
+            setStatus(msg)
+            DispatchQueue.main.async { completion?(false, msg) }
             return
         }
         install(ipaURL: SignedIPAStore.url(for: record), appName: record.appName,
-                bundleID: record.bundleID, version: record.version ?? "1.0")
+                bundleID: record.bundleID, version: record.version ?? "1.0",
+                completion: completion)
     }
 
     /// 对一个刚签好的文件拉起本地安装（签名页「开始签名」用）。
     /// 必须在主线程调：状态/音频的启停都走主队列异步（见 stop()
     /// 的顺序注释），主线程调才能保证调用顺序就是执行顺序。
-    func install(ipaURL: URL, appName: String, bundleID: String, version: String) {
+    /// completion 在主线程恰好调一次（见 install(record:) 注释）。
+    func install(ipaURL: URL, appName: String, bundleID: String, version: String,
+                 completion: ((Bool, String?) -> Void)? = nil) {
+        // 结果只报一次：各失败 return 与 open() 回调互斥，但 stop()
+        // 与 open() 回调万一都走到这里，flag 拦住第二下，不双报。
+        var completionFired = false
+        func finish(_ ok: Bool, _ msg: String?) {
+            DispatchQueue.main.async {
+                guard !completionFired else { return }
+                completionFired = true
+                completion?(ok, msg)
+            }
+        }
+        // 防重入（v63 新增，见文件头）：已在跑就直接拒绝，不停旧
+        // 服务、不起新口——旧清单 URL 必须一直有效，杀了就拒连。
+        // 这里不碰 status/lastError（跑着的安装的状态要原样留着，
+        // 原因只经 completion 回给调用方，由调用方页内显示）。
+        // guard 看 installActive（同步）+ isRunning（异步置位，双保险）。
+        guard !installActive && !isRunning else {
+            finish(false, L("本地安装服务已在运行，先取消当前安装再试。"))
+            return
+        }
         stop()
+        // 占位：从这里起、到 stop() 前，任何再进来的 install() 都
+        // 被上面 guard 挡住（stop() 的异步清场块排在后面，不会
+        // 把这个刚置的位清掉——清位只走 stop() 入口的同步行）。
+        installActive = true
         lastError = nil
         guard FileManager.default.fileExists(atPath: ipaURL.path) else {
-            setStatus(L("签好的文件找不到了，先重签一次。"))
+            let msg = L("签好的文件找不到了，先重签一次。")
+            setStatus(msg)
+            DispatchQueue.main.async { self.lastError = msg }
+            finish(false, msg)
+            // 别漏 stop()：上面已置 installActive=true，不清掉，
+            // 下次安装会被防重入 guard 永久挡住（直到杀 App）。
+            stop()
             return
         }
         setStatus(L("正在启动本地安装服务…"))
@@ -117,7 +172,6 @@ final class LocalHTTPInstallServer: ObservableObject {
         let server = GCDWebServer()
         server.addHandler(forMethod: "GET", path: manifestPath,
                           request: GCDWebServerRequest.self) { [weak self] request in
-            self?.cancelNoHitWatchdog()
             self?.log("GET \(manifestPath) \(self?.rangeDescription(for: request) ?? "range=none")")
             guard let data = manifestBox.data else {
                 return GCDWebServerResponse(statusCode: 503)
@@ -126,7 +180,6 @@ final class LocalHTTPInstallServer: ObservableObject {
         }
         server.addHandler(forMethod: "GET", path: ipaRoutePath,
                           request: GCDWebServerRequest.self) { [weak self] request in
-            self?.cancelNoHitWatchdog()
             self?.log("GET \(ipaRoutePath) \(self?.rangeDescription(for: request) ?? "range=none")")
             // 文件起服时已验过存在；装的过程中被删了就明给 404，
             // 不返回 nil（nil 在连接层行为未定义，别依赖它）。
@@ -136,7 +189,12 @@ final class LocalHTTPInstallServer: ObservableObject {
             // request.byteRange 直传：没 Range 就是全量 200，有
             // Range 就是 206 + Content-Range + Accept-Ranges，
             // 断点续传不用自己算（轻松签 FileResponse 同款）。
-            return GCDWebServerFileResponse(file: ipaPath, byteRange: request.byteRange)
+            // Accept-Ranges 再明写一遍：206 时库里自带，200 时也
+            // 让 installd 知道能断点续传（轻松签定制 FileResponse
+            // 同款显式头）。
+            let response = GCDWebServerFileResponse(file: ipaPath, byteRange: request.byteRange)
+            response?.setValue("bytes", forAdditionalHeader: "Accept-Ranges")
+            return response
         }
         do {
             try server.start(options: [
@@ -148,6 +206,7 @@ final class LocalHTTPInstallServer: ObservableObject {
             let msg = L("本地安装服务启动失败，点安装重试。")
             setStatus(msg)
             DispatchQueue.main.async { self.lastError = msg }
+            finish(false, msg)
             stop()
             return
         }
@@ -174,6 +233,7 @@ final class LocalHTTPInstallServer: ObservableObject {
             let msg = L("安装清单生成失败，点安装重试。")
             setStatus(msg)
             DispatchQueue.main.async { self.lastError = msg }
+            finish(false, msg)
             stop()
             return
         }
@@ -182,20 +242,23 @@ final class LocalHTTPInstallServer: ObservableObject {
         if let hardStopWork {
             queue.asyncAfter(deadline: .now() + 600, execute: hardStopWork)
         }
-        // 20 秒无连接看门狗（见 scheduleNoHitWatchdog）：起服后 20 秒
-        // 内没有任何 handler 被命中，说明 itms-services 拉起了、但
-        // installd 没连进来（弹窗那一路），别让 isRunning 锁死到
-        // 600 秒硬停；看门狗只看“有无命中”，用户在系统弹窗前犹豫
-        // 超过 20 秒也会触发——有意取舍：宁可让慢用户点一次重试，
-        // 也不让失败用户卡 600 秒没法重试；一旦 manifest 被命中
-        // （用户点了安装），看门狗即取消，下载再慢也不停。
-        scheduleNoHitWatchdog()
+        // v63 起无看门狗（见文件头）：服务活到 600 秒硬停、手动
+        // 取消或下次安装；用户在系统安装确认上犹豫再久也不杀，
+        // installd 慢连也不杀——杀服务正是 v61 仍弹的嫌疑之一。
         // 状态/音频一律走主队列异步（跟 stop() 里同一条纪律）：
         // 调用顺序就是执行顺序——stop() 的清场块先进队，音频起、
         // isRunning/status 后进队，绝不会出现“新音频起了又被旧
         // stop 块关掉”的倒序。音频起在 itms-services 拉起前排队，
         // 毫秒级就跑到，用户点系统“安装”时早已在播。
+        // 取消竞态 guard（v63 新增）：install() 返回后、这两个异步
+        // 块跑到之前，用户可能点了取消（stop() 已清 installID +
+        // installActive）或起了新安装（installID 已换）。令牌对不上
+        // 就什么都不做——不启动音频、不置 isRunning、不拉起安装、
+        // 不报 completion（取消那路的页内 inFlight 由取消按钮自己
+        // 清，不记成功也不记失败；新安装那路由新调用的 completion 管）。
+        let installToken = installID
         DispatchQueue.main.async { [weak self] in
+            guard let self, self.installID == installToken, self.installActive else { return }
             // 音频起失败不再静默（以前 start() 内部 catch 后只置 false，
             // 页内看不到）：写 lastError，失败时用户知道后台可能挂起服务。
             // 注意：这时 isRunning 随即置 true，页内 isRunning 分支只显示
@@ -214,16 +277,26 @@ final class LocalHTTPInstallServer: ObservableObject {
             let msg = L("安装链接生成失败，点安装重试。")
             setStatus(msg)
             DispatchQueue.main.async { self.lastError = msg }
+            finish(false, msg)
             stop()
             return
         }
         setStatus(L("已拉起系统安装：点「安装」后服务保持到下载完成，装完自动停，进度回桌面看。"))
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            // 同上：取消/新安装已发生时不开 itms-services（开了就
+            // 停不下来，还会把 completion 的成功报给已取消的那次）。
+            guard let self, self.installID == installToken, self.installActive else { return }
             UIApplication.shared.open(link, options: [:]) { [weak self] opened in
-                if !opened {
+                if opened {
+                    // 系统接管了：App 的活到此为止，服务继续跑着供
+                    // installd 取包（600 秒硬停/手动取消才停），不
+                    // 在这里 stop()——停了 installd 就拒连。
+                    finish(true, nil)
+                } else {
                     let msg = L("系统安装没拉起来，点安装重试。")
                     self?.setStatus(msg)
                     DispatchQueue.main.async { self?.lastError = msg }
+                    finish(false, msg)
                     self?.stop()
                 }
             }
@@ -231,10 +304,12 @@ final class LocalHTTPInstallServer: ObservableObject {
     }
 
     func stop() {
+        // 同步清位（见 installActive 注释）：stop() 入口就清，不等
+        // 后面主队列的清场块，这样下一次 install() 的 guard 立刻
+        // 就能进，不会被上一次的异步块拖住。
+        installActive = false
         hardStopWork?.cancel()
         hardStopWork = nil
-        noHitWatchdog?.cancel()
-        noHitWatchdog = nil
         webServer?.stop()
         webServer = nil
         ipaURL = nil
@@ -306,36 +381,12 @@ final class LocalHTTPInstallServer: ObservableObject {
         return "range=none"
     }
 
-    private func scheduleNoHitWatchdog() {
-        // v62 起停用：企业安装改走 Engine，这服务留着不用；看门狗
-        // 是回环专属（等 itms-services 的 handler 命中），Engine 路
-        // 没有 handler 概念，排期只会误杀——直接不排，调用点留着
-        // 不动（install() 里那行照常调，进来就返回）。
-        noHitWatchdog?.cancel()
-        noHitWatchdog = nil
-    }
-
-    /// handler 线程上只 cancel、不置 nil（见 noHitWatchdog 注释）。
-    private func cancelNoHitWatchdog() {
-        noHitWatchdog?.cancel()
-    }
-
-    /// 20 秒内无任何 handler 命中：itms-services 拉起了、但 installd
-    /// 没连进来。别等 600 秒硬停：自动停服 + 置失败原因，页内
-    /// “重试回环安装”立刻可用（stop() 不清 lastError，原因留得住）。
-    private func handleNoHitTimeout() {
-        let msg = L("系统安装没连上本地服务，点重试。")
-        setStatus(msg)
-        DispatchQueue.main.async { [weak self] in self?.lastError = msg }
-        stop()
-    }
-
     private func setStatus(_ text: String) {
         DispatchQueue.main.async { self.status = text }
     }
 
-    /// 安装期间的独立静音音频（v62 起停用：企业安装改走 Engine，
-    /// 不再用这个 keeper 保活；类留着不用，与本文件本体同例）：
+    /// 安装期间的独立静音音频（v63 起恢复：企业安装改回回环，
+    /// 这个 keeper 重新保活；v62 停用期间类留着没删）：
     /// Playback 类别、循环播 1 秒静音。跟全局 KeepAlive 同款 engine 写法
     ///（本仓已验证的路子），但 engine 是实例私有的；session 则
     /// 不再私有：start 成功时向全局 KeepAlive 计数 +1（只动计数、
