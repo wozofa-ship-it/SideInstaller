@@ -117,13 +117,16 @@ struct ContentView: View {
                 .ignoresSafeArea()
             }
             .scrollDismissesKeyboard(.interactively)
-            // 注意：这里不预连隧道。隧道只在 ID 操作开始时拉起
-            // （Engine.ensureNetwork / 续签 / 配对里调 tunnelUp，
-            // ID签名才自动隧道）；企业签名不自动启用隧道——安装页
-            // 一出现就连隧道，会让纯企业会话也带着隧道跑（v65 前台
-            // 仍弹 localhost 的嫌疑之一），且 ID 操作开始时自会拉
-            // 隧道，预连并无必要。企业安装前停隧道见 v66
-            // （LocalHTTPInstallServer.install 里的 BuiltinTunnel.stop）。
+            // WiFi 下安装页出现即预连隧道（见 preconnectTunnelIfNeeded）：
+            // v67 删预连是怕纯企业会话带着隧道跑（v65 localhost 嫌疑）；
+            // v68 企业安装已回退到 Engine 配对路（本来就要隧道），
+            // 预连不再有害，只是让隧道提前就绪、pill 直接变绿。
+            // WiFi 后开上来也补一次（下面 onChange），隧道已起、
+            // 运行中、非 WiFi 时一律不拉。
+            .task { await preconnectTunnelIfNeeded() }
+            .onChange(of: engine.wifiConnected) { _, isOn in
+                if isOn { Task { await preconnectTunnelIfNeeded() } }
+            }
         }
     }
 
@@ -131,6 +134,20 @@ struct ContentView: View {
 
     private var showProgress: Bool {
         engine.isRunning || engine.overallProgress > 0 || engine.finished
+    }
+
+    /// WiFi 下安装页预连隧道：空闲 + WiFi 连着 + 隧道还没起 +
+    /// 内置隧道可用时拉一次。只走内置隧道（不跳去 LocalDevVPN，
+    /// 预连绝不能把用户拽到别的 App；LOC 交接仍留在点安装时
+    /// 的已有流程里）。tunnelUp 自带幂等（已起直接返回），
+    /// Engine 的 ensureNetwork 在操作开始时也会拉，不会双重
+    /// 启动；Engine 从不停隧道，预连上的不会被自家流程掐掉。
+    /// 首次会弹一次系统 VPN 许可，之后静默自动连；pill 读的
+    /// vpnConnected 由状态监控刷新，隧道一起 pill 自动变绿。
+    private func preconnectTunnelIfNeeded() async {
+        guard !engine.isRunning, engine.wifiConnected, !engine.vpnConnected,
+              BuiltinTunnel.useBuiltinDirectly else { return }
+        _ = await engine.tunnelUp()
     }
 
     /// True on an iPhone new enough to install but too old to pair itself.
