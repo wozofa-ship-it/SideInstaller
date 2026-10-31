@@ -40,8 +40,10 @@ targets:
         embed: false
       # GCDWebServer（企业安装回环服务，vendored 在 ios-app/GCDWebServer/）
       # 上游 podspec 的 iOS 依赖：CoreServices（MIME 类型）+ CFNetwork。
-      - framework: CoreServices.framework
-      - framework: CFNetwork.framework
+      # 系统 SDK 框架必须用 sdk:（XcodeGen 生成 SDK 引用，不找文件）；
+      # framework: 会被当成仓库里的文件，CI 报错 No such file or directory。
+      - sdk: CoreServices.framework
+      - sdk: CFNetwork.framework
       # Embedded as PlugIns/SideInstallerLiveActivity.appex.
       - target: SideInstallerLiveActivity
       # Embedded as PlugIns/TunnelProv.appex (built-in loopback tunnel).
