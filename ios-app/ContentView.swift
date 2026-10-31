@@ -117,13 +117,13 @@ struct ContentView: View {
                 .ignoresSafeArea()
             }
             .scrollDismissesKeyboard(.interactively)
-            // 打开 App 就把隧道连上（内置优先，首次会弹一次系统的
-            // VPN 许可，之后静默自动连），不等用到时才手忙脚乱。
-            .task {
-                if !engine.vpnConnected {
-                    _ = await engine.tunnelUp()
-                }
-            }
+            // 注意：这里不预连隧道。隧道只在 ID 操作开始时拉起
+            // （Engine.ensureNetwork / 续签 / 配对里调 tunnelUp，
+            // ID签名才自动隧道）；企业签名不自动启用隧道——安装页
+            // 一出现就连隧道，会让纯企业会话也带着隧道跑（v65 前台
+            // 仍弹 localhost 的嫌疑之一），且 ID 操作开始时自会拉
+            // 隧道，预连并无必要。企业安装前停隧道见 v66
+            // （LocalHTTPInstallServer.install 里的 BuiltinTunnel.stop）。
         }
     }
 
