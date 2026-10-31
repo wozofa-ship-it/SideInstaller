@@ -586,7 +586,7 @@ struct CertTabView: View {
     /// 轻松签签名页式分组：标题是卡片上面一行小灰字，内容在卡片里
     ///（PanelCard 的 content 本来就是 @ViewBuilder，组内多行、单行
     /// 都行，不触发普通函数多类型分支问题）。
-    private func signGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func signGroup<Content: View>(title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.footnote)
