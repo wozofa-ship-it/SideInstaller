@@ -223,7 +223,7 @@ struct FilesTabView: View {
             return
         }
         fileInstallInFlight = true
-        localInstall.install(ipaURL: ipaURL, appName: appName, bundleID: bundleID, version: version) { [self] ok, message in
+        localInstall.install(ipaURL: ipaURL, appName: appName, bundleID: bundleID, version: version ?? "1.0") { [self] ok, message in
             fileInstallInFlight = false
             if ok {
                 showingFileInstallSuccessAlert = true

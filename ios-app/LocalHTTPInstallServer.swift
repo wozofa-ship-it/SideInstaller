@@ -264,11 +264,11 @@ final class LocalHTTPInstallServer: ObservableObject {
             // 注意：这时 isRunning 随即置 true，页内 isRunning 分支只显示
             // “取消安装”，这条 lastError 在停服后才露出（若随后看门狗
             // 触发，它的 lastError 会覆盖这条，以最近的为准）。
-            let audioOK = self?.installAudio.start() ?? false
+            let audioOK = self.installAudio.start()
             if audioOK == false {
-                self?.lastError = L("安装期静音保活启动失败，后台可能挂起服务，失败时点重试。")
+                self.lastError = L("安装期静音保活启动失败，后台可能挂起服务，失败时点重试。")
             }
-            self?.isRunning = true
+            self.isRunning = true
         }
         // 每次安装换一个随机路径，系统安装器不会吃到上次缓存的旧清单。
         let encoded = manifestURL.addingPercentEncoding(
