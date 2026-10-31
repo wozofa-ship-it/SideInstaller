@@ -144,6 +144,17 @@ final class LocalHTTPInstallServer: ObservableObject {
             stop()
             return
         }
+        // 企业安装前先停内置隧道：企业安装走 localhost HTTP，不需要
+        // 隧道；隧道是各步骤自动拉起后从不停（BuiltinTunnel 此前无
+        // stop 调用点），若在跑可能干扰 installd 的回环连接（v65 前台
+        // 仍弹 localhost 的头号嫌疑）。fire-and-forget：停隧道是系统
+        // 异步操作，不阻塞起服；installd 取清单在用户点系统“安装”
+        // 之后（数秒后），停隧道的时间足够。停失败不阻断安装（stop()
+        // 内部已吞错），ID 操作需要时会自动再拉隧道。
+        // 注意：上面那个 stop() 是本地服务停服，BuiltinTunnel.stop()
+        // 是停系统 VPN 隧道，两者不同名不同物，别混。
+        log("enterprise install: stopping built-in tunnel before local server")
+        Task { await BuiltinTunnel.stop() }
         setStatus(L("正在启动本地安装服务…"))
         beginBackgroundTask()
         installID = UUID().uuidString

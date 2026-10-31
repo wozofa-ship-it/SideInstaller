@@ -148,6 +148,30 @@ enum BuiltinTunnel {
         return false
     }
 
+    /// 停掉内置隧道（企业本地安装前调用）：企业安装走 localhost HTTP，
+    /// 不需要隧道；隧道是各步骤自动拉起后从不停（此前全仓无 stop
+    /// 调用点），若在跑可能干扰 installd 的回环连接（v65 前台仍弹
+    /// localhost 的头号嫌疑）。尽力而为：没配置、未连接、停失败
+    /// 都不阻断安装（只写日志）。ID 操作需要时 tunnelUp/startAndWait
+    /// 会自动再拉起来，这里不用重起。
+    static func stop() async {
+        do {
+            let managers = try await NETunnelProviderManager.loadAllFromPreferences()
+            guard let manager = managers.first(where: {
+                ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == providerBundleID
+            }) else { return }
+            // 未连接时 stopVPNTunnel 是空操作，不用先查状态。
+            manager.connection.stopVPNTunnel()
+        } catch {
+            // 停失败不阻断安装：企业安装不依赖隧道，继续走本地服务。
+            // 只抓 message（String）进主队列闭包，不抓 error 本身。
+            let message = error.localizedDescription
+            DispatchQueue.main.async {
+                Engine.shared.log("Built-in tunnel: stop before enterprise install failed: \(message) (install continues)")
+            }
+        }
+    }
+
     /// 找到我们自己的 VPN 配置；没有就建一份：本端读设置（默认
     /// 10.7.1.1/32），对端跟设备 IP 设置走（默认 10.7.0.1/32 ——
     /// minimuxer 连的就是对端地址）。
