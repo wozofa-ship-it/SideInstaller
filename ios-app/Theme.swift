@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The app's shared visual language: brand colours, gradients and the cards,
 /// buttons and headers every screen is composed from.
@@ -177,6 +178,20 @@ struct PanelCard<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
             .cardSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+/// 触感反馈集中一处（全仓唯一 helper，别每处各写一套）：主操作
+/// .medium，其余 .light；完成/失败走 notification。只在用户手势
+/// 触发处调用（点按动作里），别在后台回调里乱震；系统级触感
+/// 开关自带，不另起设置项。
+enum CZFHaptics {
+    static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
+    static func notification(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        UINotificationFeedbackGenerator().notificationOccurred(type)
     }
 }
 

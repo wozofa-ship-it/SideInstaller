@@ -241,6 +241,7 @@ struct FilesTabView: View {
 
     /// 动作菜单里的查看文件位置：切到这行 IPA 所在的切栏 + 文件夹，
     /// 清掉搜索，让这一行在当前视图里直接可见；位置在操作提示里明说。
+    /// 触感不另加：切栏变化会触发上面的 fileTab onChange 震一次 .light。
     private func locateFile(_ item: LocalFileItem) {
         fileTab = item.isInSignedDir ? .signed : .unsigned
         currentDir = item.relativeDir
@@ -353,7 +354,7 @@ struct FilesTabView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(L("取消安装")) { engine.cancelOneClick() }
+                    Button(L("取消安装")) { CZFHaptics.impact(.light); engine.cancelOneClick() }
                     .font(.footnote)
                 }
             } else if let error = fileInstallErrorText {
@@ -363,10 +364,10 @@ struct FilesTabView: View {
                         .foregroundStyle(.red)
                     Spacer()
                     if let record = fileInstallRecord {
-                        Button(L("重试安装")) { startEnterpriseInstall(ipaURL: SignedIPAStore.url(for: record), record: record) }
+                        Button(L("重试安装")) { CZFHaptics.impact(.light); startEnterpriseInstall(ipaURL: SignedIPAStore.url(for: record), record: record) }
                             .font(.footnote)
                     } else if let url = fileInstallURL {
-                        Button(L("重试安装")) { startEnterpriseInstall(ipaURL: url, record: nil) }
+                        Button(L("重试安装")) { CZFHaptics.impact(.light); startEnterpriseInstall(ipaURL: url, record: nil) }
                             .font(.footnote)
                     }
                 }
@@ -391,6 +392,9 @@ struct FilesTabView: View {
                         Text(L("已签名")).tag(FileListTab.signed)
                     }
                     .pickerStyle(.segmented)
+                    // 切栏触感：点切栏、或菜单“查看文件位置”切栏变化时
+                    // 各震一次 .light；后者菜单按钮本身不另震，免得一次点按震两次。
+                    .onChange(of: fileTab) { _, _ in CZFHaptics.impact(.light) }
                     fileSearchBar
                     fileActionRow
                     if !currentDir.isEmpty {
@@ -436,9 +440,11 @@ struct FilesTabView: View {
                 if engine.finished {
                     showingFileInstallSuccessAlert = true
                     localInstall.appendStepLog(L("配对安装完成"))
+                    CZFHaptics.notification(.success)
                 } else if let error = engine.lastError {
                     fileInstallErrorText = error
                     localInstall.appendStepLog(L("配对安装失败：%@", error))
+                    CZFHaptics.notification(.error)
                 }
             }
         }
@@ -459,6 +465,7 @@ struct FilesTabView: View {
         )) {
             if let item = actionItem, item.isIPA {
                 Button {
+                    CZFHaptics.impact(.light)
                     workspace.selectedIPA = item.url
                     onGoCert()
                     actionItem = nil
@@ -467,6 +474,7 @@ struct FilesTabView: View {
                 }
                 if item.isInSignedDir {
                     Button {
+                        CZFHaptics.impact(.light)
                         installSignedFile(item)
                         actionItem = nil
                     } label: {
@@ -474,18 +482,21 @@ struct FilesTabView: View {
                     }
                 }
                 Button {
+                    CZFHaptics.impact(.light)
                     machoItem = item
                     actionItem = nil
                 } label: {
                     Text(L("提取库"))
                 }
                 Button {
+                    CZFHaptics.impact(.light)
                     detailItem = item
                     actionItem = nil
                 } label: {
                     Text(L("详情"))
                 }
                 Button {
+                    CZFHaptics.impact(.light)
                     shareFile(item)
                     actionItem = nil
                 } label: {
@@ -498,6 +509,7 @@ struct FilesTabView: View {
                     Text(L("查看文件位置"))
                 }
                 Button(role: .destructive) {
+                    CZFHaptics.impact(.light)
                     delete(item)
                     actionItem = nil
                 } label: {

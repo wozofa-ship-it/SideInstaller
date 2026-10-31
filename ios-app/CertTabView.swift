@@ -213,6 +213,7 @@ struct CertTabView: View {
                 if engine.finished {
                     showingEnterpriseInstallSuccessAlert = true
                     localInstall.appendStepLog(L("配对安装完成"))
+                    CZFHaptics.notification(.success)
                     if let appName = engineInstallLogAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                             appName: appName, kind: .signAndInstall, success: true,
@@ -222,6 +223,7 @@ struct CertTabView: View {
                 } else if let error = engine.lastError {
                     enterpriseInstallErrorText = error
                     localInstall.appendStepLog(L("配对安装失败：%@", error))
+                    CZFHaptics.notification(.error)
                     if let appName = engineInstallLogAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                             appName: appName, kind: .signAndInstall, success: false,
@@ -708,6 +710,7 @@ struct CertTabView: View {
                 //（展开预设/插件/多开/仅签名）。禁用时半透明，免得看着
                 // 能点实际点不了（plain 样式本身不做禁用变灰）。
                 Button {
+                    CZFHaptics.impact(.medium)
                     startSign(kind: installWhenSign ? .signAndInstall : .signOnly)
                 } label: {
                     HStack {
@@ -725,6 +728,7 @@ struct CertTabView: View {
                 .opacity(signBusy || engine.isRunning || !certReady ? 0.5 : 1)
                 .disabled(signBusy || engine.isRunning || !certReady)
                 Button {
+                    CZFHaptics.impact(.light)
                     showMoreSettings.toggle()
                 } label: {
                     HStack {
@@ -750,6 +754,7 @@ struct CertTabView: View {
                             multiOpenSection
                             Divider()
                             Button {
+                                CZFHaptics.impact(.medium)
                                 startSign(kind: .signOnly)
                             } label: {
                                 HStack {
@@ -1219,6 +1224,7 @@ struct CertTabView: View {
                             detail: L("已签出 %d 个副本，存到「已签名」。", multiCount)))
                         signOnlyMessage = L("已签出 %d 个副本，存到「应用库 → 已签名」，逐个点安装。", multiCount)
                         localInstall.appendStepLog(L("签名成功：%@（%d 个副本）", baseName, multiCount))
+                        CZFHaptics.notification(.success)
                         signOnlyFailed = false
                     } else {
                         let record = try await CertSigner.signToFile(ipa: url, mods: mods)
@@ -1230,6 +1236,7 @@ struct CertTabView: View {
                             detail: L("已存到「已签名」")))
                         signOnlyMessage = L("签好了，已存到「应用库 → 已签名」。")
                         localInstall.appendStepLog(L("签名成功：%@", record.appName))
+                        CZFHaptics.notification(.success)
                         signOnlyFailed = false
                     }
                 } catch {
@@ -1239,6 +1246,7 @@ struct CertTabView: View {
                     signOnlyMessage = friendly
                     signOnlyFailed = true
                     localInstall.appendStepLog(L("签名失败：%@", friendly))
+                    CZFHaptics.notification(.error)
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
                         kind: .signOnly, success: false, detail: friendly))
@@ -1280,6 +1288,7 @@ struct CertTabView: View {
                     signOnlyMessage = friendly
                     signOnlyFailed = true
                     localInstall.appendStepLog(L("签名失败：%@", friendly))
+                    CZFHaptics.notification(.error)
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: selectedInfo?.name ?? url.deletingPathExtension().lastPathComponent,
                         kind: .signAndInstall, success: false, detail: friendly))
@@ -1850,7 +1859,7 @@ struct CertTabView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(L("取消安装")) { engine.cancelOneClick() }
+                Button(L("取消安装")) { CZFHaptics.impact(.light); engine.cancelOneClick() }
                 .font(.footnote)
             }
         } else if let error = enterpriseInstallErrorText {
@@ -1860,7 +1869,7 @@ struct CertTabView: View {
                     .foregroundStyle(.red)
                 Spacer()
                 if let record = enterpriseInstallRecord {
-                    Button(L("重试配对安装")) { startEngineInstall(record: record) }
+                    Button(L("重试配对安装")) { CZFHaptics.impact(.light); startEngineInstall(record: record) }
                         .font(.footnote)
                 }
             }
@@ -2094,6 +2103,7 @@ struct CertTabView: View {
                         selectedSignedIDs.insert(record.id)
                     }
                 } else {
+                    CZFHaptics.impact(.light)
                     installSigned(record)
                 }
             } label: {
@@ -2129,6 +2139,7 @@ struct CertTabView: View {
             if !selectingSigned {
                 HStack(spacing: 14) {
                     Button {
+                        CZFHaptics.impact(.light)
                         installSigned(record)
                     } label: {
                         Text(L("安装"))
