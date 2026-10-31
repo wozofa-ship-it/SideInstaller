@@ -1535,7 +1535,7 @@ struct CertTabView: View {
     /// 审核，调私有 API 不会被拒。
     private static let localDeviceUDID: String? = {
         guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "MGCopyAnswer") else { return nil }
-        typealias MGCopyAnswerFn = @convention(c) (CFStringRef) -> Unmanaged<AnyObject>?
+        typealias MGCopyAnswerFn = @convention(c) (CFString) -> Unmanaged<AnyObject>?
         let fn = unsafeBitCast(sym, to: MGCopyAnswerFn.self)
         guard let value = fn("UniqueDeviceID" as CFString)?.takeRetainedValue() else { return nil }
         return value as? String
