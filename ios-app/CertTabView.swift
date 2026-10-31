@@ -289,148 +289,164 @@ struct CertTabView: View {
     // MARK: 证书管理
 
     private var certCard: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.secondary)
-                    Text(L("证书管理"))
-                        .font(.headline)
-                    Spacer()
-                    if certReady {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.secondary)
+                Text(L("证书管理"))
+                    .font(.headline)
+                Spacer()
+                if certReady {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
                 }
-                if let info = provisionInfo {
-                    infoRow(L("描述文件"), info.name.isEmpty ? L("（无名称）") : info.name)
-                    if !info.teamName.isEmpty {
-                        infoRow(L("团队"), info.teamName)
-                    }
-                    if let expiration = info.expiration {
-                        HStack {
-                            Text(L("到期"))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
-                                .foregroundStyle(expiration < Date() ? .red : .primary)
+            }
+            if let info = provisionInfo {
+                signGroup(title: L("描述文件")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        infoRow(L("描述文件"), info.name.isEmpty ? L("（无名称）") : info.name)
+                        if !info.teamName.isEmpty {
+                            infoRow(L("团队"), info.teamName)
                         }
-                        .font(.footnote)
-                    }
-                    // 轻松签式设备提示：描述文件限定了设备时，拿本机 UDID
-                    //（MGCopyAnswer，轻松签同款办法）跟列表比对，能断言
-                    // 就断言；读不到 UDID 或列表为空才回落到只提示台数。
-                    // 企业证书通常不限设备，这一行也就不出现。
-                    if info.provisionedDeviceCount > 0 {
-                        if let udid = Self.localDeviceUDID, !info.provisionedDevices.isEmpty {
-                            if info.provisionedDevices.contains(udid) {
-                                Text(L("本机在描述文件设备列表里，签名后能装。"))
-                                    .font(.footnote)
-                                    .foregroundStyle(.green)
-                            } else {
-                                Text(L("此签名证书不包含当前设备，签名后无法在当前设备安装！！！"))
-                                    .font(.footnote)
-                                    .foregroundStyle(.red)
+                        if let expiration = info.expiration {
+                            HStack {
+                                Text(L("到期"))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
+                                    .foregroundStyle(expiration < Date() ? .red : .primary)
                             }
-                            Text(udid)
-                                .font(.system(.footnote, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                        } else {
-                            Text(L("描述文件限定了设备（共 %d 台）：如果是开发证书且本机不在列表里，签名后装不上；企业证书通常不限设备。", info.provisionedDeviceCount))
-                                .font(.footnote)
-                                .foregroundStyle(.orange)
+                            .font(.footnote)
+                        }
+                        // 轻松签式设备提示：描述文件限定了设备时，拿本机 UDID
+                        //（MGCopyAnswer，轻松签同款办法）跟列表比对，能断言
+                        // 就断言；读不到 UDID 或列表为空才回落到只提示台数。
+                        // 企业证书通常不限设备，这一行也就不出现。
+                        if info.provisionedDeviceCount > 0 {
+                            if let udid = Self.localDeviceUDID, !info.provisionedDevices.isEmpty {
+                                if info.provisionedDevices.contains(udid) {
+                                    Text(L("本机在描述文件设备列表里，签名后能装。"))
+                                        .font(.footnote)
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Text(L("此签名证书不包含当前设备，签名后无法在当前设备安装！！！"))
+                                        .font(.footnote)
+                                        .foregroundStyle(.red)
+                                }
+                                Text(udid)
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            } else {
+                                Text(L("描述文件限定了设备（共 %d 台）：如果是开发证书且本机不在列表里，签名后装不上；企业证书通常不限设备。", info.provisionedDeviceCount))
+                                    .font(.footnote)
+                                    .foregroundStyle(.orange)
+                            }
                         }
                     }
                 }
-                if let cert = certInfo, !cert.name.isEmpty {
+            }
+            if let cert = certInfo, !cert.name.isEmpty {
+                signGroup(title: L("证书")) {
                     infoRow(L("证书"), cert.name)
                 }
-                // 吊销状态：手动刷新，系统信任评估联网查（OCSP）。
-                // 查不出来（离线、链不全）不报假警告，只显示查不出来。
-                HStack(spacing: 10) {
-                    Text(L("吊销状态"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(revocationText)
-                        .font(.footnote)
-                        .foregroundStyle(revocationColor)
-                    Spacer()
-                    Button {
-                        checkRevocation()
-                    } label: {
-                        Text(revocationChecking ? L("检查中…") : L("检查吊销状态"))
+            }
+            // 吊销状态：手动刷新，系统信任评估联网查（OCSP）。
+            // 查不出来（离线、链不全）不报假警告，只显示查不出来。
+            signGroup(title: L("吊销状态")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        Text(L("吊销状态"))
                             .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Text(revocationText)
+                            .font(.footnote)
+                            .foregroundStyle(revocationColor)
+                        Spacer()
+                        Button {
+                            checkRevocation()
+                        } label: {
+                            Text(revocationChecking ? L("检查中…") : L("检查吊销状态"))
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(revocationChecking || !hasP12)
+                    }
+                    if revocationStatus == .revoked {
+                        Text(L("证书已经掉签，签名后可能无法安装。"))
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                    if let checked = revocationCheckedAt {
+                        Text(L("上次检查：%@", checked.formatted(date: .abbreviated, time: .shortened)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            signGroup(title: L("导入证书")) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 10) {
+                        Button {
+                            showP12Picker = true
+                        } label: {
+                            Text(hasP12 ? L("证书已导入 ✓") : L("导入 .p12 证书"))
+                        }
+                        Button {
+                            showProvisionPicker = true
+                        } label: {
+                            Text(hasProvision ? L("描述文件已导入 ✓") : L("导入描述文件"))
+                        }
                     }
                     .buttonStyle(.bordered)
-                    .disabled(revocationChecking || !hasP12)
-                }
-                if revocationStatus == .revoked {
-                    Text(L("证书已经掉签，签名后可能无法安装。"))
+                    // 轻松签式“导入证书库”：一次选 .p12 + 描述文件两个，
+                    // 配对才进；缺描述文件按轻松签原文报错（单导 p12 走上面）。
+                    HStack(spacing: 10) {
+                        Button {
+                            showCertLibraryPicker = true
+                        } label: {
+                            Text(L("导入证书库"))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    Text(L("证书库一次选 .p12 和描述文件两个，配不上会报错；单导 p12 走上面那个按钮。"))
                         .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                if let checked = revocationCheckedAt {
-                    Text(L("上次检查：%@", checked.formatted(date: .abbreviated, time: .shortened)))
-                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Divider()
-                HStack(spacing: 10) {
-                    Button {
-                        showP12Picker = true
-                    } label: {
-                        Text(hasP12 ? L("证书已导入 ✓") : L("导入 .p12 证书"))
-                    }
-                    Button {
-                        showProvisionPicker = true
-                    } label: {
-                        Text(hasProvision ? L("描述文件已导入 ✓") : L("导入描述文件"))
+            }
+            // 导出给 LiveContainer：只发 .p12 文件和描述文件本身，
+            // 密码不一起导出，LiveContainer 导入时再填一次密码。
+            // 这样同一张企业证书不用再找原文件就能在另一边用。
+            if hasP12 || hasProvision {
+                signGroup(title: L("导出证书")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            if hasP12 {
+                                ShareLink(item: EnterpriseCertStore.p12URL) {
+                                    Label(L("Export certificate (p12)"), systemImage: "square.and.arrow.up")
+                                }
+                            }
+                            if hasProvision {
+                                ShareLink(item: EnterpriseCertStore.provisionURL) {
+                                    Label(L("导出描述文件"), systemImage: "square.and.arrow.up")
+                                }
+                            }
+                        }
+                        .font(.footnote)
+                        Text(L("导出后可在 LiveContainer 里导入同一张证书，不用再找原文件；密码不一起导出，导入时再填一次。"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .buttonStyle(.bordered)
-                // 轻松签式“导入证书库”：一次选 .p12 + 描述文件两个，
-                // 配对才进；缺描述文件按轻松签原文报错（单导 p12 走上面）。
-                HStack(spacing: 10) {
-                    Button {
-                        showCertLibraryPicker = true
-                    } label: {
-                        Text(L("导入证书库"))
-                    }
-                }
-                .buttonStyle(.bordered)
-                Text(L("证书库一次选 .p12 和描述文件两个，配不上会报错；单导 p12 走上面那个按钮。"))
+            }
+            if certReady {
+                Text(L("企业证书装完后，首次打开 App 前要去「设置 → 通用 → VPN 与设备管理」信任这张证书。"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                // 导出给 LiveContainer：只发 .p12 文件和描述文件本身，
-                // 密码不一起导出，LiveContainer 导入时再填一次密码。
-                // 这样同一张企业证书不用再找原文件就能在另一边用。
-                if hasP12 || hasProvision {
-                    HStack(spacing: 10) {
-                        if hasP12 {
-                            ShareLink(item: EnterpriseCertStore.p12URL) {
-                                Label(L("Export certificate (p12)"), systemImage: "square.and.arrow.up")
-                            }
-                        }
-                        if hasProvision {
-                            ShareLink(item: EnterpriseCertStore.provisionURL) {
-                                Label(L("导出描述文件"), systemImage: "square.and.arrow.up")
-                            }
-                        }
-                    }
-                    .font(.footnote)
-                    Text(L("导出后可在 LiveContainer 里导入同一张证书，不用再找原文件；密码不一起导出，导入时再填一次。"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if certReady {
-                    Text(L("企业证书装完后，首次打开 App 前要去「设置 → 通用 → VPN 与设备管理」信任这张证书。"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Divider()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            signGroup(title: L("证书密码")) {
                 SecureField(L("证书密码"), text: $password)
                     .textFieldStyle(.roundedBorder)
                     .onChange(of: password) { _, newValue in
@@ -440,19 +456,18 @@ struct CertTabView: View {
                         // 密码输完回车才刷新证书信息：每敲一下都解一次 p12 没必要。
                         refreshCertState()
                     }
-                if let importError {
-                    Text(importError)
+            }
+            if let importError {
+                Text(importError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+            if hasP12 || hasProvision {
+                Button(role: .destructive) {
+                    confirmingRemoveCert = true
+                } label: {
+                    Text(L("移除证书材料"))
                         .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                if hasP12 || hasProvision {
-                    Divider()
-                    Button(role: .destructive) {
-                        confirmingRemoveCert = true
-                    } label: {
-                        Text(L("移除证书材料"))
-                            .font(.footnote)
-                    }
                 }
             }
         }
@@ -1466,6 +1481,35 @@ struct CertTabView: View {
                     }
                     .disabled(batchBusy)
                 }
+                if batchingUnsigned {
+                    HStack(spacing: 12) {
+                        Button {
+                            CZFHaptics.impact()
+                            selectedUnsignedIDs = Set(filteredUnsigned.map { $0.id })
+                        } label: {
+                            Text(L("全选")).font(.footnote)
+                        }
+                        Button {
+                            CZFHaptics.impact()
+                            selectedUnsignedIDs.removeAll()
+                        } label: {
+                            Text(L("取消全选")).font(.footnote)
+                        }
+                        Spacer()
+                        Button {
+                            CZFHaptics.impact()
+                            batchSign()
+                        } label: {
+                            Text(L("签名选中（%d）", selectedUnsignedIDs.count)).font(.footnote)
+                        }
+                        .disabled(selectedUnsignedIDs.isEmpty || batchBusy)
+                    }
+                    if let batchMessage {
+                        Text(batchMessage)
+                            .font(.footnote)
+                            .foregroundStyle(batchFailed ? .red : .green)
+                    }
+                }
                 ForEach(groupedUnsigned, id: \.key) { group in
                     VStack(alignment: .leading, spacing: 12) {
                         Text(group.key.isEmpty ? L("根目录") : group.key)
@@ -1477,26 +1521,6 @@ struct CertTabView: View {
                                 Divider()
                             }
                         }
-                    }
-                }
-                if batchingUnsigned {
-                    HStack(spacing: 12) {
-                        Button { selectedUnsignedIDs = Set(filteredUnsigned.map { $0.id }) } label: {
-                            Text(L("全选")).font(.footnote)
-                        }
-                        Button { selectedUnsignedIDs.removeAll() } label: {
-                            Text(L("取消全选")).font(.footnote)
-                        }
-                        Spacer()
-                        Button { batchSign() } label: {
-                            Text(L("签名选中（%d）", selectedUnsignedIDs.count)).font(.footnote)
-                        }
-                        .disabled(selectedUnsignedIDs.isEmpty || batchBusy)
-                    }
-                    if let batchMessage {
-                        Text(batchMessage)
-                            .font(.footnote)
-                            .foregroundStyle(batchFailed ? .red : .green)
                     }
                 }
             }
@@ -2056,15 +2080,10 @@ struct CertTabView: View {
                             .font(.footnote)
                     }
                 }
-                ForEach(filteredSigned) { record in
-                    signedRow(record)
-                    if record.id != filteredSigned.last?.id {
-                        Divider()
-                    }
-                }
                 if selectingSigned {
                     HStack(spacing: 12) {
                         Button {
+                            CZFHaptics.impact()
                             // 全选只选当前可见的（搜了就只选搜到的）。
                             selectedSignedIDs = Set(filteredSigned.map { $0.id })
                         } label: {
@@ -2072,6 +2091,7 @@ struct CertTabView: View {
                                 .font(.footnote)
                         }
                         Button {
+                            CZFHaptics.impact()
                             selectedSignedIDs.removeAll()
                         } label: {
                             Text(L("取消全选"))
@@ -2079,12 +2099,19 @@ struct CertTabView: View {
                         }
                         Spacer()
                         Button {
+                            CZFHaptics.impact()
                             showingBatchDeleteConfirm = true
                         } label: {
                             Text(L("删除选中（%d）", selectedSignedIDs.count))
                                 .font(.footnote)
                         }
                         .disabled(selectedSignedIDs.isEmpty)
+                    }
+                }
+                ForEach(filteredSigned) { record in
+                    signedRow(record)
+                    if record.id != filteredSigned.last?.id {
+                        Divider()
                     }
                 }
             }
