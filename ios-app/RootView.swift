@@ -615,6 +615,28 @@ struct ToolsView: View {
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(5))
+                    // 下载独立页（轻松签下载顶级 tab 的等价物）：
+                    // 内容就是设置页下载区（复用 DownloadsManager），
+                    // 只是以前只藏在设置 sheet 里，这里在工具 tab
+                    // 给一个固定入口，不另起顶级 tab（5 tab 已满，
+                    // 第 6 个会被收进 More，反而更难找）。
+                    NavigationLink {
+                        DownloadsListView()
+                    } label: {
+                        ToolRow(icon: "arrow.down.circle", title: L("下载"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(6))
+                    // 设置固定入口（轻松签设置顶级 tab 的等价物）：
+                    // 设置页本就存在，只是以前只在各页 toolbar 里
+                    // 弹 sheet，这里在工具 tab 给一个固定行。
+                    Button {
+                        showSettings = true
+                    } label: {
+                        ToolRow(icon: "gearshape", title: L("设置"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(7))
                 }
                 // No bottom padding: the tab bar's inset already clears the last
                 // row, and the extra 20pt would make a page that fits scroll.

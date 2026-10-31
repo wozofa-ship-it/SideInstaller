@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// One IPA in Documents, as the download manager in Settings lists it.
 struct DownloadedIPA: Identifiable, Equatable {
@@ -92,5 +93,77 @@ final class DownloadsManager: ObservableObject {
         }
         deletingID = nil
         refresh()
+    }
+}
+
+/// 下载列表独立页（工具 tab 固定入口，复用 DownloadsManager）：
+/// 设置页下载区同款内容（行样式照 SettingsView.downloadRow），
+/// 不再只藏在设置 sheet 里；删文件前先弹确认，不直接删。
+struct DownloadsListView: View {
+    @StateObject private var manager = DownloadsManager()
+    @State private var pendingDelete: DownloadedIPA?
+
+    var body: some View {
+        List {
+            if let error = manager.lastError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+            if manager.hasLoaded && manager.downloads.isEmpty {
+                Text(L("No downloaded IPAs. Ones you install from the Install tab are cached here."))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(manager.downloads) { item in
+                    HStack(spacing: 12) {
+                        Image(systemName: "shippingbox.fill")
+                            .font(.title3)
+                            .foregroundStyle(Theme.brand)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.displayName)
+                                .font(.subheadline.weight(.medium))
+                            if let modified = item.modified {
+                                let when = modified.formatted(
+                                    Date.FormatStyle(date: .abbreviated, time: .shortened)
+                                        .locale(Localizer.locale))
+                                Text(item.isImported ? L("Added %@", when) : L("Downloaded %@", when))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Text(item.sizeText)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Theme.accent2)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Theme.accent.opacity(0.16)))
+                    }
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            pendingDelete = item
+                        } label: {
+                            Label(L("删除"), systemImage: "trash")
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle(L("下载"))
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { manager.refresh() }
+        .alert(L("删除这个下载的 IPA？"), isPresented: Binding(
+            get: { pendingDelete != nil },
+            set: { if !$0 { pendingDelete = nil } }
+        )) {
+            Button(L("删除"), role: .destructive) {
+                if let item = pendingDelete { manager.delete(item) }
+                pendingDelete = nil
+            }
+            Button(L("取消"), role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text(L("只删文件，不影响已装的 App。"))
+        }
     }
 }

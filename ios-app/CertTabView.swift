@@ -8,11 +8,16 @@ import UniformTypeIdentifiers
 /// 三段切栏（轻松签式分屏）：证书管理 / 签名 IPA / 应用库
 /// （未签名按目录分组、已签名列表）；一次只显示一段，
 /// 不再三卡叠在一个长滚动里。
-/// 企业安装走独立安装（LocalHTTPInstallServer 本地回环，
-/// 不走共用 Engine、不走隧道、不要 WiFi）；回环失败时原因
-/// 只在企业页内显示 + 重试回环，绝不去共享「安装」页。
+/// 企业安装走配对安装（Engine 设备链路，v45 那套：配对 +
+/// 隧道 → lockdown → AFC → installation_proxy）：v61 的回环
+/// 直装在真机上四代都没修通（仍弹“无法连接 localhost”），
+/// 这条路根本不进 itms-services 取清单那个窗口，所以不弹。
+/// 前置是配对文件 + 隧道通 + iOS 18+（用户 12:27 已接受）；
+/// 前置不过时原因只在企业页内显示 + 重试配对，绝不去共享
+/// 「安装」页。LocalHTTPInstallServer.swift 留着不用、不删。
 /// OTAInstallServer.swift 是 HTTPS 旧版，留着不用、不删。
 struct CertTabView: View {
+    @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
@@ -65,10 +70,17 @@ struct CertTabView: View {
     @State private var pendingSignMods = CertSignMods()
     @State private var showingWarningAlert = false
 
-    // 企业独立安装：本地回环服务（不走共用 Engine）。
-    // 回环失败后重试用的记录，就是这次要装的包。
-    @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
-    @State private var localFallbackRecord: SignedIPARecord?
+    // 企业安装：走配对安装（Engine 设备链路，v45 那套）。
+    // 进行中标志 + 成功弹框（2bbabf7 写法：finished 才算成功，
+    // 取消不算）；重试用的记录，就是这次要装的包；失败原因快照
+    // （见 startEngineInstall 的注释，不直接读 engine 的全局量）。
+    @State private var engineInstallInFlight = false
+    @State private var showingEngineSuccessAlert = false
+    @State private var enterpriseInstallRecord: SignedIPARecord?
+    @State private var enterpriseInstallErrorText: String?
+    /// 仅签名并安装那路才记日志：跑完时按 Engine 结果记一条
+    ///（成功/失败）；已签名行直装不记（以前也不记）。
+    @State private var engineInstallLogAppName: String?
 
     // 应用库
     @State private var certPage = CertPage.certificate
@@ -140,6 +152,13 @@ struct CertTabView: View {
         .onAppear {
             refreshCertState()
             signedRecords = SignedIPAStore.load()
+            // 老记录证书段补齐（后台解压、每条只跑一次）：读已签
+            // IPA 里的描述文件团队号，同团队才用当前证书名补；
+            // 解压在 detached 任务里跑，不卡界面，补完重读一次。
+            Task {
+                let changed = await Task.detached { SignedIPAStore.fillMissingCertInfo() }.value
+                if changed { signedRecords = SignedIPAStore.load() }
+            }
             unsignedIPAs = unsignedItems()
             ensureUnsignedInfo()
             presets = CertSignPresetStore.load()
@@ -161,8 +180,54 @@ struct CertTabView: View {
                 ensureUnsignedInfo()
             }
         }
-        // 回环失败不再弹配对兜底：原因只在企业页内显示 + 重试
-        // 回环（见 enterpriseInstallError），绝不去共享「安装」页。
+        .onChange(of: engine.isRunning) { old, new in
+            // 配对安装跑完：finished 置位才算成功（取消不算）。
+            // 失败原因快照到页内本地量：engine 的 lastError 是全局
+            // 的，直接读会把别的 tab 的安装失败也显示到这里；取消
+            // 时 lastError 是 nil，不记失败、不留错误文本。
+            if old && !new && engineInstallInFlight {
+                engineInstallInFlight = false
+                if engine.finished {
+                    showingEngineSuccessAlert = true
+                    if let appName = engineInstallLogAppName {
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: appName, kind: .signAndInstall, success: true,
+                            detail: L("已签好，配对安装完成。")))
+                        logEntries = CertSignLogStore.load()
+                    }
+                } else if let error = engine.lastError {
+                    enterpriseInstallErrorText = error
+                    if let appName = engineInstallLogAppName {
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: appName, kind: .signAndInstall, success: false,
+                            detail: error))
+                        logEntries = CertSignLogStore.load()
+                    }
+                }
+                engineInstallLogAppName = nil
+            }
+        }
+        .alert(L("安装完成"), isPresented: $showingEngineSuccessAlert) {
+            Button(L("知道了"), role: .cancel) {}
+        } message: {
+            Text(L("装好了，可以回桌面查看安装进度。"))
+        }
+        // 导入 sheet 挂在 body 层（原来挂在签名段，应用库段切过去
+        // 就不在层级里、打不开）：签名段和应用库段的导入按钮共用
+        // 这两个，选完都走 select() 进签名段表单。
+        .sheet(isPresented: $showIPAPicker) {
+            FileImporterRepresentableView(
+                allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]
+            ) { urls in
+                if let url = urls.first { select(url) }
+            }
+        }
+        .sheet(isPresented: $showLibraryPicker) {
+            LibraryIPAPicker { url in
+                select(url)
+                showLibraryPicker = false
+            }
+        }
         .onChange(of: iconItem) { _, item in
             guard let item else { return }
             Task {
@@ -542,7 +607,7 @@ struct CertTabView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(signBusy || localInstall.isRunning || !certReady)
+                    .disabled(signBusy || engine.isRunning || !certReady)
                     Button {
                         startSign(kind: .signOnly)
                     } label: {
@@ -553,12 +618,7 @@ struct CertTabView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .disabled(signBusy || localInstall.isRunning || !certReady)
-                    if let status = localInstall.status {
-                        Text(status)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    .disabled(signBusy || engine.isRunning || !certReady)
                     enterpriseInstallError
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
@@ -588,19 +648,6 @@ struct CertTabView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-            }
-        }
-        .sheet(isPresented: $showIPAPicker) {
-            FileImporterRepresentableView(
-                allowedContentTypes: [UTType(filenameExtension: "ipa") ?? .data]
-            ) { urls in
-                if let url = urls.first { select(url) }
-            }
-        }
-        .sheet(isPresented: $showLibraryPicker) {
-            LibraryIPAPicker { url in
-                select(url)
-                showLibraryPicker = false
             }
         }
         .sheet(isPresented: $showPluginPicker) {
@@ -1044,18 +1091,27 @@ struct CertTabView: View {
         case .signAndInstall:
             Task {
                 do {
-                    // 先签好存进「已签名」，再走企业独立安装（本地
-                    // 回环，不走共用 Engine、不走隧道、不要 WiFi）。
+                    // 先签好存进「已签名」，再走配对安装（Engine 设备
+                    // 链路，v45 那套）。日志不在这里记：安装结果要等
+                    // Engine 跑完才知道，跑完时 onChange 里按 finished /
+                    // lastError 记一条（成功/失败）；前置检查不过时
+                    // 这里直接记失败（Engine 根本没跑起来）。
                     let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
                     ensureUnsignedInfo()
-                    CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
-                        appName: record.appName, kind: .signAndInstall, success: true,
-                        detail: L("已签好，已拉起安装。")))
                     await MainActor.run {
-                        self.localFallbackRecord = record
-                        self.localInstall.install(record: record)
+                        self.engineInstallLogAppName = record.appName
+                        self.startEngineInstall(record: record)
+                        if !self.engine.isRunning, let reason = self.enterpriseInstallErrorText {
+                            CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                                appName: record.appName, kind: .signAndInstall, success: false,
+                                detail: reason))
+                            self.logEntries = CertSignLogStore.load()
+                            // 前置失败不会触发 onChange，日志名额在这里清，
+                            // 不然之后一次已签名行安装跑完会误记成这条。
+                            self.engineInstallLogAppName = nil
+                        }
                     }
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
@@ -1073,12 +1129,42 @@ struct CertTabView: View {
         }
     }
 
-    /// 已签名行「安装」：走企业独立安装（本地回环，不走共用
-    /// Engine、不走隧道、不要 WiFi）。回环失败时原因只在
-    /// 企业页内显示 + 重试回环，绝不去共享「安装」页。
+    /// 已签名行「安装」：走配对安装（Engine 设备链路，v45 那套）。
+    /// 前置失败（缺配对文件/隧道）时原因只在企业页内显示 +
+    /// 重试配对，绝不去共享「安装」页。
     private func installSigned(_ record: SignedIPARecord) {
-        localFallbackRecord = record
-        localInstall.install(record: record)
+        startEngineInstall(record: record)
+    }
+
+    /// 企业安装统一入口（签名并安装、已签名行安装、重试都走它）：
+    /// 调 Engine 的 runInstallSignedIPA；前置检查（配对文件、
+    /// 隧道、iOS 18+）不过时 Engine 直接返回、isRunning 根本没
+    /// 置位——这时就别留着进行中标志（否则之后别的 tab 一次
+    /// 成功安装也会误弹），并把原因快照到页内：优先用 Engine
+    /// 的前置向导（标题 + 步骤，告诉用户去补配对文件/连隧道）；
+    /// 向导没变（纯日志那两路：系统版本、内置隧道自动起关了）
+    /// 或是上一次跑剩的旧向导（成功后的信任向导、失败的别的
+    /// 向导）时，一律给通用提示，不把旧向导当成这次的原因；
+    /// 不读 lastError——前置失败不置它，读到的只会是上一次
+    /// 跑的旧错。重复同一个前置失败时向导值不变，但它仍是
+    /// 这次的原因（前置三向导认值，不认新旧）。
+    private func startEngineInstall(record: SignedIPARecord) {
+        enterpriseInstallRecord = record
+        enterpriseInstallErrorText = nil
+        let guideBefore = engine.guide
+        engineInstallInFlight = true
+        engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
+        if !engine.isRunning {
+            engineInstallInFlight = false
+            if let guide = engine.guide,
+               guide != guideBefore
+               || guide == Guides.importPairing || guide == Guides.vpn
+               || guide == Guides.deviceIPMismatch {
+                enterpriseInstallErrorText = ([guide.title] + guide.steps).joined(separator: "\n")
+            } else {
+                enterpriseInstallErrorText = L("配对安装没能启动：请检查配对文件与隧道是否就绪，或去「安装」页看日志。")
+            }
+        }
     }
 
     // MARK: 应用库（未签名/已签名切栏）
@@ -1095,6 +1181,27 @@ struct CertTabView: View {
                     Text(L("应用库"))
                         .font(.headline)
                     Spacer()
+                    // 应用库页内直接导入（轻松签应用页同款入口）：
+                    // 复用签名段的文件导入 picker，选完走 select()
+                    // 进签名段表单；“从文件库选择”不在这里重复——
+                    // 未签名栏本身就是文件库，点行就进签名。
+                    Button {
+                        showIPAPicker = true
+                    } label: {
+                        Text(L("导入"))
+                            .font(.footnote)
+                    }
+                    // 商店入口（轻松签 AppStore 顶级 tab 的等价物）：
+                    // Side 的源浏览 + 下载能力本就在 SourcesView 里，
+                    // 只是以前只藏在安装 tab 内，这里在应用库页给一
+                    // 个直达入口，不另起顶级 tab（5 tab 已满，第 6 个
+                    // 会被收进 More，反而更难找）。
+                    NavigationLink {
+                        SourcesView()
+                    } label: {
+                        Text(L("商店"))
+                            .font(.footnote)
+                    }
                 }
                 // 轻松签应用页同款浅灰搜索框，两个切栏都按名字过滤。
                 HStack(spacing: 8) {
@@ -1541,30 +1648,37 @@ struct CertTabView: View {
         return value as? String
     }()
 
-    /// 企业安装失败提示 + 回环重试/取消：只在企业页内显示，
-    /// 不弹配对兜底、不碰共享「安装」页。以前只在 !isRunning 时
-    /// 显示，安装一卡住（isRunning 永真、lastError 仍 nil）页内
-    /// 就没有任何按钮能停它、能重试——现在 isRunning 时也显示
-    /// “取消安装”（调 stop()），停掉后 lastError 若有就显示重试。
+    /// 企业安装状态 + 失败提示 + 配对重试/取消：只在企业页内
+    /// 显示，不碰共享「安装」页。isRunning 时显示进度 +“取消
+    /// 安装”（调 Engine 的 cancelOneClick，中止 pipelineTask，
+    /// 不是摆设）；跑完失败时显示快照的原因 +“重试配对安装”
+    ///（原因来自 startEngineInstall / onChange 的快照，不直接
+    ///读 engine 的全局 lastError，免得别的 tab 的失败串到这里）。
     @ViewBuilder
     private var enterpriseInstallError: some View {
-        if localInstall.isRunning {
+        if engine.isRunning {
             HStack(spacing: 8) {
-                Text(L("安装服务运行中"))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if engine.installProgress > 0 {
+                    Text(L("配对安装进行中（%d%%）", Int(engine.installProgress * 100)))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(L("配对安装进行中"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button(L("取消安装")) { localInstall.stop() }
+                Button(L("取消安装")) { engine.cancelOneClick() }
                     .font(.footnote)
             }
-        } else if let error = localInstall.lastError {
+        } else if let error = enterpriseInstallErrorText {
             HStack(spacing: 8) {
                 Text(error)
                     .font(.footnote)
                     .foregroundStyle(.red)
                 Spacer()
-                if let record = localFallbackRecord {
-                    Button(L("重试回环安装")) { localInstall.install(record: record) }
+                if let record = enterpriseInstallRecord {
+                    Button(L("重试配对安装")) { startEngineInstall(record: record) }
                         .font(.footnote)
                 }
             }
@@ -1573,11 +1687,6 @@ struct CertTabView: View {
 
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let status = localInstall.status {
-                Text(status)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
             enterpriseInstallError
             if signedRecords.isEmpty {
                 Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))
@@ -1688,7 +1797,7 @@ struct CertTabView: View {
                         Text(L("安装"))
                             .font(.footnote.weight(.semibold))
                     }
-                    .disabled(localInstall.isRunning)
+                    .disabled(engine.isRunning)
                     ShareLink(item: SignedIPAStore.url(for: record)) {
                         Text(L("分享"))
                             .font(.footnote)
@@ -1761,7 +1870,7 @@ struct CertTabView: View {
     }()
 }
 
-/// 签名流程两种去向：仅签名存已签名，或签名后走本地直装。
+/// 签名流程两种去向：仅签名存已签名，或签名后走配对安装。
 private enum CertSignKind {
     case signOnly
     case signAndInstall

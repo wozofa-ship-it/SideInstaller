@@ -85,6 +85,7 @@ enum AppFileLibrary {
 /// 文件页：管理 App 沙盒 Documents 里的文件——导入、分享、删除，
 /// IPA 可以直接去企业证书签名或（已签名的）直接安装。
 struct FilesTabView: View {
+    @EnvironmentObject private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace
@@ -121,11 +122,16 @@ struct FilesTabView: View {
     /// 要移动的文件/文件夹（sheet 的 item，nil 就不弹）。
     @State private var moveItem: LocalFileItem?
     @StateObject private var lanServer = LANTransferServer()
-    /// 文件页已签名安装：本地回环服务（企业签的包专用，
-    /// 不走共用 Engine、不走隧道、不要 WiFi）。
-    @ObservedObject private var localInstall = LocalHTTPInstallServer.shared
-    /// 文件页回环失败后重试用的记录（装时记下）。
+    /// 文件页已签名安装：走配对安装（Engine 设备链路，v45 那套，
+    /// 企业签的包专用）。进行中标志 + 成功弹框（证书页同款，
+    /// inFlight 隔离：两页的 onChange 各只认自己起的安装）；
+    /// 重试用的记录/文件地址（装时记下，无记录的现解安装记地址）；
+    /// 失败原因快照（证书页同款，不直接读 engine 全局量）。
+    @State private var engineInstallInFlight = false
+    @State private var showingEngineSuccessAlert = false
     @State private var fileInstallRecord: SignedIPARecord?
+    @State private var fileInstallURL: URL?
+    @State private var fileInstallErrorText: String?
     /// 局域网地址点按复制后的短暂「已复制」提示。
     @State private var lanCopied = false
 
@@ -157,56 +163,78 @@ struct FilesTabView: View {
         (currentDir as NSString).lastPathComponent
     }
 
-    /// 文件页已签名 IPA 安装：只走本地回环（企业签的包），
-    /// 不碰配对/共享「安装」页；记录找得到就用记录，
-    /// 找不到（手动拷进已签名目录的）就现解 Info.plist；
-    /// 两样都没有就明说，不静默失败。
+    /// 文件页已签名 IPA 安装：只走配对安装（Engine 设备链路，
+    /// v45 那套，企业签的包），不碰回环/共享「安装」页；记录
+    /// 找得到就用记录，找不到（手动拷进已签名目录的）就直接
+    /// 按文件地址装——Engine 自己解包取包名，不再预先解
+    /// Info.plist 卡一道（解包失败时 Engine 的失败原因会显示
+    /// 出来，不静默失败）。
     private func installSignedFile(_ item: LocalFileItem) {
         if let record = SignedIPAStore.load().first(where: { SignedIPAStore.url(for: $0) == item.url }) {
-            fileInstallRecord = record
-            localInstall.install(record: record)
+            startEngineInstall(ipaURL: item.url, record: record)
             return
         }
-        // 无记录的现解安装没有可存的重试记录：先清掉旧的，
-        // 免得失败时重试按钮指到上一次的包；重装点行上的安装即可。
-        fileInstallRecord = nil
-        guard let info = IPALibrary.appInfo(at: item.url), !info.bundleID.isEmpty else {
-            opMessage = L("这个已签名文件没有安装记录，解包也拿不到 Bundle ID，装不了，先去证书页重签一次。")
-            opFailed = true
-            return
-        }
-        localInstall.install(ipaURL: item.url, appName: info.name, bundleID: info.bundleID, version: info.version ?? "1.0")
+        startEngineInstall(ipaURL: item.url, record: nil)
     }
 
-    /// 文件页回环安装状态：只在文件页内显示，不碰共享「安装」页。
-    /// 以前只在 !isRunning 时显示失败，安装一卡住页内就没有任何
-    /// 按钮能停它——现在 isRunning 时也显示“取消安装”（调 stop()），
-    /// 停掉后 lastError 若有就显示重试（与证书页同一规则）。
+    /// 文件页安装统一入口（证书页 startEngineInstall 同款）：
+    /// 调 Engine 的 runInstallSignedIPA；前置检查不过时 Engine
+    /// 直接返回、isRunning 没置位——清进行中标志并把原因快照
+    /// 到页内（向导判新旧的规则见证书页，不把旧向导当原因）。
+    private func startEngineInstall(ipaURL: URL, record: SignedIPARecord?) {
+        fileInstallRecord = record
+        fileInstallURL = ipaURL
+        fileInstallErrorText = nil
+        let guideBefore = engine.guide
+        engineInstallInFlight = true
+        engine.runInstallSignedIPA(ipaURL: ipaURL)
+        if !engine.isRunning {
+            engineInstallInFlight = false
+            if let guide = engine.guide,
+               guide != guideBefore
+               || guide == Guides.importPairing || guide == Guides.vpn
+               || guide == Guides.deviceIPMismatch {
+                fileInstallErrorText = ([guide.title] + guide.steps).joined(separator: "\n")
+            } else {
+                fileInstallErrorText = L("配对安装没能启动：请检查配对文件与隧道是否就绪，或去「安装」页看日志。")
+            }
+        }
+    }
+
+    /// 文件页配对安装状态：只在文件页内显示，不碰共享「安装」页。
+    /// isRunning 时显示进度 +“取消安装”（调 Engine 的
+    /// cancelOneClick，中止 pipelineTask）；跑完失败时显示快照
+    /// 的原因 +“重试配对安装”（原因来自 startEngineInstall /
+    /// onChange 的快照，不直接读 engine 全局量）。
     @ViewBuilder
     private var fileInstallStatus: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let status = localInstall.status {
-                Text(status)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            if localInstall.isRunning {
+            if engine.isRunning {
                 HStack(spacing: 8) {
-                    Text(L("安装服务运行中"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    if engine.installProgress > 0 {
+                        Text(L("配对安装进行中（%d%%）", Int(engine.installProgress * 100)))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(L("配对安装进行中"))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    Button(L("取消安装")) { localInstall.stop() }
+                    Button(L("取消安装")) { engine.cancelOneClick() }
                         .font(.footnote)
                 }
-            } else if let error = localInstall.lastError {
+            } else if let error = fileInstallErrorText {
                 HStack(spacing: 8) {
                     Text(error)
                         .font(.footnote)
                         .foregroundStyle(.red)
                     Spacer()
                     if let record = fileInstallRecord {
-                        Button(L("重试回环安装")) { localInstall.install(record: record) }
+                        Button(L("重试配对安装")) { startEngineInstall(ipaURL: SignedIPAStore.url(for: record), record: record) }
+                            .font(.footnote)
+                    } else if let url = fileInstallURL {
+                        Button(L("重试配对安装")) { startEngineInstall(ipaURL: url, record: nil) }
                             .font(.footnote)
                     }
                 }
@@ -254,6 +282,23 @@ struct FilesTabView: View {
             .background(AppBackground())
         }
         .onAppear { files = AppFileLibrary.scan() }
+        .onChange(of: engine.isRunning) { old, new in
+            // 证书页 onChange 同款：finished 才算成功（取消不算）；
+            // 失败原因快照到页内本地量，不直接读 engine 全局量。
+            if old && !new && engineInstallInFlight {
+                engineInstallInFlight = false
+                if engine.finished {
+                    showingEngineSuccessAlert = true
+                } else if let error = engine.lastError {
+                    fileInstallErrorText = error
+                }
+            }
+        }
+        .alert(L("安装完成"), isPresented: $showingEngineSuccessAlert) {
+            Button(L("知道了"), role: .cancel) {}
+        } message: {
+            Text(L("装好了，可以回桌面查看安装进度。"))
+        }
         .alert(L("重命名"), isPresented: Binding(
             get: { renameItem != nil },
             set: { if !$0 { renameItem = nil } }
@@ -735,7 +780,7 @@ struct FilesTabView: View {
                                 Text(L("安装"))
                                     .font(.footnote.weight(.semibold))
                             }
-                            .disabled(localInstall.isRunning)
+                            .disabled(engine.isRunning)
                         }
                     }
                     Spacer()

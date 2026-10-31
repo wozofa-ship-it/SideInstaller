@@ -565,6 +565,67 @@ enum SignedIPAStore {
         save(load().filter { !names.contains($0.fileName) })
     }
 
+    /// 老记录证书段补齐：v61 之前签的记录没存 certName/teamID，
+    /// 行里不显示证书段。逐条读已签 IPA 里的 embedded.mobileprovision
+    ///（CMS 包着 plist，照 BuiltinTunnel 的 latin1 截 XML 办法），
+    ///取 TeamIdentifier；团队与当前描述文件一致时才用当前证书名
+    ///补 certName（同团队才敢认是同一张证，团队不同就不猜）。
+    ///已补过的记录不再重读；读不到/解不出就跳过，不报错。
+    ///返回 true 表示改过清单（调用方重读一次）。
+    ///注意：解压整个 IPA 只为读一个小文件，大包会慢一截——
+    ///调用方须在后台跑、每条只跑一次，跑完就不再碰。
+    static func fillMissingCertInfo() -> Bool {
+        guard let currentTeam = EnterpriseCertStore.provisionInfo?.teamID,
+              !currentTeam.isEmpty,
+              let currentName = EnterpriseCertStore.certInfo?.name,
+              !currentName.isEmpty else { return false }
+        var records = load()
+        var changed = false
+        for index in records.indices {
+            let old = records[index]
+            guard old.certName == nil || old.teamID == nil else { continue }
+            // 已有团队号且与当前团队不同：这条记录对应的文件后来
+            // 换证重签过（或记录本身就是旧证的），不拿当前证书名
+            // 去盖它。
+            if let storedTeam = old.teamID, storedTeam != currentTeam { continue }
+            guard let team = provisionTeamID(of: url(for: old)), team == currentTeam else { continue }
+            if records[index].certName == nil { records[index].certName = currentName }
+            if records[index].teamID == nil { records[index].teamID = team }
+            changed = true
+        }
+        if changed { save(records) }
+        return changed
+    }
+
+    /// 已签 IPA 里的描述文件团队号：解压到暂存目录，读
+    /// Payload/*.app/embedded.mobileprovision 的 TeamIdentifier。
+    /// 解不出就 nil（调用方跳过，不报错）。
+    private static func provisionTeamID(of ipaURL: URL) -> String? {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CZFProvision-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard FileZipTool.unzip(archive: ipaURL, to: tmp) == nil,
+              let payload = try? FileManager.default.contentsOfDirectory(
+                  at: tmp.appendingPathComponent("Payload", isDirectory: true),
+                  includingPropertiesForKeys: nil),
+              let appDir = payload.first(where: { $0.pathExtension == "app" }),
+              let data = try? Data(contentsOf: appDir.appendingPathComponent("embedded.mobileprovision")),
+              let text = String(data: data, encoding: .isoLatin1),
+              let start = text.range(of: "<?xml"),
+              let end = text.range(of: "</plist>", options: .backwards) else {
+            return nil
+        }
+        let xml = String(text[start.lowerBound..<end.upperBound])
+        guard let xmlData = xml.data(using: .utf8),
+              let plist = try? PropertyListSerialization.propertyList(
+                  from: xmlData, options: [], format: nil) as? [String: Any],
+              let teams = plist["TeamIdentifier"] as? [String],
+              let team = teams.first, !team.isEmpty else {
+            return nil
+        }
+        return team
+    }
+
     /// 文件页改名后同步清单里的文件名。
     static func renameFile(from oldName: String, to newName: String) {
         var records = load()

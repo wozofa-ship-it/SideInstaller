@@ -23,6 +23,11 @@ import UIKit
 /// - 只能装企业证书签好的包（个人 ID 签的包走这条路装不上，
 ///   系统安装器验签名那关就过不了，仍走配对安装）。
 /// - 服务只在安装期间跑，装完自动停；路径带随机 ID，不猜到。
+/// v62 起停用：企业安装改走配对安装（Engine 设备链路，v45 那套），
+/// 证书页/文件页不再调这里；文件留着不用（与 OTAInstallServer 同例）。
+/// 看门狗与 diagnosticLog 已同步停用：scheduleNoHitWatchdog 不再
+/// 排期（见该函数），diagnosticLog 自此不再追加（服务不起，handler
+/// 永不命中，数组恒为空，仅留着不删、免得以后接线又要重写）。
 final class LocalHTTPInstallServer: ObservableObject {
     /// 全局唯一：证书页与文件页共用同一实例，isRunning/status/
     /// lastError 不再两边分裂（以前各 @StateObject 一个，A 页起的
@@ -35,9 +40,10 @@ final class LocalHTTPInstallServer: ObservableObject {
     /// 最近一次失败原因：企业页/文件页据此在页内显示 + 重试回环，
     /// 不弹兜底、不碰配对/共享安装页；下次 install() 时清掉。
     @Published private(set) var lastError: String?
-    /// 接线诊断日志（下次再弹“无法连接 localhost”时看这个）：
-    /// handler 命中、起服端口都记一行；Console 可见，页内也可直接
-    /// 读这个数组展示。只留最近 100 行。
+    /// 接线诊断日志（v62 起停用：企业安装改走 Engine，服务不起，
+    /// handler 永不命中，此数组恒为空；仅留着不删，免得以后
+    /// 接线又要重写。以前的用法：handler 命中、起服端口记一行，
+    /// Console 可见，页内也可直接读这个数组展示，只留最近 100 行）。
     @Published private(set) var diagnosticLog: [String] = []
 
     private var webServer: GCDWebServer?
@@ -301,12 +307,12 @@ final class LocalHTTPInstallServer: ObservableObject {
     }
 
     private func scheduleNoHitWatchdog() {
+        // v62 起停用：企业安装改走 Engine，这服务留着不用；看门狗
+        // 是回环专属（等 itms-services 的 handler 命中），Engine 路
+        // 没有 handler 概念，排期只会误杀——直接不排，调用点留着
+        // 不动（install() 里那行照常调，进来就返回）。
         noHitWatchdog?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.handleNoHitTimeout()
-        }
-        noHitWatchdog = work
-        queue.asyncAfter(deadline: .now() + 20, execute: work)
+        noHitWatchdog = nil
     }
 
     /// handler 线程上只 cancel、不置 nil（见 noHitWatchdog 注释）。
@@ -328,8 +334,9 @@ final class LocalHTTPInstallServer: ObservableObject {
         DispatchQueue.main.async { self.status = text }
     }
 
-    /// 安装期间的独立静音音频（见 installAudio 注释）：Playback
-    /// 类别、循环播 1 秒静音。跟全局 KeepAlive 同款 engine 写法
+    /// 安装期间的独立静音音频（v62 起停用：企业安装改走 Engine，
+    /// 不再用这个 keeper 保活；类留着不用，与本文件本体同例）：
+    /// Playback 类别、循环播 1 秒静音。跟全局 KeepAlive 同款 engine 写法
     ///（本仓已验证的路子），但 engine 是实例私有的；session 则
     /// 不再私有：start 成功时向全局 KeepAlive 计数 +1（只动计数、
     /// 不启动全局 engine），这样全局最后一个 holder 停掉时不会

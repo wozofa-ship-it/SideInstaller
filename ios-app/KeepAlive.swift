@@ -51,10 +51,12 @@ final class KeepAlive: NSObject {
         if Self.audioHolders == 0 { Self.releaseSession() }
     }
 
-    /// 外部静音音频（安装期的 InstallAudioKeeper）持有 session 的计数：
-    /// 只动计数、不启动全局 engine；调用方须成对调用（start 成功时
-    /// retain、stop 时 release）。归零时才释放 session，避免全局
-    /// 最后一个 holder 停掉时误杀正在跑的安装音频。
+    /// 外部静音音频持有 session 的计数（v62 起停用：企业安装改走
+    /// Engine，安装期的 InstallAudioKeeper 留着不用，不再有外部
+    /// holder 调这里；计数 API 留着不删，免得以后外部音频 holder
+    /// 又要重写）：只动计数、不启动全局 engine；调用方须成对
+    /// 调用（start 成功时 retain、stop 时 release）。归零时才释放
+    /// session，避免全局最后一个 holder 停掉时误杀正在跑的音频。
     static func retainAudioSession() {
         audioHolders += 1
     }

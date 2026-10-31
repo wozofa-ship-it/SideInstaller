@@ -13,8 +13,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.9.9"
-    CURRENT_PROJECT_VERSION: "54"
+    MARKETING_VERSION: "0.9.10"
+    CURRENT_PROJECT_VERSION: "55"
     TARGETED_DEVICE_FAMILY: "1,2"
     # aws-lc-rs / idevice are arm64-only here; drop x86_64 sim slice.
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
