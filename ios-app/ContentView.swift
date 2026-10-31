@@ -1364,7 +1364,10 @@ extension View {
             Button { isPresented.wrappedValue = true } label: {
                 Image(systemName: "gearshape")
             }
-            .tint(.primary)
+            // 与工具页设置行同色（indigo）：.primary 在浅色下是黑，
+            // 齿轮就跟黑图标行一水黑；齿轮就是设置入口，全页统一
+            // 这个色（本 helper 全 App 共用，改色即全页同色）。
+            .tint(.indigo)
         }
     }
 }

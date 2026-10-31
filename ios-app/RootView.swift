@@ -563,7 +563,7 @@ struct ToolsView: View {
                     NavigationLink {
                         SideBySideView(manager: sideBySideManager)
                     } label: {
-                        ToolRow(image: "SideBySideLogo",
+                        ToolRow(icon: "square.on.square", color: .purple,
                                 title: L("Side by Side"),
                                 beta: true)
                     }
@@ -575,7 +575,7 @@ struct ToolsView: View {
                         NavigationLink {
                             PairingView(manager: pairingManager)
                         } label: {
-                            ToolRow(image: "PairingLogo", title: L("Pairing"))
+                            ToolRow(icon: "link", color: .teal, title: L("Pairing"))
                         }
                         .buttonStyle(.plain, sound: .tick)
                         .cascadeItem(2)
@@ -583,7 +583,7 @@ struct ToolsView: View {
                     NavigationLink {
                         CertsView(manager: certManager)
                     } label: {
-                        ToolRow(image: "CertsLogo", title: L("Certificates"))
+                        ToolRow(icon: "checkmark.seal", color: .blue, title: L("Certificates"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(2))
@@ -597,21 +597,21 @@ struct ToolsView: View {
                     NavigationLink {
                         EntitlementsView(manager: entitlementsManager)
                     } label: {
-                        ToolRow(image: "EntitlementsLogo", title: L("Entitlements"))
+                        ToolRow(icon: "checklist", color: .orange, title: L("Entitlements"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(3))
                     NavigationLink {
                         LocationView(manager: locationManager)
                     } label: {
-                        ToolRow(image: "LocationLogo", title: L("Location spoofing"))
+                        ToolRow(icon: "location.fill", color: .green, title: L("Location spoofing"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(4))
                     NavigationLink {
                         AppsView(manager: appsManager)
                     } label: {
-                        ToolRow(image: "AppsLogo", title: L("Sideloaded apps"))
+                        ToolRow(icon: "app.badge.clock", color: .red, title: L("Sideloaded apps"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(5))
@@ -623,7 +623,7 @@ struct ToolsView: View {
                     NavigationLink {
                         DownloadsListView()
                     } label: {
-                        ToolRow(icon: "arrow.down.circle", title: L("下载"))
+                        ToolRow(icon: "arrow.down.circle", color: .pink, title: L("下载"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(6))
@@ -633,7 +633,7 @@ struct ToolsView: View {
                     Button {
                         showSettings = true
                     } label: {
-                        ToolRow(icon: "gearshape", title: L("设置"))
+                        ToolRow(icon: "gearshape", color: .indigo, title: L("设置"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(7))
@@ -667,11 +667,14 @@ struct ToolsView: View {
     }
 }
 
-/// One Tools menu row: logo, name and chevron. Pages without logo art pass an
-/// SF Symbol, drawn on the brand gradient at the same size.
+/// One Tools menu row: coloured glyph, name and chevron. Each row gets its
+/// own gradient colour (no uniform black: the dark logo art rendered every
+/// row black); the glyph is a white SF Symbol on that row's gradient.
+/// The logo assets stay in the catalog (each pushed page's BrandHeader
+/// still uses its own), only the Tools rows stop using them.
 private struct ToolRow: View {
-    var image: String? = nil
-    var icon: String? = nil
+    var icon: String
+    var color: Color
     var title: String
     /// Shows a Beta badge.
     var beta: Bool = false
@@ -693,19 +696,15 @@ private struct ToolRow: View {
         }
     }
 
-    @ViewBuilder
+    /// Single branch now (no if/switch over View types), so no
+    /// @ViewBuilder needed here; the 46×46 frame + cornerRadius 12
+    /// in body are untouched.
     private var glyph: some View {
-        if let image {
-            Image(image)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                Rectangle().fill(Theme.brand)
-                Image(systemName: icon ?? "questionmark")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
+        ZStack {
+            Rectangle().fill(Theme.gradient(color))
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 }

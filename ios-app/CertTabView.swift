@@ -80,6 +80,8 @@ struct CertTabView: View {
     // startEnterpriseInstall 的注释，completion 回来的，不直接
     // 读 localInstall 的全局量，免得别的页的失败串到这里）。
     @State private var enterpriseInstallInFlight = false
+    // 安装诊断日志展开态（默认收起）：只控制展示，不存盘、不进 UserDefaults。
+    @State private var showInstallDiagnosticLog = false
     @State private var showingEnterpriseInstallSuccessAlert = false
     @State private var enterpriseInstallRecord: SignedIPARecord?
     @State private var enterpriseInstallErrorText: String?
@@ -610,6 +612,7 @@ struct CertTabView: View {
                     .buttonStyle(.bordered)
                     .disabled(signBusy || localInstall.isRunning || !certReady)
                     enterpriseInstallStatus
+                    installDiagnosticLogSection
                     if let signOnlyMessage {
                         Text(signOnlyMessage)
                             .font(.footnote)
@@ -839,14 +842,14 @@ struct CertTabView: View {
 
     private func selectedIPASummary(_ url: URL) -> some View {
         HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(width: 52, height: 52)
-                Image(systemName: "app.badge.checkmark")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-            }
+            // 签名段已选文件行：显示 IPA 真实图标（应用库同款
+            // libraryIcon：取到显示 52×52 真图，取不到/还没取到
+            // 显示中性灰方块占位，不造假图）。取图走 unsigned
+            // 缓存桶 + loadLibraryIcon（signed: false），与未签名
+            // 库行同一套；行 .task(id: 路径#指纹) 触发，换文件重取、
+            // 同文件不重复解包、取失败不死循环。行布局/文字/
+            // 更换按钮/签名逻辑一律不动。
+            libraryIcon(for: url.path, signed: false)
             VStack(alignment: .leading, spacing: 2) {
                 Text(selectedInfo?.name ?? url.lastPathComponent)
                     .font(.subheadline.weight(.semibold))
@@ -873,6 +876,9 @@ struct CertTabView: View {
                 Text(L("更换"))
                     .font(.footnote)
             }
+        }
+        .task(id: "\(url.path)#\(iconFingerprint(for: url.path))") {
+            loadLibraryIcon(for: url.path, signed: false)
         }
     }
 
@@ -1703,9 +1709,52 @@ struct CertTabView: View {
         }
     }
 
+    /// 安装诊断日志（只读展示，不动行为）：读单例 localInstall
+    /// .diagnosticLog 原样展示（不解析、不重排、不过滤；
+    /// 最新行在最下，往下翻）。默认收起；失败后点开看有
+    /// 没有 manifest 命中 / IPA 命中 / 无命中，就是阶段证据。
+    /// 复制按钮把全文贴到剪贴板。签名段与应用库段各放一
+    /// 处、共用同一个展开态与同一份数据；三段切栏一次只
+    /// 显示一段，不会同时出现两个。
+    private var installDiagnosticLogSection: some View {
+        DisclosureGroup(isExpanded: $showInstallDiagnosticLog) {
+            VStack(alignment: .leading, spacing: 8) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if localInstall.diagnosticLog.isEmpty {
+                            Text(L("暂无安装日志。"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(Array(localInstall.diagnosticLog.enumerated()), id: \.offset) { _, line in
+                                Text(verbatim: line)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+                .background(Color.secondary.opacity(0.08))
+                .cornerRadius(8)
+                Button(L("复制日志")) {
+                    UIPasteboard.general.string = localInstall.diagnosticLog.joined(separator: "\n")
+                }
+                .font(.footnote)
+                .disabled(localInstall.diagnosticLog.isEmpty)
+            }
+        } label: {
+            Text(L("安装诊断日志"))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var signedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             enterpriseInstallStatus
+            installDiagnosticLogSection
             if signedRecords.isEmpty {
                 Text(L("还没有已签名的 IPA。用「签名」页的「仅签名」签好就会存到这里，随时能装、能分享。"))
                     .font(.footnote)
