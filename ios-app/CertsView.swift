@@ -78,8 +78,8 @@ struct CertsView: View {
 
     /// 企业页已有同款红条，个人证书页之前只有行内小字到期日：
     /// 7 天有效期的个人证书到期前毫无预警，App 打不开才发现。
-    /// 任一证书 7 天内到期就出红条，写明证书名 + 到期日；
-    /// 只展示，不碰续签过滤、团队判定等任何逻辑。
+    /// 任一证书 7 天内到期就出红条，写明证书名 + 到期日，下附一行
+    /// 动作指引；只展示，不碰续签过滤、团队判定等任何逻辑。
     @ViewBuilder
     private var expiryBanner: some View {
         if !expiringCerts.isEmpty {
@@ -99,6 +99,9 @@ struct CertsView: View {
                             }
                         }
                     }
+                    Text(L("证书到期后请重新登录 Apple ID 获取新证书，再用全部续签重签 App。"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .transition(.opacity)

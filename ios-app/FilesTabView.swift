@@ -254,11 +254,14 @@ struct FilesTabView: View {
         opFailed = false
     }
 
-    /// 搜索过滤（当前视图）：名字含查询串就算，不区分大小写。
+    /// 搜索过滤（当前视图）：名字或行上显示的 Bundle ID 含查询串就算，不区分大小写。
     private func matching(_ items: [LocalFileItem]) -> [LocalFileItem] {
         guard !fileSearchText.isEmpty else { return items }
         let query = fileSearchText.lowercased()
-        return items.filter { $0.name.lowercased().contains(query) }
+        return items.filter {
+            $0.name.lowercased().contains(query)
+                || (fileIPAInfo[$0.url.path]?.bundleID.lowercased().contains(query) == true)
+        }
     }
 
     /// 当前文件夹的直接子项（文件夹 + 文件同一列表，扫描顺序）。
@@ -1219,23 +1222,28 @@ struct FilesTabView: View {
         }
     }
 
-    /// 从磁盘删掉一项（已签名行同时清 Signed 清单记录，
-    /// SignedIPAStore.remove 里本来就连文件一起删）。
-    private func removeFileFromDisk(_ item: LocalFileItem) {
+    /// 从磁盘删掉一项，返回磁盘上是不是真没了（已签名行同时清 Signed 清单记录，
+    /// SignedIPAStore.remove 里本来就连文件一起删）。删不掉返回 false，
+    /// 调用方写提示，别静默重扫了事。
+    private func removeFileFromDisk(_ item: LocalFileItem) -> Bool {
         if item.isInSignedDir,
            let record = SignedIPAStore.load().first(where: { $0.fileName == item.name }) {
             SignedIPAStore.remove(record)
-        } else {
-            try? FileManager.default.removeItem(at: item.url)
+        } else if FileManager.default.fileExists(atPath: item.url.path) {
+            do {
+                try FileManager.default.removeItem(at: item.url)
+            } catch {
+                return false
+            }
         }
+        return !FileManager.default.fileExists(atPath: item.url.path)
     }
 
     /// 单删：磁盘上确认没了才从数组里去掉它（含文件夹子项），
     /// 不用整树重扫；删除没成功（文件还在）就重扫恢复真相，
     /// 别把还在的文件藏掉。
     private func delete(_ item: LocalFileItem) {
-        removeFileFromDisk(item)
-        if !FileManager.default.fileExists(atPath: item.url.path) {
+        if removeFileFromDisk(item) {
             files.removeAll {
                 $0.url.path == item.url.path || $0.url.path.hasPrefix(item.url.path + "/")
             }
@@ -1243,6 +1251,8 @@ struct FilesTabView: View {
         } else {
             files = AppFileLibrary.scan()
             resetCurrentDirIfNeeded()
+            opMessage = L("删除失败，文件仍在")
+            opFailed = true
         }
     }
 
@@ -1331,13 +1341,18 @@ struct FilesTabView: View {
     /// 批量删：先删完所有项，最后只扫一次（原来每项各扫一次，
     /// 删 N 个就是 N 次整树枚举，全在主线程）。
     private func deleteSelection() {
+        var failed = 0
         for item in files where selection.contains(item.id) {
-            removeFileFromDisk(item)
+            if !removeFileFromDisk(item) { failed += 1 }
         }
         selection = []
         selecting = false
         files = AppFileLibrary.scan()
         resetCurrentDirIfNeeded()
+        if failed > 0 {
+            opMessage = L("有 %d 个文件删除失败", failed)
+            opFailed = true
+        }
     }
 
     /// 在同目录里找一个不重名的目标 URL。
@@ -1399,7 +1414,14 @@ struct FilesTabView: View {
         // 只打包文件：文件夹以前根本不在列表里，Rust 压包接不接
         // 目录项没验证过，别在这里新开行为，选了文件夹就跳过它。
         let items = files.filter { selection.contains($0.id) && !$0.isDirectory }
-        guard !items.isEmpty else { return }
+        guard !items.isEmpty else {
+            // 选的全是文件夹、或什么都没选：原来静默 return，
+            // 点了跟没点一样。给一句提示，别让用户干等。
+            let hasFolders = files.contains { selection.contains($0.id) && $0.isDirectory }
+            opMessage = hasFolders ? L("文件夹不参与打包") : L("请先选择要打包的文件")
+            opFailed = false
+            return
+        }
         let root = IPALibrary.documentsDir
         var out = root.appendingPathComponent("打包.zip")
         var counter = 2

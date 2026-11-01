@@ -132,6 +132,11 @@ struct CertTabView: View {
     @State private var batchBusy = false
     @State private var batchMessage: String?
     @State private var batchFailed = false
+    // 批量签名警告确认：掉签/未脱壳先汇总弹一次，点继续才签。
+    @State private var pendingBatchWarnings: [String] = []
+    @State private var pendingBatchTargets: [LocalFileItem] = []
+    @State private var pendingBatchMods = CertSignMods()
+    @State private var showingBatchWarningAlert = false
     // 签名预设（签名段）：只存跨 App 通用的项。
     @State private var presets: [CertSignPreset] = []
     @State private var presetNameText = ""
@@ -708,7 +713,7 @@ struct CertTabView: View {
                         .textInputAutocapitalization(.never)
                 }
                 signGroup(title: L("最低系统版本")) {
-                    TextField("如 15.0", text: $mods.minOS)
+                    TextField(L("如 15.0"), text: $mods.minOS)
                         .textFieldStyle(.plain)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -719,7 +724,8 @@ struct CertTabView: View {
                 signGroup(title: L("签名后立即安装")) {
                     // 开 = 签完直接走配对安装，关 = 只签存已签名；
                     // 跟原来 Toggle 同例，只是挪进分组行里。
-                    Toggle(L("签名后立即安装"), isOn: $installWhenSign)
+                    // 组标题已显示，Toggle 标签只留无障碍，不再上下重复。
+                    Toggle(L("签名后立即安装"), isOn: $installWhenSign).labelsHidden()
                 }
                 signGroup(title: L("选择证书")) {
                     Button {
@@ -1535,6 +1541,17 @@ struct CertTabView: View {
                             Text(L("签名选中（%d）", selectedUnsignedIDs.count)).font(.footnote)
                         }
                         .disabled(selectedUnsignedIDs.isEmpty || batchBusy)
+                        .alert(L("签名提醒"), isPresented: $showingBatchWarningAlert) {
+                            Button(L("继续签名")) {
+                                runBatchSign(targets: pendingBatchTargets, mods: pendingBatchMods)
+                                clearPendingBatch()
+                            }
+                            Button(L("取消"), role: .cancel) {
+                                clearPendingBatch()
+                            }
+                        } message: {
+                            Text(pendingBatchWarnings.joined(separator: "\n"))
+                        }
                     }
                     if let batchMessage {
                         Text(batchMessage)
@@ -1577,6 +1594,7 @@ struct CertTabView: View {
         return unsignedIPAs.filter { item in
             item.name.lowercased().contains(query)
                 || (unsignedInfo[item.url.path]?.name.lowercased().contains(query) == true)
+                || (unsignedInfo[item.url.path]?.bundleID.lowercased().contains(query) == true)
         }
     }
 
@@ -1636,7 +1654,10 @@ struct CertTabView: View {
     }
 
     /// 批量签名：只签名不安装（一次装多个做不出来，跟多开同理），
-    /// 每 App 原信息不动（名字、Bundle ID 等都不改），逐个签进「已签名」。
+    /// 逐个签进「已签名」；签名段表单的改动批量同样带上（见 batchSign）。
+    /// 批量签名：先在后台跑单签同一组签前检查（掉签、未脱壳），
+    /// 有警告先弹一次汇总确认，点继续才签；没警告直接签。
+    /// 吊销状态读上次手动检查的结果——没查过就不警告，不猜。
     private func batchSign() {
         guard !batchBusy, !selectedUnsignedIDs.isEmpty else { return }
         guard certReady else {
@@ -1646,6 +1667,60 @@ struct CertTabView: View {
         }
         let targets = unsignedIPAs.filter { selectedUnsignedIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
+        // 签名段表单的改动（插件、最低系统版本、图标等）批量同样带上，
+        // 与单签 startSign 一致；但名字/Bundle ID/版本是单 App 身份，
+        // 批量目标各有自己的值，表单里手填的自定义值不能盖到全部目标上，
+        // 这里清掉只留跨 App 通用项；包成 let，避免 var 被 Task.detached 捕获。
+        let mods: CertSignMods = {
+            var m = effectiveMods
+            m.name = ""
+            m.bundleID = ""
+            m.version = ""
+            return m
+        }()
+        let urls = targets.map { $0.url }
+        Task.detached(priority: .userInitiated) {
+            var undumpedURLs: [URL] = []
+            for url in urls {
+                if let cryptid = IPADecryptionCheck.cryptid(of: url), cryptid != 0 {
+                    undumpedURLs.append(url)
+                }
+            }
+            await MainActor.run {
+                var warnings: [String] = []
+                if self.revocationStatus == .revoked {
+                    warnings.append(L("证书已经掉签，签名后可能无法安装。"))
+                }
+                if !undumpedURLs.isEmpty {
+                    let names = undumpedURLs.compactMap { url in
+                        targets.first(where: { $0.url == url }).map { self.unsignedDisplayName($0) }
+                    }
+                    if !names.isEmpty {
+                        warnings.append(L("以下程序未脱壳，签名后可能无法安装，建议重新脱壳签名：%@", names.joined(separator: "、")))
+                    }
+                }
+                if warnings.isEmpty {
+                    self.runBatchSign(targets: targets, mods: mods)
+                } else {
+                    self.pendingBatchWarnings = warnings
+                    self.pendingBatchTargets = targets
+                    self.pendingBatchMods = mods
+                    self.showingBatchWarningAlert = true
+                }
+            }
+        }
+    }
+
+    private func clearPendingBatch() {
+        pendingBatchWarnings = []
+        pendingBatchTargets = []
+        pendingBatchMods = CertSignMods()
+    }
+
+    /// 批量签名执行：只签名不安装；每项各签一次，多开不展开
+    ///（多开只对单签的「仅签名」生效，见 multiOpenSection 注释，
+    /// batchSign 本来就不走 multiCount，这里也不新开行为）。
+    private func runBatchSign(targets: [LocalFileItem], mods: CertSignMods) {
         batchBusy = true
         batchMessage = nil
         Task {
@@ -1654,7 +1729,7 @@ struct CertTabView: View {
             var firstError: String?
             for item in targets {
                 do {
-                    _ = try await CertSigner.signToFile(ipa: item.url, mods: CertSignMods())
+                    _ = try await CertSigner.signToFile(ipa: item.url, mods: mods)
                     CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                         appName: unsignedDisplayName(item), kind: .batch, success: true,
                         detail: L("已存到「已签名」")))
@@ -1680,7 +1755,7 @@ struct CertTabView: View {
                     self.batchFailed = false
                 } else {
                     var message = L("批量签完：成功 %d 个，失败 %d 个。", ok, fail)
-                    if let firstError { message += " " + firstError }
+                    if let firstError { message += " " + friendlySignError(firstError) }
                     self.batchMessage = message
                     self.batchFailed = true
                 }
@@ -2230,6 +2305,7 @@ struct CertTabView: View {
         return signedRecords.filter { record in
             record.appName.lowercased().contains(query)
                 || record.fileName.lowercased().contains(query)
+                || record.bundleID.lowercased().contains(query)
         }
     }
 

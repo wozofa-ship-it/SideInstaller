@@ -28,6 +28,8 @@ struct SettingsView: View {
 
     /// 内置隧道本端地址，与 BuiltinTunnel 共用同一 UserDefaults 键。
     @AppStorage("CZFBuiltinTunnelIfaceIP") private var builtinTunnelIfaceIP = "10.7.1.1/32"
+    /// Device IP 填非法时弹一次提示（Tunnel 节和 Advanced 节两处栏共用）。
+    @State private var showDeviceIPResetAlert = false
     /// Wi-Fi 下自动启用隧道（v0.9.19）：与安装页预连共用同一键，
     /// 缺省（键不存在）= 开，保住 v70 行为；只管自动行为
     ///（页面预连 + 断线重连），不管操作时 tunnelUp 的内置直起，
@@ -50,7 +52,6 @@ struct SettingsView: View {
                 autoRefreshSection
                 downloadsSection
                 anisetteSection
-                advancedSection
                 logSection
             }
             .sheet(item: $editorTarget) { AccountEditor(target: $0) }
@@ -95,6 +96,13 @@ struct SettingsView: View {
                 Text(L("“%@” (%@) will be removed. You can download it again any time from the Install tab.",
                        item.fileName, item.sizeText))
             }
+        }
+        // Device IP 非法重置的提示：挂在 Form 链上，与上面两个 alert
+        // 分开，避免同时弹出冲突。
+        .alert(L("Invalid device IP"), isPresented: $showDeviceIPResetAlert) {
+            Button(L("OK"), role: .cancel) { }
+        } message: {
+            Text(L("The address was invalid, reset to 10.7.0.1."))
         }
     }
 
@@ -213,6 +221,22 @@ struct SettingsView: View {
         }
     }
 
+    /// Device IP 校验：照抄本端地址栏的做法（trim → 校验 → 非法重置），
+    /// 只是 Device IP 是裸地址不是 CIDR，所以 requireExplicitCIDR 传 false
+    ///（裸 IPv4 按 /32 算）；非法时重置回 10.7.0.1 并弹提示。
+    private func validateDeviceIP() {
+        let trimmed = engine.deviceIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        if (try? CIDRValidator.shared.validateCIDR(
+            trimmed, isRouteDestination: false,
+            allowIntermediateAddresses: true,
+            requireExplicitCIDR: false)) != nil {
+            engine.deviceIP = trimmed
+        } else {
+            engine.deviceIP = "10.7.0.1"
+            showDeviceIPResetAlert = true
+        }
+    }
+
     // MARK: Tunnel
 
     /// LocalDevVPN controls: start it whenever something needs the tunnel, or
@@ -252,6 +276,7 @@ struct SettingsView: View {
                     .keyboardType(.numbersAndPunctuation)
                     .multilineTextAlignment(.trailing)
                     .foregroundStyle(.secondary)
+                    .onSubmit { validateDeviceIP() }
             }
             Toggle(L("Auto-enable tunnel on Wi-Fi"), isOn: $autoTunnelPreconnect)
         } header: {
@@ -389,25 +414,6 @@ struct SettingsView: View {
                 }
             }
         )
-    }
-
-    // MARK: Advanced
-
-    private var advancedSection: some View {
-        Section {
-            HStack {
-                Text(L("Device IP"))
-                Spacer()
-                TextField("10.7.0.1", text: $engine.deviceIP)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.numbersAndPunctuation)
-                    .multilineTextAlignment(.trailing)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(L("Advanced"))
-        }
     }
 
     // MARK: Activity log
