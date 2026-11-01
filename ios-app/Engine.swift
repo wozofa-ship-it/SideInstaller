@@ -3864,19 +3864,24 @@ enum Guides {
     /// Shown when Apple refuses a certificate because one exists (error 7460).
     /// When SideStore's certificate can be had, using it comes first.
     static func certExists(sideStoreCertificate: Bool) -> Guide {
-        Guide(
+        // Fork 的 Guide.steps 是 [String]（非可选），上游三元里的 nil 放不进来；
+        // 按本文件 deviceRegistration 的老办法，有条件才 append，顺序与文案不变。
+        var steps: [String] = [
+            L("Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending."),
+            L("SideInstaller couldn't reuse it. That happens when the certificate was issued somewhere else — AltStore, SideStore, Sideloadly or Xcode on another device — so the private key it needs isn't on this iPhone."),
+        ]
+        if sideStoreCertificate {
+            steps.append(L("If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked."))
+        }
+        steps += [
+            L("Use “Revoke and retry” above, or open Certificates in the Tools tab, tap “Load certificates”, and revoke it there."),
+            L("Revoking is permanent: every app already signed with that certificate stops launching, on every device."),
+            L("Alternatively, sign in with a different (or spare) Apple ID above, then tap Install again."),
+        ]
+        return Guide(
             title: L("A signing certificate already exists"),
             systemImage: "exclamationmark.shield",
-            steps: [
-                L("Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending."),
-                L("SideInstaller couldn't reuse it. That happens when the certificate was issued somewhere else — AltStore, SideStore, Sideloadly or Xcode on another device — so the private key it needs isn't on this iPhone."),
-                sideStoreCertificate
-                    ? L("If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked.")
-                    : nil,
-                L("Use “Revoke and retry” above, or open Certificates in the Tools tab, tap “Load certificates”, and revoke it there."),
-                L("Revoking is permanent: every app already signed with that certificate stops launching, on every device."),
-                L("Alternatively, sign in with a different (or spare) Apple ID above, then tap Install again."),
-            ],
+            steps: steps,
             actionLabel: nil, actionURLString: nil)
     }
 
