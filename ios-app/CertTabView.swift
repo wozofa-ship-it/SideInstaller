@@ -706,7 +706,7 @@ struct CertTabView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(certReady ? .secondary : .orange)
+                            .foregroundStyle(certReady ? Color.secondary : Color.orange)
                         Text(L("证书"))
                             .font(.headline)
                         Spacer()
