@@ -583,17 +583,12 @@ struct ToolsView: View {
                     NavigationLink {
                         CertsView(manager: certManager)
                     } label: {
-                        ToolRow(icon: "checkmark.seal", color: .blue, title: L("Certificates"))
+                        ToolRow(icon: "checkmark.seal", color: .blue, title: L("Apple ID 证书"))
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(2))
                     // 别走错：这里是上游的 Apple ID 证书管理，企业证书
-                    // 在底部第一栏「证书」页，不在这里。
-                    Text(L("这里是 Apple ID 证书；企业证书在底部「证书」页。"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
+                    // 在底部第一栏「签名」页，不在这里。
                     NavigationLink {
                         EntitlementsView(manager: entitlementsManager)
                     } label: {

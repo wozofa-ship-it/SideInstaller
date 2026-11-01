@@ -564,13 +564,16 @@ struct CertSignMods {
     var bundleID = ""
     var version = ""
     var minOS = ""
+    /// 自定义输出主名（表单“打包文件名”可编辑项，空着回落源文件名；
+    /// 不进预设，换 IPA 时随 mods 一起清空）。
+    var outputName = ""
     /// 新图标的 PNG 数据（选了才有）。
     var icon: Data? = nil
     /// 要注入的插件文件（已复制到暂存目录的 .dylib/.deb/.zip）。
     var plugins: [URL] = []
 
     var isEmpty: Bool {
-        name.isEmpty && bundleID.isEmpty && version.isEmpty && minOS.isEmpty && icon == nil && plugins.isEmpty
+        name.isEmpty && bundleID.isEmpty && version.isEmpty && minOS.isEmpty && outputName.isEmpty && icon == nil && plugins.isEmpty
     }
 
     func json(iconPath: String?, outIpaPath: String?) -> String {
@@ -783,6 +786,7 @@ enum CertSignLogKind: String, Codable {
     case signOnly
     case signAndInstall
     case batch
+    case installOnly
 }
 
 /// 一条签名记录：只记结果，不记证书密码等敏感信息。
@@ -917,6 +921,16 @@ enum CertSignPresetStore {
 // MARK: - 独立签名器（只签名不安装，不走 Engine 流水线）
 
 enum CertSigner {
+    /// 输出主名：表单“打包文件名”可编辑项，空着回落源文件名；
+    /// 只取主名，去掉顺手带的 .ipa 后缀与路径分隔符；重名仍走
+    /// uniqueOutputURL 的序号。单签、批量、多开副本都走这里。
+    private static func outputBaseName(mods: CertSignMods, ipa: URL) -> String {
+        var raw = mods.outputName.trimmingCharacters(in: .whitespaces)
+        if raw.lowercased().hasSuffix(".ipa") { raw = String(raw.dropLast(4)) }
+        raw = raw.replacingOccurrences(of: "/", with: "")
+        return raw.isEmpty ? ipa.deletingPathExtension().lastPathComponent : raw
+    }
+
     /// 用企业证书把 IPA 签好并存进「已签名」，返回记录。
     static func signToFile(ipa: URL, mods: CertSignMods) async throws -> SignedIPARecord {
         guard EnterpriseCertStore.ready else {
@@ -941,7 +955,7 @@ enum CertSigner {
                 iconPath = path.path
             }
             let outURL = SignedIPAStore.uniqueOutputURL(
-                baseName: ipa.deletingPathExtension().lastPathComponent)
+                baseName: Self.outputBaseName(mods: mods, ipa: ipa))
             let json = mods.json(iconPath: iconPath, outIpaPath: outURL.path)
             var signed: UnsafeMutablePointer<CChar>?
             var error: UnsafeMutablePointer<CChar>?

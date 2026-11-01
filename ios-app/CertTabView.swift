@@ -92,10 +92,12 @@ struct CertTabView: View {
     // 快照（见 startEngineInstall 的注释：前置失败当场快照，
     // 跑完由 onChange 按 finished/lastError 快照，不直接绑
     // engine 的全局量，免得别的 tab 的安装状态串到这里）。
-    // 仅签名并安装那路才记签名日志：跑完时按 Engine 结果记
-    // 一条（成功/失败）；已签名行直装不记（v62 做法）。
+    // 配对安装跑完记一条签名日志：签名并安装那路记
+    // “签名并安装”，已签名行直装记“仅安装”（kind 由起
+    // 手那路定，重试复用同一 kind，跑完时不清掉）。
     @State private var enterpriseInstallInFlight = false
     @State private var engineInstallLogAppName: String?
+    @State private var engineInstallLogKind: CertSignLogKind = .signAndInstall
     // 安装诊断日志展开态（默认收起）：只控制展示，不存盘、不进 UserDefaults。
     @State private var showInstallDiagnosticLog = false
     @State private var showingEnterpriseInstallSuccessAlert = false
@@ -218,14 +220,15 @@ struct CertTabView: View {
             // 跑完不会误弹到这里。
             if old && !new && enterpriseInstallInFlight {
                 enterpriseInstallInFlight = false
+                let logKind = engineInstallLogKind
                 if engine.finished {
                     showingEnterpriseInstallSuccessAlert = true
                     localInstall.appendStepLog(L("配对安装完成"))
                     CZFHaptics.notification(.success)
                     if let appName = engineInstallLogAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
-                            appName: appName, kind: .signAndInstall, success: true,
-                            detail: L("已签好，配对安装完成。")))
+                            appName: appName, kind: logKind, success: true,
+                            detail: logKind == .installOnly ? L("配对安装完成。") : L("已签好，配对安装完成。")))
                         logEntries = CertSignLogStore.load()
                     }
                 } else if let error = engine.lastError {
@@ -234,11 +237,13 @@ struct CertTabView: View {
                     CZFHaptics.notification(.error)
                     if let appName = engineInstallLogAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
-                            appName: appName, kind: .signAndInstall, success: false,
+                            appName: appName, kind: logKind, success: false,
                             detail: error))
                         logEntries = CertSignLogStore.load()
                     }
                 }
+                // 只清名字、不清 kind：失败后“重试配对安装”复用
+                // 同一条记录，kind 留着才能继续记对。
                 engineInstallLogAppName = nil
             }
         }
@@ -678,12 +683,12 @@ struct CertTabView: View {
         if let name = provisionInfo?.name, !name.isEmpty {
             return name
         }
-        return L("未导入，去证书页导入")
+        return L("未导入，去上方证书组导入")
     }
 
-    /// “打包文件名”行显示的输出名：跟 signToFile 同例，源文件主名
-    /// +“-已签.ipa”（改名只改包内名字，不改输出文件名；重名时
-    /// 签名那一刻自动加序号，见 uniqueOutputURL）。
+    /// “打包文件名”行空着时回落的输出名：源文件主名 +“-已签.ipa”
+    ///（改名只改包内名字，不改输出文件名；填了自定义名则以
+    /// 自定义名为主名；重名时签名那一刻自动加序号，见 uniqueOutputURL）。
     private var predictedOutputName: String {
         guard let url = selectedIPA else { return "" }
         return "\(url.deletingPathExtension().lastPathComponent)-已签.ipa"
@@ -803,9 +808,10 @@ struct CertTabView: View {
                 }
                 signGroup(title: L("打包文件名")) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(predictedOutputName)
-                            .lineLimit(1)
-                        Text(L("重名自动加序号"))
+                        TextField(predictedOutputName, text: $mods.outputName)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        Text(L("空着用推导名；重名自动加序号"))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -839,6 +845,15 @@ struct CertTabView: View {
                 .cornerRadius(12)
                 .opacity(signBusy || engine.isRunning || !certReady ? 0.5 : 1)
                 .disabled(signBusy || engine.isRunning || !certReady)
+                // 多开与立即安装静默冲突提示：多开只对“仅签名”生效，
+                // 开着“签名后立即安装”时红按钮只签装 1 个——这句以前
+                // 只藏在默认收起的更多设置里，红按钮处直接说明，
+                // 免得在按钮上踩坑。只加提示，不改签名行为。
+                if installWhenSign && multiCount > 1 {
+                    Text(L("已开“签名后立即安装”，这次只签装 1 个，多开数量不生效；要签多个请关掉安装开关或用“仅签名”。"))
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                }
                 Button {
                     CZFHaptics.impact(.light)
                     showMoreSettings.toggle()
@@ -1267,6 +1282,8 @@ struct CertTabView: View {
         result.version = (version.isEmpty || version == (info.version ?? "")) ? "" : version
         let minOS = result.minOS.trimmingCharacters(in: .whitespaces)
         result.minOS = (minOS.isEmpty || minOS == (info.minOS ?? "")) ? "" : minOS
+        // 输出名没有“原值”概念：空着就是回落推导名，只清空白。
+        result.outputName = result.outputName.trimmingCharacters(in: .whitespaces)
         return result
     }
 
@@ -1403,6 +1420,7 @@ struct CertTabView: View {
                     await MainActor.run {
                         self.localInstall.appendStepLog(L("签名成功：%@", record.appName))
                         self.engineInstallLogAppName = record.appName
+                        self.engineInstallLogKind = .signAndInstall
                         self.startEngineInstall(record: record)
                         if !self.engine.isRunning, let reason = self.enterpriseInstallErrorText {
                             CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
@@ -1434,9 +1452,10 @@ struct CertTabView: View {
 
     /// 已签名行「安装」：走配对安装（Engine 设备链路，v45 那套）。
     /// 前置失败（缺配对文件/隧道）时原因只在企业页内显示 +
-    /// 重试配对安装，绝不去共享「安装」页。不记签名日志
-    ///（v62 做法：只有签名并安装那路记）。
+    /// 重试配对安装，绝不去共享「安装」页。跑完由 onChange
+    /// 记一条「仅安装」日志，不记成“签名并安装”。
     private func installSigned(_ record: SignedIPARecord) {
+        engineInstallLogKind = .installOnly
         startEngineInstall(record: record)
     }
 
@@ -1741,7 +1760,7 @@ struct CertTabView: View {
     private func batchSign() {
         guard !batchBusy, !selectedUnsignedIDs.isEmpty else { return }
         guard certReady else {
-            batchMessage = L("先去「证书」页把证书、描述文件和密码备齐。")
+            batchMessage = L("先去上方证书组把证书、描述文件和密码备齐。")
             batchFailed = true
             return
         }
@@ -1920,6 +1939,7 @@ struct CertTabView: View {
         case .signOnly: return L("仅签名")
         case .signAndInstall: return L("签名并安装")
         case .batch: return L("批量签名")
+        case .installOnly: return L("仅安装")
         }
     }
 
@@ -2428,23 +2448,58 @@ private enum CertLibraryTab: Identifiable, Hashable {
 }
 
 /// 从文件库（Documents 里的全部 IPA）里挑一个。
+/// 签名页“从文件库选择”picker：行格式照文件页 IPA 行（图标 +
+/// App 名 / V版本 | 大小 | Bundle ID / 文件名），顶部带库内搜索；
+/// 图标与信息都只读 central directory + 单条目、不整包解压，
+/// 行出现时触发一次，取不到就占位、不死循环（文件页同款）。
 private struct LibraryIPAPicker: View {
     @Environment(\.dismiss) private var dismiss
     var onPick: (URL) -> Void
+
+    @State private var query = ""
+    @State private var icons: [String: Data] = [:]
+    @State private var iconsTried: Set<String> = []
+    @State private var infos: [String: IPALibrary.AppInfo] = [:]
+    @State private var infosTried: Set<String> = []
 
     private var ipas: [LocalFileItem] {
         AppFileLibrary.scan().filter { $0.isIPA }
     }
 
+    private var filtered: [LocalFileItem] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return ipas }
+        return ipas.filter {
+            $0.name.localizedCaseInsensitiveContains(q)
+                || infos[$0.url.path]?.name.localizedCaseInsensitiveContains(q) == true
+                || infos[$0.url.path]?.bundleID.localizedCaseInsensitiveContains(q) == true
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            List(ipas) { item in
-                Button {
-                    onPick(item.url)
-                } label: {
-                    Text(item.name)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
+            VStack(spacing: 0) {
+                // 应用库同款浅灰搜索框：按文件名/App 名/Bundle ID 过滤。
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField(L("搜索"), text: $query)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.12))
+                .cornerRadius(8)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                List(filtered) { item in
+                    Button {
+                        onPick(item.url)
+                    } label: {
+                        pickerRow(item)
+                    }
+                    // plain 才能压住 List 里 Button 默认的蓝色字。
+                    .buttonStyle(.plain)
                 }
             }
             .navigationTitle(L("选择 IPA"))
@@ -2454,6 +2509,88 @@ private struct LibraryIPAPicker: View {
                     Button(L("取消")) { dismiss() }
                 }
             }
+        }
+    }
+
+    private func cacheKey(_ item: LocalFileItem) -> String {
+        "\(item.url.path)#\(item.size)#\(item.modified?.timeIntervalSince1970 ?? 0)"
+    }
+
+    private func displayName(_ item: LocalFileItem) -> String {
+        if let name = infos[item.url.path]?.name, !name.isEmpty {
+            return name
+        }
+        return (item.name as NSString).deletingPathExtension
+    }
+
+    private func secondLine(_ item: LocalFileItem) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)
+        guard let info = infos[item.url.path] else { return size }
+        var parts: [String] = []
+        if let version = info.version, !version.isEmpty {
+            parts.append("V\(version)")
+        }
+        parts.append(size)
+        if !info.bundleID.isEmpty {
+            parts.append(info.bundleID)
+        }
+        return parts.joined(separator: " | ")
+    }
+
+    private func pickerRow(_ item: LocalFileItem) -> some View {
+        HStack(spacing: 8) {
+            if let data = icons[item.url.path], let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Image(systemName: "doc")
+                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                    .frame(width: 52, height: 52)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(displayName(item))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                Text(secondLine(item))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(item.name)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .contentShape(Rectangle())
+        .task(id: cacheKey(item)) {
+            loadIcon(for: item)
+            loadInfo(for: item)
+        }
+    }
+
+    private func loadIcon(for item: LocalFileItem) {
+        let key = cacheKey(item)
+        guard !iconsTried.contains(key) else { return }
+        iconsTried.insert(key)
+        Task.detached { [url = item.url, path = item.url.path] in
+            guard let data = IPALibrary.iconData(at: url) else { return }
+            await MainActor.run { icons[path] = data }
+        }
+    }
+
+    private func loadInfo(for item: LocalFileItem) {
+        let key = cacheKey(item)
+        guard !infosTried.contains(key) else { return }
+        infosTried.insert(key)
+        Task.detached { [url = item.url, path = item.url.path] in
+            guard let info = IPALibrary.appInfo(at: url) else { return }
+            await MainActor.run { infos[path] = info }
         }
     }
 }

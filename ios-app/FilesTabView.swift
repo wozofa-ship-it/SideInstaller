@@ -397,6 +397,14 @@ struct FilesTabView: View {
         startEnterpriseInstall(ipaURL: item.url, record: nil)
     }
 
+    /// 文件页安装日志用的 App 名：记录名优先，现解析次之，文件名兜底；
+    /// startEnterpriseInstall 里步骤日志用同款推导。
+    private var fileInstallAppName: String? {
+        fileInstallRecord?.appName
+            ?? fileInstallURL.flatMap { IPALibrary.appInfo(at: $0)?.name }
+            ?? fileInstallURL?.deletingPathExtension().lastPathComponent
+    }
+
     /// 文件页安装统一入口（证书页 startEngineInstall 同款）：
     /// 调 Engine 的 runInstallSignedIPA（配对设备链路，v45 那套），
     /// 全程只在文件页内反馈——进行中显示 Engine 进度 +“取消安装”，
@@ -407,9 +415,8 @@ struct FilesTabView: View {
     /// 给通用提示，不读 lastError——前置失败不置它）。名字只用于
     /// 步骤日志：有记录用记录名，没记录现解析，解析不到就用文件名，
     /// Engine 安装本身不需要 Bundle ID，不再因解析不到而拒装。
-    /// 文件页安装不写 CertSignLogStore（v62 也不写；日志的 kind
-    /// 没有“仅安装”一项，硬记会把一次只装没签的说成“签名并安装”，
-    /// 误导——文件页自己的状态条 + 成功弹框就是反馈）。
+    /// 文件页安装跑完写一条「仅安装」日志（kind 有 installOnly 后
+    /// 不再会说成“签名并安装”）；前置失败不进日志（与此前一致）。
     private func startEnterpriseInstall(ipaURL: URL, record: SignedIPARecord?) {
         fileInstallRecord = record
         fileInstallURL = ipaURL
@@ -560,7 +567,7 @@ struct FilesTabView: View {
         // 配对安装跑完：finished 置位才算成功（取消不算）。只认
         // fileInstallInFlight 期间的变化，ID 线的安装跑完不会误弹
         // 到这里；失败原因快照到页内本地量，不直接绑 engine 的
-        // 全局量。文件页安装不写签名日志（见 startEnterpriseInstall）。
+        // 全局量。文件页安装跑完写一条「仅安装」日志（见 startEnterpriseInstall）。
         .onChange(of: engine.isRunning) { old, new in
             if old && !new && fileInstallInFlight {
                 fileInstallInFlight = false
@@ -568,10 +575,20 @@ struct FilesTabView: View {
                     showingFileInstallSuccessAlert = true
                     localInstall.appendStepLog(L("配对安装完成"))
                     CZFHaptics.notification(.success)
+                    if let appName = fileInstallAppName {
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: appName, kind: .installOnly, success: true,
+                            detail: L("配对安装完成。")))
+                    }
                 } else if let error = engine.lastError {
                     fileInstallErrorText = error
                     localInstall.appendStepLog(L("配对安装失败：%@", error))
                     CZFHaptics.notification(.error)
+                    if let appName = fileInstallAppName {
+                        CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
+                            appName: appName, kind: .installOnly, success: false,
+                            detail: error))
+                    }
                 }
             }
         }
@@ -711,7 +728,7 @@ struct FilesTabView: View {
     private var header: some View {
         HStack(alignment: .top) {
             Text(L("文件"))
-                .font(.title2.weight(.bold))
+                .font(.largeTitle.weight(.bold))
             Spacer()
             Menu {
                 Button { showImporter = true } label: {
