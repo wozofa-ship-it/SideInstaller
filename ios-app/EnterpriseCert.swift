@@ -157,7 +157,9 @@ enum EnterpriseCertStore {
               let rawIdentity = first[kSecImportItemIdentity as String] else {
             throw EngineError.message(L("证书解不开——密码不对，或者 .p12 文件有问题。"))
         }
-        let identity = rawIdentity as! SecIdentity
+        guard let identity = rawIdentity as? SecIdentity else {
+            throw EngineError.message(L("证书解不开——密码不对，或者 .p12 文件有问题。"))
+        }
         var certRef: SecCertificate?
         guard SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess, let cert = certRef else {
             throw EngineError.message(L("证书读取失败。"))
@@ -186,7 +188,10 @@ enum EnterpriseCertStore {
               let rawIdentity = first[kSecImportItemIdentity as String] else {
             throw EngineError.message(L("证书解不开——密码不对，或者 .p12 文件有问题。"))
         }
-        return rawIdentity as! SecIdentity
+        guard let identity = rawIdentity as? SecIdentity else {
+            throw EngineError.message(L("证书解不开——密码不对，或者 .p12 文件有问题。"))
+        }
+        return identity
     }
 
     /// 证书本身的信息（名头 + 到期日）：证书卡上要显示。解不开（比如

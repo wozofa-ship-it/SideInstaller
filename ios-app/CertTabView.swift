@@ -706,14 +706,14 @@ struct CertTabView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(certReady ? .secondary : .orange)
                         Text(L("证书"))
                             .font(.headline)
                         Spacer()
                         if certReady {
                             if let name = certInfo?.name, !name.isEmpty {
                                 Text(name)
-                                    .font(.footnote)
+                                    .font(.footnote.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                             }
@@ -739,6 +739,9 @@ struct CertTabView: View {
                     certCard
                 }
             }
+            // 证书组与下面签名表单的分界线：收起时只留状态行，分界线
+            // 让“证书组到此结束”一眼看出来，展开时同样适用。
+            Divider()
             // 导入失败明说（源导入/文件库选择的文件找不到了时）：
             // 段内绝不静默空白——有错就露出来，进口按钮就在下面。
             if let signError {
