@@ -613,13 +613,19 @@ struct ContentView: View {
 
     /// Starts the run straight from the tap. The surface reshapes because the
     /// run is going, so nothing waits on the animation.
-    /// 点安装先弹一屏检查清单（v0.9.19），清单只做提醒、不拦安装；
+    /// 点安装先算一次清单状态（跟 PrecheckSheet 同一套判定）：
+    /// 只有红行（blocked，缺了会卡住）时才弹清单；全绿或只有
+    /// 橙色（安装时自动启动）时直接走继续安装的路，省一屏一 tap。
     /// 真正的门禁仍在 continueAfterPrecheck 与 runOneClick 里。
     private func startInstall() {
         installPressed = false
         CZFHaptics.impact(.medium)
         engine.refreshNetworkStatus()
-        showPrecheck = true
+        if precheckHasBlocked(engine) {
+            showPrecheck = true
+        } else {
+            continueAfterPrecheck()
+        }
     }
 
     /// 清单点“继续安装”后走原 startInstall 的路：先过隧道门禁
@@ -1146,6 +1152,49 @@ struct ContentView: View {
 /// 原有隧道门禁与 runOneClick 自己的门禁照常跑。
 /// 行读的都是 engine 的实时状态，行内修复（启动隧道、
 /// 导入配对文件/安装包）做完行自己变绿，不用重开清单。
+/// 清单各行的状态判定：PrecheckSheet 各行与 startInstall 共用同一套，
+/// 行里只按这个状态分叉，startInstall 只凭它决定弹不弹清单。
+/// 各行说明文字/修复按钮的明细选择仍在行里，不影响状态。
+private func wifiPrecheckState(_ engine: Engine) -> PrecheckState {
+    if engine.wifiConnected { return .ok }
+    if engine.needsFreshPairing, engine.canSelfPair { return .blocked }
+    return .na
+}
+
+private func tunnelPrecheckState(_ engine: Engine) -> PrecheckState {
+    if engine.vpnConnected { return .ok }
+    if engine.tunnelAvailable { return .warn }
+    return .blocked
+}
+
+private func pairingPrecheckState(_ engine: Engine) -> PrecheckState {
+    if engine.canSelfPair { return .ok }
+    if engine.importedPairingName != nil { return .ok }
+    if engine.hasPairingFile { return .ok }
+    return .blocked
+}
+
+private func accountPrecheckState(_ engine: Engine) -> PrecheckState {
+    if !engine.normalizedAppleID.isEmpty, !engine.applePassword.isEmpty { return .ok }
+    return .blocked
+}
+
+private func packagePrecheckState(_ engine: Engine) -> PrecheckState {
+    if engine.customIPAName != nil { return .ok }
+    return .blocked
+}
+
+/// 任一行红（blocked）即弹清单；安装包行只在自定义 IPA 时才算
+///（sheet 里本来也只在自定义 IPA 时才渲染这一行）。
+private func precheckHasBlocked(_ engine: Engine) -> Bool {
+    if wifiPrecheckState(engine) == .blocked { return true }
+    if tunnelPrecheckState(engine) == .blocked { return true }
+    if pairingPrecheckState(engine) == .blocked { return true }
+    if accountPrecheckState(engine) == .blocked { return true }
+    if engine.installSource == .custom, packagePrecheckState(engine) == .blocked { return true }
+    return false
+}
+
 private struct PrecheckSheet: View {
     @EnvironmentObject private var engine: Engine
     @Environment(\.dismiss) private var dismiss
@@ -1206,9 +1255,9 @@ private struct PrecheckSheet: View {
     /// 或本机不能自配对（走文件导入）时都不需要 Wi-Fi。
     @ViewBuilder
     private var wifiRow: some View {
-        if engine.wifiConnected {
+        if wifiPrecheckState(engine) == .ok {
             precheckRow(title: L("Wi-Fi"), state: .ok, detail: L("已连接"))
-        } else if engine.needsFreshPairing, engine.canSelfPair {
+        } else if wifiPrecheckState(engine) == .blocked {
             precheckRow(title: L("Wi-Fi"), state: .blocked, detail: L("未连接——本次配对需要 Wi-Fi"))
         } else {
             precheckRow(title: L("Wi-Fi"), state: .na, detail: L("不需要 Wi-Fi"))
@@ -1220,9 +1269,9 @@ private struct PrecheckSheet: View {
     /// 继续安装时会弹安装提示）。
     @ViewBuilder
     private var tunnelRow: some View {
-        if engine.vpnConnected {
+        if tunnelPrecheckState(engine) == .ok {
             precheckRow(title: L("隧道"), state: .ok, detail: L("已连接"))
-        } else if engine.tunnelAvailable {
+        } else if tunnelPrecheckState(engine) == .warn {
             if BuiltinTunnel.useBuiltinDirectly || engine.localDevVPNInstalled {
                 precheckRow(title: L("隧道"), state: .warn, detail: L("未连接，安装时自动启动"),
                             fixTitle: L("立即启动"), fix: startTunnel)
@@ -1241,15 +1290,15 @@ private struct PrecheckSheet: View {
     /// 文件为准（名字没记下来也算已导入）。
     @ViewBuilder
     private var pairingRow: some View {
-        if engine.canSelfPair {
+        if pairingPrecheckState(engine) == .blocked {
+            precheckRow(title: L("配对文件"), state: .blocked, detail: L("未导入"),
+                        fixTitle: L("导入配对文件"), fix: { showPairingPicker = true })
+        } else if engine.canSelfPair {
             precheckRow(title: L("配对文件"), state: .ok, detail: L("本机可自配对，不需要文件"))
         } else if let name = engine.importedPairingName {
             precheckRow(title: L("配对文件"), state: .ok, detail: L("已导入：%@", name))
-        } else if engine.hasPairingFile {
-            precheckRow(title: L("配对文件"), state: .ok, detail: L("已导入配对文件"))
         } else {
-            precheckRow(title: L("配对文件"), state: .blocked, detail: L("未导入"),
-                        fixTitle: L("导入配对文件"), fix: { showPairingPicker = true })
+            precheckRow(title: L("配对文件"), state: .ok, detail: L("已导入配对文件"))
         }
     }
 
@@ -1257,7 +1306,7 @@ private struct PrecheckSheet: View {
     /// 不是证书页的企业证书（企业安装不走这条路，故不列入）。
     @ViewBuilder
     private var accountRow: some View {
-        if !engine.normalizedAppleID.isEmpty, !engine.applePassword.isEmpty {
+        if accountPrecheckState(engine) == .ok {
             precheckRow(title: L("Apple ID（签名身份）"), state: .ok, detail: engine.normalizedAppleID)
         } else {
             precheckRow(title: L("Apple ID（签名身份）"), state: .blocked, detail: L("去设置页登录 Apple ID 并填好密码"))
@@ -1267,7 +1316,7 @@ private struct PrecheckSheet: View {
     /// 仅自定义 IPA 有这一行，对应 runOneClick 的已导入门禁。
     @ViewBuilder
     private var packageRow: some View {
-        if let name = engine.customIPAName {
+        if packagePrecheckState(engine) == .ok, let name = engine.customIPAName {
             precheckRow(title: L("安装包"), state: .ok, detail: name)
         } else {
             precheckRow(title: L("安装包"), state: .blocked, detail: L("还没导入 .ipa"),

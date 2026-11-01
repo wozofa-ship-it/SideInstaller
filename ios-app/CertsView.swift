@@ -20,6 +20,7 @@ struct CertsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 header.cascadeItem(0)
+                expiryBanner
                 loadButton.cascadeItem(1)
                 exportButton.cascadeItem(2)
                 if manager.canUseSideStoreCertificate {
@@ -62,6 +63,57 @@ struct CertsView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .top)))
             }
         }
+    }
+
+    // MARK: Expiry warning
+
+    /// 7 天内到期（含已过期）的证书：跟 CertTabView.expirySoon
+    /// 同一条规则（剩余天数 ≤7 天），只做展示。
+    private var expiringCerts: [DevCert] {
+        manager.certs.filter { cert in
+            guard let expiry = cert.expiresAt else { return false }
+            return (Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0) <= 7
+        }
+    }
+
+    /// 企业页已有同款红条，个人证书页之前只有行内小字到期日：
+    /// 7 天有效期的个人证书到期前毫无预警，App 打不开才发现。
+    /// 任一证书 7 天内到期就出红条，写明证书名 + 到期日；
+    /// 只展示，不碰续签过滤、团队判定等任何逻辑。
+    @ViewBuilder
+    private var expiryBanner: some View {
+        if !expiringCerts.isEmpty {
+            CalloutCard(tint: .red) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L("证书到期提醒"))
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(expiringCerts, id: \.id) { cert in
+                        HStack {
+                            Text(cert.displayName)
+                                .font(.subheadline)
+                            Spacer()
+                            if let expiry = cert.expiresAt {
+                                Text(expiryLabel(expiry))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
+    /// 到期日 + 剩余天数，跟 CertTabView.remainingText 同一套算法。
+    private func expiryLabel(_ expiry: Date) -> String {
+        let date = expiry.formatted(
+            Date.FormatStyle(date: .abbreviated, time: .omitted)
+                .locale(Localizer.locale))
+        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+        if days < 0 { return L("%@（已过期）", date) }
+        if days == 0 { return L("%@（今天到期）", date) }
+        return L("%@（剩 %d 天）", date, days)
     }
 
     // MARK: Primary action

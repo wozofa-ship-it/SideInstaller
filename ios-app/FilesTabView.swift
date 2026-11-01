@@ -136,6 +136,10 @@ struct FilesTabView: View {
     @State private var fileIPAInfoTried: Set<String> = []
     /// 点行弹出的底部动作菜单正在操作的行（nil = 不弹）。
     @State private var actionItem: LocalFileItem?
+    /// 待确认删除的单个文件（行菜单/行内按钮/详情页点删除后先弹确认）。
+    @State private var pendingDeleteItem: LocalFileItem?
+    /// 批量删除待确认（工具栏“删除所选”点后先弹确认，带数量）。
+    @State private var pendingDeleteSelection = false
     /// 当前进的文件夹（相对 Documents 的路径，"" = 根目录）：
     /// 点文件夹行就进，返回条回上级；删了当前文件夹就回根目录。
     @State private var currentDir = ""
@@ -453,6 +457,29 @@ struct FilesTabView: View {
         } message: {
             Text(L("装好了，可以回桌面查看安装进度。"))
         }
+        // 单删确认：沙盒删除不进废纸篓，IPA 很可能是唯一一份。
+        .alert(L("删除“%@”？", pendingDeleteItem?.name ?? ""), isPresented: Binding(
+            get: { pendingDeleteItem != nil },
+            set: { if !$0 { pendingDeleteItem = nil } }
+        )) {
+            Button(L("删除"), role: .destructive) {
+                if let item = pendingDeleteItem { delete(item) }
+                pendingDeleteItem = nil
+            }
+            Button(L("取消"), role: .cancel) { pendingDeleteItem = nil }
+        } message: {
+            Text(L("删除后无法恢复"))
+        }
+        // 批量删确认，带数量。
+        .alert(L("删除所选 %d 个？", selection.count), isPresented: $pendingDeleteSelection) {
+            Button(L("删除"), role: .destructive) {
+                pendingDeleteSelection = false
+                deleteSelection()
+            }
+            Button(L("取消"), role: .cancel) { pendingDeleteSelection = false }
+        } message: {
+            Text(L("删除后无法恢复"))
+        }
         // 点 IPA 行弹出的底部动作菜单（轻松签文件列表同款顺序）：
         // 签名 / 安装（仅已签名行）/ 提取库 / 详情 / 分享 / 查看文件
         // 位置 / 删除 / 取消。提取库在 Side 没有同名功能，映射到现
@@ -510,7 +537,7 @@ struct FilesTabView: View {
                 }
                 Button(role: .destructive) {
                     CZFHaptics.impact(.light)
-                    delete(item)
+                    pendingDeleteItem = item
                     actionItem = nil
                 } label: {
                     Text(L("删除"))
@@ -548,7 +575,7 @@ struct FilesTabView: View {
         .sheet(item: $detailItem) { item in
             FileDetailSheet(item: item, onDelete: {
                 detailItem = nil
-                delete(item)
+                pendingDeleteItem = item
             }, onRename: {
                 detailItem = nil
                 renameText = item.name
@@ -654,7 +681,7 @@ struct FilesTabView: View {
                     .buttonStyle(.bordered)
                     .disabled(selection.isEmpty || opBusy)
                     Button(role: .destructive) {
-                        deleteSelection()
+                        pendingDeleteSelection = true
                     } label: {
                         Text(L("删除所选"))
                     }
@@ -1071,7 +1098,7 @@ struct FilesTabView: View {
                     // 这里只留删除（重命名在长按菜单里）。
                     Spacer()
                     Button(role: .destructive) {
-                        delete(item)
+                        pendingDeleteItem = item
                     } label: {
                         Text(L("删除"))
                             .font(.footnote)
@@ -1083,7 +1110,7 @@ struct FilesTabView: View {
                     }
                     Spacer()
                     Button(role: .destructive) {
-                        delete(item)
+                        pendingDeleteItem = item
                     } label: {
                         Text(L("删除"))
                             .font(.footnote)
@@ -1176,7 +1203,7 @@ struct FilesTabView: View {
                 }
             }
             Button(role: .destructive) {
-                delete(item)
+                pendingDeleteItem = item
             } label: {
                 Label(L("删除"), systemImage: "trash")
             }
@@ -1192,15 +1219,31 @@ struct FilesTabView: View {
         }
     }
 
-    private func delete(_ item: LocalFileItem) {
+    /// 从磁盘删掉一项（已签名行同时清 Signed 清单记录，
+    /// SignedIPAStore.remove 里本来就连文件一起删）。
+    private func removeFileFromDisk(_ item: LocalFileItem) {
         if item.isInSignedDir,
            let record = SignedIPAStore.load().first(where: { $0.fileName == item.name }) {
             SignedIPAStore.remove(record)
         } else {
             try? FileManager.default.removeItem(at: item.url)
         }
-        files = AppFileLibrary.scan()
-        resetCurrentDirIfNeeded()
+    }
+
+    /// 单删：磁盘上确认没了才从数组里去掉它（含文件夹子项），
+    /// 不用整树重扫；删除没成功（文件还在）就重扫恢复真相，
+    /// 别把还在的文件藏掉。
+    private func delete(_ item: LocalFileItem) {
+        removeFileFromDisk(item)
+        if !FileManager.default.fileExists(atPath: item.url.path) {
+            files.removeAll {
+                $0.url.path == item.url.path || $0.url.path.hasPrefix(item.url.path + "/")
+            }
+            resetCurrentDirIfNeeded()
+        } else {
+            files = AppFileLibrary.scan()
+            resetCurrentDirIfNeeded()
+        }
     }
 
     /// 在当前目录（根目录或进的文件夹里）新建文件夹（轻松签
@@ -1285,12 +1328,16 @@ struct FilesTabView: View {
         }
     }
 
+    /// 批量删：先删完所有项，最后只扫一次（原来每项各扫一次，
+    /// 删 N 个就是 N 次整树枚举，全在主线程）。
     private func deleteSelection() {
         for item in files where selection.contains(item.id) {
-            delete(item)
+            removeFileFromDisk(item)
         }
         selection = []
         selecting = false
+        files = AppFileLibrary.scan()
+        resetCurrentDirIfNeeded()
     }
 
     /// 在同目录里找一个不重名的目标 URL。
@@ -1323,7 +1370,17 @@ struct FilesTabView: View {
             if item.isInSignedDir {
                 SignedIPAStore.renameFile(from: item.name, to: newName)
             }
-            files = AppFileLibrary.scan()
+            if !item.isDirectory, let idx = files.firstIndex(where: { $0.id == item.id }) {
+                // 文件改名只换这一行的 url/name（同目录，大小/日期/
+                // 相对目录都不变），不用整树重扫；文件夹改名会动
+                // 全部子项路径，仍走重扫。
+                let old = files[idx]
+                files[idx] = LocalFileItem(url: dest, name: newName, relativeDir: old.relativeDir,
+                                           size: old.size, modified: old.modified,
+                                           isDirectory: old.isDirectory, childCount: old.childCount)
+            } else {
+                files = AppFileLibrary.scan()
+            }
             resetCurrentDirIfNeeded()
             opMessage = L("已改名")
             opFailed = false
