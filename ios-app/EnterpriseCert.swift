@@ -281,20 +281,29 @@ private enum X509Validity {
     }
 
     /// 最小 DER TLV 读取器：单字节 tag + 定长 length（DER 无不定长）。
+    /// 注意：Data 切片保留原下标（startIndex 不归零），count 只是长度，
+    /// 所以 `offset < count` 放行不等于 `data[offset]` 合法——0.9.75 真机
+    /// 闪退就是这句在切片上炸的。所有下标一律以 base 为起点算。
     private struct DERReader {
         let data: Data
+        let base: Data.Index
         var offset = 0
 
+        init(data: Data) {
+            self.data = data
+            self.base = data.startIndex
+        }
+
         func peekTag() -> UInt8? {
-            offset < data.count ? data[offset] : nil
+            offset < data.count ? data[base + offset] : nil
         }
 
         mutating func readTLV() -> (tag: UInt8, value: Data)? {
             guard offset < data.count else { return nil }
-            let tag = data[offset]
+            let tag = data[base + offset]
             offset += 1
             guard offset < data.count else { return nil }
-            let lengthByte = data[offset]
+            let lengthByte = data[base + offset]
             offset += 1
             let length: Int
             if lengthByte & 0x80 == 0 {
@@ -303,12 +312,12 @@ private enum X509Validity {
                 let count = Int(lengthByte & 0x7F)
                 guard count > 0, count <= 4, offset + count <= data.count else { return nil }
                 var len = 0
-                for i in 0..<count { len = (len << 8) | Int(data[offset + i]) }
+                for i in 0..<count { len = (len << 8) | Int(data[base + offset + i]) }
                 offset += count
                 length = len
             }
             guard offset + length <= data.count else { return nil }
-            let value = data[offset..<offset + length]
+            let value = data[(base + offset)..<(base + offset + length)]
             offset += length
             return (tag, value)
         }
