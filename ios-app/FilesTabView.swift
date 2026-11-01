@@ -1299,9 +1299,17 @@ struct FilesTabView: View {
     private func performRename() {
         guard let item = renameItem else { return }
         renameItem = nil
-        let newName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var newName = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !newName.isEmpty, newName != item.name,
               !newName.contains("/") else { return }
+        // 已签 IPA 改名去后缀后，证书页清单仍留一条幽灵记录
+        // （点安装必失败）：IPA 文件改名没写 .ipa 就补上。
+        if !item.isDirectory, item.url.pathExtension.lowercased() == "ipa",
+           !newName.lowercased().hasSuffix(".ipa") {
+            newName += ".ipa"
+        }
+        // 补后缀后跟原名相同（“X.ipa”改“X”）就是没改，直接返回。
+        guard newName != item.name else { return }
         let dest = item.url.deletingLastPathComponent().appendingPathComponent(newName)
         guard !FileManager.default.fileExists(atPath: dest.path) else {
             opMessage = L("已有同名文件")

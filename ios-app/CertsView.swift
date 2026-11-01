@@ -108,12 +108,18 @@ struct CertsView: View {
         }
     }
 
-    /// 到期日 + 剩余天数，跟 CertTabView.remainingText 同一套算法。
+    /// 到期日 + 剩余天数，跟 CertTabView.remainingText、已装 App 页
+    /// AppsView.daysRemaining 同一套算法（自然日对齐，见 S7），
+    /// 同一到期日在三页说法一致。只改日期显示，不动 ID 签名/
+    /// 续签逻辑。
     private func expiryLabel(_ expiry: Date) -> String {
         let date = expiry.formatted(
             Date.FormatStyle(date: .abbreviated, time: .omitted)
                 .locale(Localizer.locale))
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: expiry)).day ?? 0
         if days < 0 { return L("%@（已过期）", date) }
         if days == 0 { return L("%@（今天到期）", date) }
         return L("%@（剩 %d 天）", date, days)

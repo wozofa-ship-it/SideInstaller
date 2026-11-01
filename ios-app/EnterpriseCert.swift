@@ -22,6 +22,11 @@ enum EnterpriseCertStore {
     static var hasProvision: Bool { FileManager.default.fileExists(atPath: provisionURL.path) }
     static var password: String {
         get {
+            // S10：钥匙串写失败进 fallback 后，即使钥匙串里有
+            // 旧条目，getter 也要先认新密码——以前先读钥匙串、
+            // 有值直接返回，改密场景下界面显示新密码、签名实际
+            // 用旧密码，报错“密码错误”且重输难定位。
+            if memoryFallbackValid, let fallback = memoryFallback { return fallback }
             if let stored = keychainRead() { return stored }
             if let fallback = memoryFallback { return fallback }
             // 一次性迁移：旧版存在 UserDefaults 的明文密码搬进
@@ -30,10 +35,13 @@ enum EnterpriseCertStore {
             if !legacy.isEmpty {
                 if keychainWrite(legacy) == nil {
                     UserDefaults.standard.removeObject(forKey: "CZFEnterpriseCertPassword")
+                    memoryFallbackValid = false
                 } else {
                     // 钥匙串写不进：先留内存给本次用，旧键也留着，
-                    // 下次启动再试迁移，免得密码丢了要重填。
+                    // 下次启动再试迁移，免得密码丢了要重填；同时
+                    // 标记有效，免得钥匙串旧条目把刚迁的盖回去。
                     memoryFallback = legacy
+                    memoryFallbackValid = true
                 }
                 return legacy
             }
@@ -44,16 +52,29 @@ enum EnterpriseCertStore {
             if newValue.isEmpty {
                 keychainDelete()
                 memoryFallback = nil
+                memoryFallbackValid = false
             } else {
                 // 钥匙串万一写不进（极少见），只留在内存里撑到
-                // App 退出，不回写 UserDefaults 明文。
-                memoryFallback = keychainWrite(newValue) == nil ? nil : newValue
+                // App 退出，不回写 UserDefaults 明文；同时标记
+                // 有效（见 S10），下次读先认它，不认旧条目。
+                if keychainWrite(newValue) == nil {
+                    memoryFallback = nil
+                    memoryFallbackValid = false
+                } else {
+                    memoryFallback = newValue
+                    memoryFallbackValid = true
+                }
             }
         }
     }
     /// 钥匙串写失败时的当会话 fallback（AccountStore 的
     /// volatilePasswords 同款做法），App 退出即丢。
     private static var memoryFallback: String?
+    /// memoryFallback 是否是本次会话里最新写入的密码（见 S10）：
+    /// 只在钥匙串写失败、密码被迫留内存时为 true；钥匙串写成
+    /// 功或密码清空时为 false。首次导入无旧条目时钥匙串读本
+    /// 来就是空，fallback 正常工作，本标志不改变那条路径。
+    private static var memoryFallbackValid = false
     static var ready: Bool { hasP12 && hasProvision && !password.isEmpty }
 
     // MARK: - 钥匙串（AccountStore 的 Keychain 模板同款）
@@ -236,7 +257,7 @@ enum EnterpriseCertStore {
     }
 
     /// 签名前校验（两条签名路共用：CertSigner 和 Engine 流水线）。
-    /// 只拦板上钉钉的两档——过期，和证书与描述文件对不上（
+    /// 只拦板上钉钉的档——过期，和证书与描述文件对不上（
     /// 描述文件里根本没有这张证书，签出来的包装上去也装不上，
     /// 不如签之前就明说）。解析不出来的项不拦，免得误杀能签的。
     /// 证书对不上的判断走描述文件内嵌的证书列表：证书在列表里
@@ -245,6 +266,13 @@ enum EnterpriseCertStore {
         let now = Date()
         if let expiration = provisionInfo?.expiration, expiration < now {
             throw EngineError.message(L("描述文件已过期（%@），签出来的包装上去也是闪退，先换一张没过期的描述文件。",
+                                        expiration.formatted(date: .abbreviated, time: .omitted)))
+        }
+        // p12 证书本身过期也要拦：以前只看描述文件，证书过期
+        // 时一路签完、到安装/启动才暴露。解不开（密码不对）时
+        // certInfo 为 nil，这里不拦，签名那步自会明说。
+        if let expiration = certInfo?.expiration, expiration < now {
+            throw EngineError.message(L("证书已过期（%@），签出来的包装上去也是闪退，先换一张没过期的证书。",
                                         expiration.formatted(date: .abbreviated, time: .omitted)))
         }
         // p12 解不开（比如密码不对）时这里不重复报错：后面签
@@ -427,12 +455,20 @@ enum CertRevocationChecker {
     }
 }
 
-/// 脱壳检查：读 IPA 主程序 Mach-O 的 LC_ENCRYPTION_INFO，cryptid
-/// 非 0 说明还是加密的（没脱壳），签完可能装不上。
-/// 返回 nil = 查不出来（不警告）；0 = 已脱壳；>0 = 未脱壳。
-/// 调用方在后台线程调：大包解压到临时目录要几秒，查完即删。
+/// 脱壳检查：解包读各 .app 的 Mach-O 加密命令，cryptid 非 0
+/// 说明还是加密的（没脱壳），签完可能装不上。undumpedApps
+/// 遍历全部 .app（见 SS2），不再只取第一个。nil = 查不出来
+/// （不警告）；调用方在后台线程调：大包解压到临时目录要几
+/// 秒，查完即删。
 enum IPADecryptionCheck {
-    static func cryptid(of ipaURL: URL) -> Int? {
+    /// 未脱壳的 .app 目录名（见 SS2）：遍历 Payload 里全部
+    /// .app 逐个查，不再只取第一个——contentsOfDirectory 顺
+    /// 序未定义，单 .app 时取第一个碰巧对，多 .app 时可能查
+    /// 错对象。nil = 整包解不开/读不到（不警告，与旧语义一致）；
+    /// 空数组 = 全部已脱壳；非空 = 逐个报未脱壳的 app 名。
+    /// 单个 .app 读不出来时跳过它、不警告（旧语义里单个读不
+    /// 出也是 nil，即不警告）。
+    static func undumpedApps(of ipaURL: URL) -> [String]? {
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory
             .appendingPathComponent("EnterpriseCryptCheck-\(UUID().uuidString)", isDirectory: true)
@@ -441,8 +477,20 @@ enum IPADecryptionCheck {
         } catch { return nil }
         defer { try? fm.removeItem(at: tmp) }
         guard FileZipTool.unzip(archive: ipaURL, to: tmp) == nil else { return nil }
-        guard let payload = try? fm.contentsOfDirectory(at: tmp.appendingPathComponent("Payload"), includingPropertiesForKeys: nil),
-              let appDir = payload.first(where: { $0.pathExtension == "app" }) else { return nil }
+        guard let payload = try? fm.contentsOfDirectory(at: tmp.appendingPathComponent("Payload"), includingPropertiesForKeys: nil) else { return nil }
+        let appDirs = payload.filter { $0.pathExtension == "app" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard !appDirs.isEmpty else { return nil }
+        var undumped: [String] = []
+        for appDir in appDirs {
+            if let cryptid = cryptid(ofAppDir: appDir), cryptid != 0 {
+                undumped.append(appDir.lastPathComponent)
+            }
+        }
+        return undumped
+    }
+
+    private static func cryptid(ofAppDir appDir: URL) -> Int? {
         let executableName: String
         if let plistData = try? Data(contentsOf: appDir.appendingPathComponent("Info.plist")),
            let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil),
@@ -683,6 +731,17 @@ enum SignedIPAStore {
             .sorted { $0.date > $1.date }
     }
 
+    /// 未过滤的原单：只给保存用。load() 按文件存在过滤，拿它
+    /// 当保存底本会把“移出 Signed 目录”的记录永久抹掉（文件
+    /// 移回来也找不回）；显示层继续用 load()，移走的文件本
+    /// 来就不该显示，但记录要留着等人移回来。
+    static func loadRaw() -> [SignedIPARecord] {
+        guard let data = try? Data(contentsOf: manifestURL),
+              let records = try? JSONDecoder().decode([SignedIPARecord].self, from: data)
+        else { return [] }
+        return records.sorted { $0.date > $1.date }
+    }
+
     private static func save(_ records: [SignedIPARecord]) {
         if let data = try? JSONEncoder().encode(records) {
             try? data.write(to: manifestURL, options: .atomic)
@@ -690,12 +749,14 @@ enum SignedIPAStore {
     }
 
     static func add(_ record: SignedIPARecord) {
-        save([record] + load())
+        // 同文件名只留一条（id 就是 fileName）：并发签出同名时
+        // 不再出现两个同 id 记录，删的时候也不会误删一对。
+        save([record] + loadRaw().filter { $0.fileName != record.fileName })
     }
 
     static func remove(_ record: SignedIPARecord) {
         try? FileManager.default.removeItem(at: url(for: record))
-        save(load().filter { $0.fileName != record.fileName })
+        save(loadRaw().filter { $0.fileName != record.fileName })
     }
 
     /// 批量删除：一次读清单、一次写回，不按条循环调 remove。
@@ -704,7 +765,7 @@ enum SignedIPAStore {
         for record in records {
             try? FileManager.default.removeItem(at: url(for: record))
         }
-        save(load().filter { !names.contains($0.fileName) })
+        save(loadRaw().filter { !names.contains($0.fileName) })
     }
 
     /// 老记录证书段补齐：v61 之前签的记录没存 certName/teamID，
@@ -721,7 +782,7 @@ enum SignedIPAStore {
               !currentTeam.isEmpty,
               let currentName = EnterpriseCertStore.certInfo?.name,
               !currentName.isEmpty else { return false }
-        var records = load()
+        var records = loadRaw()
         var changed = false
         for index in records.indices {
             let old = records[index]
@@ -770,7 +831,7 @@ enum SignedIPAStore {
 
     /// 文件页改名后同步清单里的文件名。
     static func renameFile(from oldName: String, to newName: String) {
-        var records = load()
+        var records = loadRaw()
         for index in records.indices where records[index].fileName == oldName {
             records[index].fileName = newName
         }
@@ -1061,6 +1122,10 @@ enum CertSigner {
             }
             let outURL = SignedIPAStore.uniqueOutputURL(
                 baseName: Self.outputBaseName(mods: mods, ipa: ipa))
+            // 打包失败清理用（见 S8）：签名开始前 outURL 是否已存在。
+            // 正常流程 uniqueOutputURL 恒返回不存在的路径，快照恒为
+            // false；S2 互斥修好后这个快照才是竞态安全的。
+            let outExistedBefore = fm.fileExists(atPath: outURL.path)
             let json = mods.json(iconPath: iconPath, outIpaPath: outURL.path)
             // 瘦身/兼容开关开着：先改包再签，改坏直接抛错不签；
             // 开关全关走原包，一字不动。
@@ -1075,6 +1140,13 @@ enum CertSigner {
             if rc != 0 {
                 let msg = error.map { String(cString: $0) } ?? "rc=\(rc)"
                 error.map { si_string_free($0) }
+                // zip_bundle 一上来就 File::create(out_ipa)，打包中
+                // 途失败会留半截 zip：本次签名开始前不存在、失败
+                // 后已存在，就是这次留下的残缺文件，删掉它；用户
+                // 原有文件（开始前已存在）绝不删。
+                if !outExistedBefore {
+                    try? fm.removeItem(at: outURL)
+                }
                 throw EngineError.message(L("企业证书签名失败：%@", msg))
             }
             signed.map { si_string_free($0) }

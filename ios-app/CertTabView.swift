@@ -77,6 +77,9 @@ struct CertTabView: View {
     // 选中 IPA 的脱壳预检结果（nil = 还没算出来）：加密的在表单上
     // 直接提示；真正签的时候 startSign 还会再算一次 gate。
     @State private var selectedCryptid: Int?
+    /// 选中 IPA 里未脱壳的 .app 名（与 selectedCryptid 同步写）：
+    /// 表单提示逐个报名字，不只含糊说“程序”（见 SS2）。
+    @State private var selectedUndumpedApps: [String] = []
 
     // 多开：数量与起始序号（只对「仅签名」生效，见 multiOpenSection）
     @State private var multiCountText = "1"
@@ -99,6 +102,10 @@ struct CertTabView: View {
     // “签名并安装”，已签名行直装记“仅安装”（kind 由起
     // 手那路定，重试复用同一 kind，跑完时不清掉）。
     @State private var enterpriseInstallInFlight = false
+    /// 企业页这次安装的归属凭证（见 startEngineInstall）：起跑时
+    /// 快照 engine.installSessionID，结束时只认同一会话；对不上
+    /// 说明这段“进行中”是别的安装的，不记日志、不弹框。
+    @State private var enterpriseInstallRunID: UUID?
     @State private var engineInstallLogAppName: String?
     @State private var engineInstallLogKind: CertSignLogKind = .signAndInstall
     // 安装诊断日志展开态（默认收起）：只控制展示，不存盘、不进 UserDefaults。
@@ -231,13 +238,28 @@ struct CertTabView: View {
             // enterpriseInstallInFlight 期间的变化，ID 线的安装
             // 跑完不会误弹到这里。
             if old && !new && enterpriseInstallInFlight {
+                // 当前又有安装在跑（isRunning 已翻回 true）：这次
+                // 投递是上一次安装的滞后投递，不是当前这跑的结束
+                // ——不认、不清，新跑的结束投递随后会来；不清的
+                // 话新跑结束时 inFlight 还在，不会丢完成。
+                guard !engine.isRunning else { return }
                 enterpriseInstallInFlight = false
+                // 归属凭证：只认自己那次安装的结束。凭证对不上
+                // （别的安装在标志立着时结束）时不记日志、不弹框、
+                // 不留旧名额，免得把别人的结果记到这条头上。
+                let runID = enterpriseInstallRunID
+                enterpriseInstallRunID = nil
+                let logAppName = engineInstallLogAppName
+                guard runID != nil, runID == engine.installSessionID else {
+                    engineInstallLogAppName = nil
+                    return
+                }
                 let logKind = engineInstallLogKind
                 if engine.finished {
                     showingEnterpriseInstallSuccessAlert = true
                     localInstall.appendStepLog(L("配对安装完成"))
                     CZFHaptics.notification(.success)
-                    if let appName = engineInstallLogAppName {
+                    if let appName = logAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                             appName: appName, kind: logKind, success: true,
                             detail: logKind == .installOnly ? L("配对安装完成。") : L("已签好，配对安装完成。")))
@@ -247,7 +269,7 @@ struct CertTabView: View {
                     enterpriseInstallErrorText = error
                     localInstall.appendStepLog(L("配对安装失败：%@", error))
                     CZFHaptics.notification(.error)
-                    if let appName = engineInstallLogAppName {
+                    if let appName = logAppName {
                         CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                             appName: appName, kind: logKind, success: false,
                             detail: error))
@@ -558,9 +580,27 @@ struct CertTabView: View {
             importError = L("未找到与本证书相匹配的mobileprovision文件，请将mobileprovision文件放在与p12文件相同的目录下。")
             return
         }
+        // 双文件导入原子化（见 S9）：p12 先换、描述文件失败时
+        // 以前是半新半旧（新 p12 + 旧描述文件），下次签名才以
+        // 配对不上暴露。先备份旧 p12（KB 级，放内存无妨），第
+        // 二步失败时把 p12 滚回旧值；描述文件自身 atomic 写盘，
+        // 失败时原文件不动，无需回滚；p12 自身失败时描述文件
+        // 根本没动。回滚写盘本身若也失败是磁盘级故障，只能
+        // best-effort，原错照常报，不静默吞掉。
+        let fm = FileManager.default
+        let oldP12 = try? Data(contentsOf: EnterpriseCertStore.p12URL)
         do {
             try EnterpriseCertStore.importP12(from: p12)
-            try EnterpriseCertStore.importProvision(from: provision)
+            do {
+                try EnterpriseCertStore.importProvision(from: provision)
+            } catch {
+                if let oldP12 {
+                    try? oldP12.write(to: EnterpriseCertStore.p12URL, options: .atomic)
+                } else {
+                    try? fm.removeItem(at: EnterpriseCertStore.p12URL)
+                }
+                throw error
+            }
             importError = nil
             // 导入时就比对配对：对不上就地报错，不要等到签名才发现。
             // p12 解不开（比如密码不对）时查不出来，不在这里重复报错，
@@ -585,8 +625,20 @@ struct CertTabView: View {
         .font(.footnote)
     }
 
+    /// 剩余天数：按自然日对齐（与已装 App 页 AppsView.daysRemaining
+    /// 同一套算法，见 S7）。旧算法 dateComponents(from: Date(),
+    /// to: expiry) 按不足 24 小时截断，同一到期日在企业页算 0
+    /// 天、在 App 页算 1 天，两边说法打架；自然日对齐后“1 =
+    /// tomorrow”，到期当天算 0 天（显示“今天到期”）。
+    private func remainingDays(to expiration: Date) -> Int {
+        let calendar = Calendar.current
+        return calendar.dateComponents([.day],
+            from: calendar.startOfDay(for: Date()),
+            to: calendar.startOfDay(for: expiration)).day ?? 0
+    }
+
     private func remainingText(_ expiration: Date) -> String {
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiration).day ?? 0
+        let days = remainingDays(to: expiration)
         if days < 0 { return L("（已过期）") }
         if days == 0 { return L("（今天到期）") }
         return L("（剩 %d 天）", days)
@@ -594,12 +646,14 @@ struct CertTabView: View {
 
     /// 剩余天数 ≤7 天（已过期也算）即提醒；跟 remainingText 同一套算法。
     private func expirySoon(_ expiration: Date) -> Bool {
-        (Calendar.current.dateComponents([.day], from: Date(), to: expiration).day ?? 0) <= 7
+        remainingDays(to: expiration) <= 7
     }
 
     /// 描述文件 7 天内到期（或已过期）时证书管理顶部的红条：
     /// 按 provisionInfo.expiration 实际日期算，永不硬编码。
     /// 纯展示——企业证书 App 内续不了，只能重新导入，所以不给动作。
+    /// 证书本身同样亮红条：以前只看描述文件，证书过期时这里
+    /// 一声不吭（校验也不拦，见 S4），两条各亮各的、不合并。
     @ViewBuilder
     private var expiryWarning: some View {
         if let expiration = provisionInfo?.expiration, expirySoon(expiration) {
@@ -613,6 +667,25 @@ struct CertTabView: View {
                             .font(.subheadline.weight(.semibold))
                         Text(expiration < Date()
                              ? L("签出来的包装上去也是闪退。先换一张没过期的描述文件，重新导入。")
+                             : L("到期日 %@%@，请及时重新导入。", expiration.formatted(date: .abbreviated, time: .omitted), remainingText(expiration)))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        if let expiration = certInfo?.expiration, expirySoon(expiration) {
+            CalloutCard(tint: .red) {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(expiration < Date() ? L("证书已过期") : L("证书快到期了"))
+                            .font(.subheadline.weight(.semibold))
+                        Text(expiration < Date()
+                             ? L("签出来的包装上去也是闪退。先换一张没过期的证书，重新导入。")
                              : L("到期日 %@%@，请及时重新导入。", expiration.formatted(date: .abbreviated, time: .omitted), remainingText(expiration)))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -854,8 +927,12 @@ struct CertTabView: View {
                 }
                 // 轻松签式脱壳提示：选好 IPA 就预检，加密的直接在
                 // 表单上提示（签时 startSign 还会再算一次 gate）。
+                // 多 .app 时逐个报名字（见 SS2）；名字还没算出来
+                // 时退回固定文案，不空着。
                 if let cryptid = selectedCryptid, cryptid != 0 {
-                    Text(L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。"))
+                    Text(selectedUndumpedApps.isEmpty
+                         ? L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。")
+                         : L("以下程序未脱壳，签名后可能无法安装，建议重新脱壳签名：%@", selectedUndumpedApps.joined(separator: "、")))
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
@@ -1051,6 +1128,7 @@ struct CertTabView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.footnote)
                     .frame(width: 52)
+                    .disabled(signBusy)
                 Text(L("起始序号"))
                     .font(.footnote)
                 TextField("1", text: $multiStartText)
@@ -1058,6 +1136,7 @@ struct CertTabView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.footnote)
                     .frame(width: 52)
+                    .disabled(signBusy)
                 Spacer()
             }
             if multiCount > 1 {
@@ -1351,6 +1430,7 @@ struct CertTabView: View {
         multiCountText = "1"
         multiStartText = "1"
         selectedCryptid = nil
+        selectedUndumpedApps = []
     }
 
     private func select(_ url: URL) {
@@ -1381,14 +1461,20 @@ struct CertTabView: View {
             mods.version = info.version ?? ""
             mods.minOS = info.minOS ?? ""
         }
-        // 脱壳预检（轻松签式）：选好就在后台算 cryptid，加密的
-        // 直接在表单上提示；选中的还是这个 IPA 才写，免得切走后
+        // 脱壳预检（轻松签式）：选好就在后台算，加密的直接
+        // 在表单上提示；选中的还是这个 IPA 才写，免得切走后
         // 旧结果盖住新表单。签时 startSign 还会再算一次 gate。
+        // 映射：undumpedApps 返回 nil（读不到）→ nil 无提示；
+        // 空（全已脱壳）→ 0；非空 → 1，表单只判 != 0（见 SS2）。
         selectedCryptid = nil
+        selectedUndumpedApps = []
         Task.detached(priority: .userInitiated) {
-            let cryptid = IPADecryptionCheck.cryptid(of: url)
+            let undumped = IPADecryptionCheck.undumpedApps(of: url)
             await MainActor.run {
-                if self.selectedIPA == url { self.selectedCryptid = cryptid }
+                if self.selectedIPA == url {
+                    self.selectedCryptid = undumped.map { $0.isEmpty ? 0 : 1 }
+                    self.selectedUndumpedApps = undumped ?? []
+                }
             }
         }
     }
@@ -1418,6 +1504,12 @@ struct CertTabView: View {
     /// 正在签（按钮里已有转圈）时点按不重复提示。
     private func signFromMainButton(kind: CertSignKind, proxy: ScrollViewProxy) {
         if signBusy { return }
+        // 单签与批量签名互斥：批量跑着时单签不进 signToFile，
+        // 否则两路撞同一个输出文件、清单出重复 id（见 S2）。
+        if batchBusy {
+            signBlockedMessage = L("批量签名正在进行，等它跑完再签。")
+            return
+        }
         if engine.isRunning {
             signBlockedMessage = L("Engine 正在运行，等它跑完再签。")
             return
@@ -1438,20 +1530,29 @@ struct CertTabView: View {
     /// 有警告先弹提醒（警告不拦截，点继续才执行），没警告直接执行。
     /// 吊销状态读上次手动检查的结果——没查过就不警告，不猜。
     private func startSign(kind: CertSignKind) {
-        guard let url = selectedIPA, !signBusy, certReady else { return }
+        guard let url = selectedIPA, !signBusy, !batchBusy, certReady else { return }
         signBlockedMessage = nil
         signBusy = true
         signOnlyMessage = nil
+        // 表单缓存 stale（见 SS1）：selectedInfo 只在选中时解析
+        // 一次，同路径文件在文件页被替换后它还是旧 App 的；签
+        // 名执行前按文件重解析一次，解析失败（文件又没了）时
+        // 留旧值——签名那步自会按文件报错，不在这里拦。
+        if let fresh = IPALibrary.appInfo(at: url) {
+            selectedInfo = fresh
+        }
         let currentMods = effectiveMods
         Task.detached(priority: .userInitiated) {
-            let cryptid = IPADecryptionCheck.cryptid(of: url)
+            let undumped = IPADecryptionCheck.undumpedApps(of: url)
             await MainActor.run {
                 var warnings: [String] = []
                 if self.revocationStatus == .revoked {
                     warnings.append(L("证书已经掉签，签名后可能无法安装。"))
                 }
-                if let cryptid, cryptid != 0 {
-                    warnings.append(L("程序未脱壳，签名后可能无法安装，建议重新脱壳签名。"))
+                if let undumped, !undumped.isEmpty {
+                    // 多 .app 时逐个报名字（见 SS2）；单 app 时
+                    // 名字就是包里那个 .app，不再含糊说“程序”。
+                    warnings.append(L("以下程序未脱壳，签名后可能无法安装，建议重新脱壳签名：%@", undumped.joined(separator: "、")))
                 }
                 if warnings.isEmpty {
                     self.executeSign(kind: kind, url: url, mods: currentMods)
@@ -1486,6 +1587,11 @@ struct CertTabView: View {
 
     private func executeSign(kind: CertSignKind, url: URL, mods: CertSignMods) {
         signBusy = true
+        // 上次安装失败的旧错误在这里清掉：不然一次成功的仅签名
+        // 仍在按钮下顶着旧安装错误（状态行优先级里错误排在签名
+        // 结果前面），看着像这次又失败了。签名并安装路的安装错
+        // 误由 startEngineInstall/onChange 后面重新置，不受影响。
+        enterpriseInstallErrorText = nil
         // 步骤日志（只加可见性，不改签名逻辑）：签名开始行进同一份
         // diagnosticLog，后面成功/失败/配对安装开始/完成各补一行，
         // 企业页一步步就在这份日志里看；Engine 自己的管线日志
@@ -1505,13 +1611,25 @@ struct CertTabView: View {
                         let baseID = mods.bundleID.isEmpty
                             ? (selectedInfo?.bundleID ?? "")
                             : mods.bundleID
+                        // 打包名同样按序号派生（与名字序号同款）：手填
+                        // 名先去重再加序号，空着按源文件名派生；不然
+                        // 全部副本共用一主名、只靠 2、3… 区分，看不出
+                        // 哪个副本是几号。
+                        let baseOutput = mods.outputName.isEmpty
+                            ? SignedIPAStore.stripSignedSuffix(url.deletingPathExtension().lastPathComponent)
+                            : SignedIPAStore.stripSignedSuffix(mods.outputName)
+                        // 起始序号循环开始时快照：输入框签名期间已禁用，
+                        // 但循环内现读仍是隐患，快照后中途改值也影响不到
+                        // 正在签的副本（见 S11）。
+                        let startIdx = multiStart
                         for j in 0..<multiCount {
-                            let idx = multiStart + j
+                            let idx = startIdx + j
                             var copy = mods
                             copy.name = "\(baseName) \(idx)"
                             // Bundle ID 实在读不出来就不加后缀（签出来
                             // 和原包同 ID，装的时候会顶掉原包，不静默造假）。
                             copy.bundleID = baseID.isEmpty ? "" : "\(baseID).\(idx)"
+                            copy.outputName = "\(baseOutput) \(idx)"
                             _ = try await CertSigner.signToFile(ipa: url, mods: copy)
                         }
                         signedRecords = SignedIPAStore.load()
@@ -1622,12 +1740,24 @@ struct CertTabView: View {
     private func startEngineInstall(record: SignedIPARecord) {
         enterpriseInstallRecord = record
         enterpriseInstallErrorText = nil
+        // 文件页同款守卫（FilesTabView）：Engine 单管线，别的安装
+        // 在跑时不新起——runInstallSignedIPA 里静默 return，但
+        // 进行中标志若立着，之后别人的安装结束会被误认成这次
+        // 的（归属劫持）。签名并安装路同样走这里复查：签名耗时
+        // 几秒，点按瞬间没在跑不等于起安装时也没在跑。
+        guard !engine.isRunning else {
+            enterpriseInstallErrorText = L("已有安装在进行，先等当前安装完成再试。")
+            // 名额只在没跑认领时清：正跑着的那次还指着它记日志，
+            // 忙时一点就清会把进行中那次的日志名额抹掉。
+            if !enterpriseInstallInFlight { engineInstallLogAppName = nil }
+            return
+        }
         let guideBefore = engine.guide
-        enterpriseInstallInFlight = true
+        let sessionBefore = engine.installSessionID
         localInstall.appendStepLog(L("配对安装开始：%@", record.appName))
         engine.runInstallSignedIPA(ipaURL: SignedIPAStore.url(for: record))
         if !engine.isRunning {
-            enterpriseInstallInFlight = false
+            if !enterpriseInstallInFlight { engineInstallLogAppName = nil }
             if let guide = engine.guide,
                guide != guideBefore
                || guide == Guides.importPairing || guide == Guides.vpn
@@ -1637,7 +1767,23 @@ struct CertTabView: View {
                 enterpriseInstallErrorText = L("配对安装没能启动：请检查配对文件与隧道是否就绪，或去「安装」页看日志。")
             }
             localInstall.appendStepLog(L("配对安装失败：%@", enterpriseInstallErrorText ?? ""))
+            return
         }
+        // 真正起跑了才立进行中标志 + 归属凭证：会话没变说明这
+        // 次调用根本没起跑（起跑瞬间输了竞态），按“已有安装在
+        // 进行”处理，绝不把别人的结束认成自己的；onChange 只
+        // 认同一会话的结束（见 body 层）。
+        guard engine.installSessionID != sessionBefore, let session = engine.installSessionID else {
+            enterpriseInstallErrorText = L("已有安装在进行，先等当前安装完成再试。")
+            if !enterpriseInstallInFlight { engineInstallLogAppName = nil }
+            return
+        }
+        enterpriseInstallInFlight = true
+        enterpriseInstallRunID = session
+        // 日志名额跟这次跑绑定（已签名行直装以前从不设名额，
+        // 仅安装的完成日志被悄悄跳过；这里起跑时认领，失败/
+        // 忙时上面已清，不会把旧名额留给下一次误认）。
+        engineInstallLogAppName = record.appName
     }
 
     // MARK: 应用库（未签名/已签名切栏）
@@ -1812,6 +1958,10 @@ struct CertTabView: View {
                             }
                             Button(L("取消"), role: .cancel) {
                                 clearPendingBatch()
+                                // 批量忙标志在 batchSign 入口就立起来了，取消
+                                // 时这里放掉；确认那路 runBatchSign 自己接管，
+                                // 跑完才放，不在这里清。
+                                batchBusy = false
                             }
                         } message: {
                             Text(pendingBatchWarnings.joined(separator: "\n"))
@@ -1914,24 +2064,45 @@ struct CertTabView: View {
             batchFailed = true
             return
         }
+        // 与单签互斥（见 S2）：单签跑着、或 Engine 安装跑着时
+        // 不进批量，否则两路撞同一个输出文件。忙标志在入口就
+        // 立起来（不只在 runBatchSign 里），否则脱壳预检那几秒
+        // 窗口里单签还能进来，两路照样撞上。
+        if signBusy {
+            batchMessage = L("正在签名，等它跑完再批量签名。")
+            batchFailed = true
+            return
+        }
+        if engine.isRunning {
+            batchMessage = L("已有安装在进行，先等当前安装完成再批量签名。")
+            batchFailed = true
+            return
+        }
         let targets = unsignedIPAs.filter { selectedUnsignedIDs.contains($0.id) }
         guard !targets.isEmpty else { return }
+        batchBusy = true
+        batchMessage = nil
         // 签名段表单的改动（插件、最低系统版本、图标等）批量同样带上，
         // 与单签 startSign 一致；但名字/Bundle ID/版本是单 App 身份，
         // 批量目标各有自己的值，表单里手填的自定义值不能盖到全部目标上，
-        // 这里清掉只留跨 App 通用项；包成 let，避免 var 被 Task.detached 捕获。
+        // 这里清掉只留跨 App 通用项；打包名同理（不然全部产物共用
+        // 同一主名、只靠 2、3… 序号区分，文件名跟 App 对不上）；
+        // 包成 let，避免 var 被 Task.detached 捕获。
         let mods: CertSignMods = {
             var m = effectiveMods
             m.name = ""
             m.bundleID = ""
             m.version = ""
+            m.outputName = ""
             return m
         }()
         let urls = targets.map { $0.url }
         Task.detached(priority: .userInitiated) {
             var undumpedURLs: [URL] = []
             for url in urls {
-                if let cryptid = IPADecryptionCheck.cryptid(of: url), cryptid != 0 {
+                // 按 IPA 粒度判定：包里任一 .app 未脱壳即该 IPA
+                // 未脱壳（见 SS2），不再只看第一个 .app。
+                if let undumped = IPADecryptionCheck.undumpedApps(of: url), !undumped.isEmpty {
                     undumpedURLs.append(url)
                 }
             }
@@ -2379,22 +2550,30 @@ struct CertTabView: View {
                 HStack(spacing: 6) {
                     if signBusy {
                         ProgressView()
+                    } else if signOnlyFailed {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.red)
                     } else {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
-                    Text(signBusy ? L("签名中…") : L("签名已完成"))
+                    Text(signBusy ? L("签名中…") : (signOnlyFailed ? L("签名失败") : L("签名已完成")))
                         .font(.footnote)
+                        .foregroundStyle(signBusy ? .primary : (signOnlyFailed ? .red : .primary))
                 }
                 HStack(spacing: 6) {
                     if signBusy {
                         ProgressView()
+                    } else if signOnlyFailed {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.red)
                     } else {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                     }
-                    Text(signBusy ? L("打包中…") : L("打包已完成"))
+                    Text(signBusy ? L("打包中…") : (signOnlyFailed ? L("打包未完成") : L("打包已完成")))
                         .font(.footnote)
+                        .foregroundStyle(signBusy ? .primary : (signOnlyFailed ? .red : .primary))
                 }
                 HStack(spacing: 6) {
                     if enterpriseInstallInFlight {

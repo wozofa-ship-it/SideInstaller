@@ -340,6 +340,15 @@ final class Engine: ObservableObject {
     /// True while the one-click pipeline is running.
     @Published var isRunning: Bool = false
 
+    /// 本次安装会话的归属凭证：runInstallSignedIPA 真正起跑时
+    /// 同步置一个新 UUID。Engine 是单管线，isRunning 只能说
+    /// “有安装在跑”，说不出是谁的——企业页起跑失败（别的安装
+    /// 已在跑）时若留着进行中标志，之后别人的安装结束会被误
+    /// 认成这次的；调用方起跑后快照它、结束时比对才认。跑完
+    /// 不清零（下一跑起跑时自然轮换；清零会让结束时的比对
+    /// 永远对不上）。
+    @Published var installSessionID: UUID?
+
     /// True from a cancel until the run stops, which waits for the step in
     /// flight to reach a safe point.
     @Published private(set) var isCancelling: Bool = false
@@ -2144,6 +2153,7 @@ final class Engine: ObservableObject {
         }
         resetRun()
         isRunning = true
+        installSessionID = UUID()
         log("=== Installing already-signed IPA ===")
 
         pipelineTask = Task { @MainActor in
