@@ -121,8 +121,6 @@ struct FilesTabView: View {
     @State private var machoItem: LocalFileItem?
     /// ⓘ 详情 sheet 正在看的行。
     @State private var detailItem: LocalFileItem?
-    /// 系统文件组是否展开（默认折叠，文件页先只看用户文件）。
-    @State private var showSystemFiles = false
     /// 文件页搜索（轻松签文件列表顶部搜索条同款）：按名字过滤当前视图。
     @State private var fileSearchText = ""
     /// 轻松签文件列表式切栏：未签名 = 不在 Signed 目录的 IPA，
@@ -492,8 +490,6 @@ struct FilesTabView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     header.cascadeItem(0)
-                    importCard.cascadeItem(1)
-                    fileInstallStatus
                     if selecting {
                         selectionBar.cascadeItem(2)
                     }
@@ -508,7 +504,6 @@ struct FilesTabView: View {
                     // 各震一次 .light；后者菜单按钮本身不另震，免得一次点按震两次。
                     .onChange(of: fileTab) { _, _ in CZFHaptics.impact(.light) }
                     fileSearchBar
-                    fileActionRow
                     if !currentDir.isEmpty {
                         currentDirBar
                         if currentDirItems.isEmpty {
@@ -525,18 +520,35 @@ struct FilesTabView: View {
                     } else {
                         // IPA 行不再单开「IPA 文件」组：切栏 + 搜索过滤
                         // 后的 ipaList 就是全部 IPA（轻松签文件列表式，
-                        // 无卡片头）；未签名 tab 下其他文件、系统文件仍用
-                        // 旧组，已签名 tab 只显示已签名 IPA，两组都收起。
+                        // 无卡片头）；其他文件、系统文件不再分组头，合并为
+                        // 扁平列表（过滤逻辑不动）。
                         ipaList.cascadeItem(2)
                         if fileTab == .unsigned {
-                            if !matching(others).isEmpty {
-                                fileSection(title: L("其他文件"), items: matching(others)).cascadeItem(3)
-                            }
-                            if !matching(systemFiles).isEmpty {
-                                systemSection.cascadeItem(4)
+                            let flatFiles = matching(others) + matching(systemFiles)
+                            if !flatFiles.isEmpty {
+                                PanelCard {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        ForEach(flatFiles) { item in
+                                            fileRow(item)
+                                            if item.id != flatFiles.last?.id {
+                                                Divider()
+                                            }
+                                        }
+                                    }
+                                }
+                                .cascadeItem(3)
                             }
                         }
                     }
+                    // 页尾（原来顶栏区的安装状态、导入卡、计数都到这里）：
+                    // 安装状态平时不显示，安装进行中/失败时才出现。
+                    fileInstallStatus
+                    importCard.cascadeItem(5)
+                    Text(L("%d 个文件 · %@", files.count,
+                           ByteCountFormatter.string(fromByteCount: Int64(totalSize), countStyle: .file)))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 .padding([.horizontal, .top], 20)
                 .padding(.bottom, 20)
@@ -694,17 +706,34 @@ struct FilesTabView: View {
         }
     }
 
+    /// 文件页顶栏：只留标题 + 切栏 + 搜索（轻松签文件列表式紧凑顶栏）；
+    /// 原来的大标题计数、导入卡、安装状态、操作行都移到页尾或 ••• 菜单里。
     private var header: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(L("文件"))
-                    .font(.largeTitle.weight(.bold))
-                Text(L("%d 个文件 · %@", files.count,
-                       ByteCountFormatter.string(fromByteCount: Int64(totalSize), countStyle: .file)))
-                    .font(.footnote)
+            Text(L("文件"))
+                .font(.title2.weight(.bold))
+            Spacer()
+            Menu {
+                Button { showImporter = true } label: {
+                    Label(L("导入文件"), systemImage: "square.and.arrow.down")
+                }
+                Button {
+                    newFolderName = ""
+                    showNewFolderAlert = true
+                } label: {
+                    Label(L("新建文件夹"), systemImage: "folder.badge.plus")
+                }
+                Button {
+                    files = AppFileLibrary.scan()
+                    resetCurrentDirIfNeeded()
+                } label: {
+                    Label(L("刷新"), systemImage: "arrow.clockwise")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
             if !files.isEmpty {
                 Button {
                     selecting.toggle()
@@ -870,36 +899,11 @@ struct FilesTabView: View {
             TextField(L("搜索"), text: $fileSearchText)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.center)
         }
         .padding(8)
         .background(Color.secondary.opacity(0.12))
         .cornerRadius(8)
-    }
-
-    /// 文件页操作行（轻松签文件列表同款动作入口）：新建文件夹 +
-    /// 手动刷新（平时列表只在进页/操作后重扫，手动刷新兜底）。
-    private var fileActionRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                newFolderName = ""
-                showNewFolderAlert = true
-            } label: {
-                Label(L("新建文件夹"), systemImage: "folder.badge.plus")
-                    .font(.footnote)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            Button {
-                files = AppFileLibrary.scan()
-                resetCurrentDirIfNeeded()
-            } label: {
-                Label(L("刷新"), systemImage: "arrow.clockwise")
-                    .font(.footnote)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            Spacer()
-        }
     }
 
     /// 当前文件夹返回条：点回上级（根目录就回文件组）。
@@ -959,64 +963,6 @@ struct FilesTabView: View {
                     fileRow(item)
                     if item.id != filteredIPAs.last?.id {
                         Divider()
-                    }
-                }
-            }
-        }
-    }
-
-    private func fileSection(title: String, items: [LocalFileItem]) -> some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: title == L("IPA 文件") ? "app.badge" : "doc")
-                        .foregroundStyle(.secondary)
-                    Text(title)
-                        .font(.headline)
-                    Spacer()
-                    Text("\(items.count)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(items) { item in
-                    fileRow(item)
-                    if item.id != items.last?.id {
-                        Divider()
-                    }
-                }
-            }
-        }
-    }
-
-    /// 系统文件组：默认折叠，只露一行标题和个数；点开后和别的
-    /// 文件一样看详情、分享、删除。DDI 挂载走自己的路径，不靠
-    /// 文件列表找文件，所以收起来不影响 DDI，只是不让它 clutter。
-    /// 搜索时也按名字过滤（跟别的组一样）。
-    private var systemSection: some View {
-        PanelCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Button { showSystemFiles.toggle() } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc")
-                            .foregroundStyle(.secondary)
-                        Text(L("系统文件"))
-                            .font(.headline)
-                        Spacer()
-                        Text("\(matching(systemFiles).count)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: showSystemFiles ? "chevron.up" : "chevron.down")
-                            .foregroundStyle(.secondary)
-                            .font(.footnote)
-                    }
-                }
-                .buttonStyle(.plain)
-                if showSystemFiles {
-                    ForEach(matching(systemFiles)) { item in
-                        fileRow(item)
-                        if item.id != matching(systemFiles).last?.id {
-                            Divider()
-                        }
                     }
                 }
             }
@@ -1106,8 +1052,8 @@ struct FilesTabView: View {
                     // IPA 行三行格式（轻松签文件列表同款）：解析出的
                     // App 名 / V版本 | 大小 | Bundle ID / 文件名。
                     // 行内不再放分享/去签名/安装/删除按钮——点行弹
-                    // 底部动作菜单，菜单里全有；ⓘ 也不放，菜单里
-                    // 有详情。
+                    // 底部动作菜单，菜单里全有；右侧ⓘ 点开详情
+                    // （与非 IPA 行一致）。
                     VStack(alignment: .leading, spacing: 2) {
                         Text(ipaDisplayName(item))
                             .font(.subheadline.weight(.semibold))
@@ -1133,48 +1079,15 @@ struct FilesTabView: View {
                     }
                 }
                 Spacer()
-                if item.isDirectory {
-                    // 文件夹入口标识：点行就进，ⓘ 仍是详情。
-                    Image(systemName: "chevron.right")
-                        .foregroundStyle(.secondary)
-                        .font(.footnote)
+                // ⓘ 详情：所有行都有（IPA 行也补上，与非 IPA 行一致）；
+                // 文件夹不再另放 chevron，点行就进文件夹。
+                Button {
+                    detailItem = item
+                } label: {
+                    Image(systemName: "info.circle")
+                        .foregroundStyle(.blue)
                 }
-                if !item.isIPA {
-                    Button {
-                        detailItem = item
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            if !selecting && !item.isIPA {
-            HStack(spacing: 14) {
-                if item.isDirectory {
-                    // 文件夹是新增的行：分享/签名/安装都是文件的操作，
-                    // 这里只留删除（重命名在长按菜单里）。
-                    Spacer()
-                    Button(role: .destructive) {
-                        pendingDeleteItem = item
-                    } label: {
-                        Text(L("删除"))
-                            .font(.footnote)
-                    }
-                } else {
-                    ShareLink(item: item.url) {
-                        Text(L("分享"))
-                            .font(.footnote)
-                    }
-                    Spacer()
-                    Button(role: .destructive) {
-                        pendingDeleteItem = item
-                    } label: {
-                        Text(L("删除"))
-                            .font(.footnote)
-                    }
-                }
-            }
+                .buttonStyle(.plain)
             }
         }
         .contentShape(Rectangle())

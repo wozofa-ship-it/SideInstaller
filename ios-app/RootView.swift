@@ -83,7 +83,7 @@ struct RootView: View {
         // `.tabItem`/`.tag` rather than iOS 18's `Tab`, to keep iOS 17.
         TabView(selection: tabSelection) {
             CertTabView()
-                .tabItem { Label(L("证书"), systemImage: "checkmark.seal.fill") }
+                .tabItem { Label(L("签名"), systemImage: "checkmark.seal.fill") }
                 .tag(Page.cert)
             FilesTabView(onGoCert: { page = .cert })
                 .tabItem { Label(L("文件"), systemImage: "folder.fill") }

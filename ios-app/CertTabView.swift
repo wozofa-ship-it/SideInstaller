@@ -106,7 +106,9 @@ struct CertTabView: View {
     @State private var signError: String?
 
     // 应用库
-    @State private var certPage = CertPage.certificate
+    @State private var certPage = CertPage.signing
+    /// 证书组展开态（签名段顶部）：nil = 自动（未就绪默认展开、就绪默认收起），点标题切换后锁定。
+    @State private var certGroupExpanded: Bool? = nil
     @State private var libraryTab = CertLibraryTab.unsigned
     @State private var librarySearchText = ""
     @State private var unsignedIPAs: [LocalFileItem] = []
@@ -161,7 +163,6 @@ struct CertTabView: View {
                     .cascadeItem(0)
                     .padding(.horizontal, 20)
                 Picker("", selection: $certPage) {
-                    Text(L("证书")).tag(CertPage.certificate)
                     Text(L("签名")).tag(CertPage.signing)
                     Text(L("应用库")).tag(CertPage.library)
                 }
@@ -279,13 +280,11 @@ struct CertTabView: View {
             .padding(.top, 8)
     }
 
-    /// 企业证书页分屏：一次只显示一段（轻松签式），不再三卡叠滚。
-    /// 切栏本身不改任何状态，卡片还是原来那三张。
+    /// 企业证书页分屏：一次只显示一段（轻松签式）；证书段已并进
+    /// 签名段顶部作证书组，这里只剩签名/应用库两段。
     @ViewBuilder
     private var pageContent: some View {
         switch certPage {
-        case .certificate:
-            certCard.cascadeItem(1)
         case .signing:
             signCard.cascadeItem(2)
         case .library:
@@ -295,19 +294,10 @@ struct CertTabView: View {
 
     // MARK: 证书管理
 
+    /// 证书组内容（原证书段，签名段顶部的证书组展开时显示；标题行
+    /// 由证书组自己提供，这里不再另起“证书管理”头）。
     private var certCard: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.secondary)
-                Text(L("证书管理"))
-                    .font(.headline)
-                Spacer()
-                if certReady {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                }
-            }
             expiryWarning
             if let info = provisionInfo {
                 signGroup(title: L("描述文件")) {
@@ -677,7 +667,7 @@ struct CertTabView: View {
     }
 
     /// “选择证书”行显示的当前证书：证书名 + 团队 ID（轻松签签名页
-    /// 同款格式）；都没导入就明说去证书页导入，点行切到证书段。
+    /// 同款格式）；都没导入就明说去证书组导入，点行展开上方证书组。
     private var certRowText: String {
         if let name = certInfo?.name, !name.isEmpty {
             if let teamID = provisionInfo?.teamID, !teamID.isEmpty {
@@ -708,6 +698,47 @@ struct CertTabView: View {
     /// 步骤进度/诊断日志/安装状态/提示文案位置跟原来一样，在按钮下面。
     private var signCard: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // 证书组（原证书段整体搬进签名段顶部）：未就绪默认展开、
+            // 就绪默认收起只留状态行，点标题切换。
+            VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    certGroupExpanded = !(certGroupExpanded ?? !certReady)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.secondary)
+                        Text(L("证书"))
+                            .font(.headline)
+                        Spacer()
+                        if certReady {
+                            if let name = certInfo?.name, !name.isEmpty {
+                                Text(name)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if let expiration = certInfo?.expiration ?? provisionInfo?.expiration {
+                                Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
+                                    .font(.footnote)
+                                    .foregroundStyle(expirySoon(expiration) ? .red : .secondary)
+                            }
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Text(L("未就绪"))
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                        }
+                        Image(systemName: (certGroupExpanded ?? !certReady) ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(.secondary)
+                            .font(.footnote)
+                    }
+                }
+                .buttonStyle(.plain)
+                if certGroupExpanded ?? !certReady {
+                    certCard
+                }
+            }
             // 导入失败明说（源导入/文件库选择的文件找不到了时）：
             // 段内绝不静默空白——有错就露出来，进口按钮就在下面。
             if let signError {
@@ -754,7 +785,7 @@ struct CertTabView: View {
                 }
                 signGroup(title: L("选择证书")) {
                     Button {
-                        certPage = .certificate
+                        certGroupExpanded = true
                     } label: {
                         HStack {
                             Text(certRowText)
@@ -855,7 +886,7 @@ struct CertTabView: View {
                         .foregroundStyle(signOnlyFailed ? .red : .green)
                 }
                 if !certReady {
-                    Text(L("先去「证书」页把证书、描述文件和密码备齐。"))
+                    Text(L("先在上方证书组把证书、描述文件和密码备齐。"))
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
@@ -1453,6 +1484,23 @@ struct CertTabView: View {
                     Text(L("应用库"))
                         .font(.headline)
                     Spacer()
+                    // 选择改顶栏右上按钮（原来在“共 N 个”计数行里，计数行已删）：
+                    // 未签名栏切批量签名、已签名栏切批量删除，记录段没有选择。
+                    if libraryTab != .log {
+                        Button {
+                            if libraryTab == .unsigned {
+                                batchingUnsigned.toggle()
+                                if !batchingUnsigned { selectedUnsignedIDs.removeAll() }
+                            } else {
+                                selectingSigned.toggle()
+                                if !selectingSigned { selectedSignedIDs.removeAll() }
+                            }
+                        } label: {
+                            Text((libraryTab == .unsigned ? batchingUnsigned : selectingSigned) ? L("完成") : L("选择"))
+                                .font(.footnote)
+                        }
+                        .disabled(libraryTab == .unsigned ? batchBusy : false)
+                    }
                     // 应用库页内直接导入（轻松签应用页同款入口）：
                     // 复用签名段的文件导入 picker，选完走 select()
                     // 进签名段表单；“从文件库选择”不在这里重复——
@@ -1475,6 +1523,11 @@ struct CertTabView: View {
                             .font(.footnote)
                     }
                 }
+                Picker("", selection: $libraryTab) {
+                    Text(L("未签名")).tag(CertLibraryTab.unsigned)
+                    Text(L("已签名")).tag(CertLibraryTab.signed)
+                }
+                .pickerStyle(.segmented)
                 // 轻松签应用页同款浅灰搜索框，两个切栏都按名字过滤。
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -1486,13 +1539,23 @@ struct CertTabView: View {
                 .padding(8)
                 .background(Color.secondary.opacity(0.12))
                 .cornerRadius(8)
-                Picker("", selection: $libraryTab) {
-                    Text(L("未签名")).tag(CertLibraryTab.unsigned)
-                    Text(L("已签名")).tag(CertLibraryTab.signed)
-                    Text(L("记录")).tag(CertLibraryTab.log)
-                }
-                .pickerStyle(.segmented)
                 libraryContent
+                // 记录段不在切栏里了，页尾留一行入口（切到记录段后本行隐藏，点切栏回未签名/已签名）。
+                if libraryTab != .log {
+                    Button {
+                        libraryTab = .log
+                    } label: {
+                        HStack {
+                            Text(L("记录"))
+                                .font(.footnote)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(.secondary)
+                                .font(.footnote)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .alert(L("删除这个已签名 IPA？"), isPresented: $showingDeleteConfirm) {
@@ -1540,8 +1603,7 @@ struct CertTabView: View {
     /// 未签名栏：文件库里还没签过的 IPA（Signed 目录里的已签
     /// 成品不算未签名）。只读展示名字、目录、大小，不逐行解
     /// Info.plist（证书页每敲一键都重读是已知性能坑）；点
-    /// 「去签名」就进签名段表单。
-    /// 按目录分组（轻松签应用库式）：根目录在前，其余按目录名排。
+    /// 「去签名」就进签名段表单。扁平列表，不按目录分组。
     private var unsignedList: some View {
         VStack(alignment: .leading, spacing: 12) {
             if filteredUnsigned.isEmpty {
@@ -1551,20 +1613,6 @@ struct CertTabView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                HStack(spacing: 12) {
-                    Text(L("共 %d 个", filteredUnsigned.count))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        batchingUnsigned.toggle()
-                        if !batchingUnsigned { selectedUnsignedIDs.removeAll() }
-                    } label: {
-                        Text(batchingUnsigned ? L("完成") : L("选择"))
-                            .font(.footnote)
-                    }
-                    .disabled(batchBusy)
-                }
                 if batchingUnsigned {
                     HStack(spacing: 12) {
                         Button {
@@ -1605,31 +1653,14 @@ struct CertTabView: View {
                             .foregroundStyle(batchFailed ? .red : .green)
                     }
                 }
-                ForEach(groupedUnsigned, id: \.key) { group in
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(group.key.isEmpty ? L("根目录") : group.key)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        ForEach(group.items) { item in
-                            unsignedRow(item)
-                            if item.id != group.items.last?.id {
-                                Divider()
-                            }
-                        }
+                ForEach(filteredUnsigned) { item in
+                    unsignedRow(item)
+                    if item.id != filteredUnsigned.last?.id {
+                        Divider()
                     }
                 }
             }
         }
-    }
-
-    /// 未签名栏按目录分组：同一目录的放一组，组内保持原顺序。
-    private var groupedUnsigned: [(key: String, items: [LocalFileItem])] {
-        let groups = Dictionary(grouping: filteredUnsigned, by: { $0.relativeDir })
-        return groups.keys.sorted(by: { a, b in
-            if a.isEmpty { return true }
-            if b.isEmpty { return false }
-            return a < b
-        }).map { key in (key: key, items: groups[key] ?? []) }
     }
 
     /// 搜索过滤只读缓存：名字命中文件名或解析出的 App 名都算，
@@ -1956,12 +1987,12 @@ struct CertTabView: View {
         if let image = signed ? signedIcons[path] : unsignedIcons[path] {
             Image(uiImage: image)
                 .resizable()
-                .frame(width: 52, height: 52)
+                .frame(width: 60, height: 60)
                 .cornerRadius(13)
         } else {
             RoundedRectangle(cornerRadius: 13)
                 .fill(Color.secondary.opacity(0.15))
-                .frame(width: 52, height: 52)
+                .frame(width: 60, height: 60)
         }
     }
 
@@ -2238,19 +2269,6 @@ struct CertTabView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                HStack(spacing: 12) {
-                    Text(L("共 %d 个", filteredSigned.count))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        selectingSigned.toggle()
-                        if !selectingSigned { selectedSignedIDs.removeAll() }
-                    } label: {
-                        Text(selectingSigned ? L("完成") : L("选择"))
-                            .font(.footnote)
-                    }
-                }
                 if selectingSigned {
                     HStack(spacing: 12) {
                         Button {
@@ -2324,40 +2342,23 @@ struct CertTabView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                        Text(signedMetaLine(record))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
                     Spacer()
                 }
             }
             .buttonStyle(.plain)
             .task(id: "\(iconPath)#\(iconFingerprint(for: iconPath))") { loadLibraryIcon(for: iconPath, signed: true) }
-            if !selectingSigned {
-                HStack(spacing: 14) {
-                    Button {
-                        CZFHaptics.impact(.light)
-                        installSigned(record)
-                    } label: {
-                        Text(L("安装"))
-                            .font(.footnote.weight(.semibold))
-                    }
-                    .disabled(engine.isRunning || enterpriseInstallInFlight)
-                    ShareLink(item: SignedIPAStore.url(for: record)) {
-                        Text(L("分享"))
-                            .font(.footnote)
-                    }
-                    Spacer()
-                    Button(role: .destructive) {
-                        recordPendingDelete = record
-                        showingDeleteConfirm = true
-                    } label: {
-                        Text(L("删除"))
-                            .font(.footnote)
-                    }
+            // 行下按钮排已删：安装走点行直装，分享/删除进长按菜单。
+            .contextMenu {
+                ShareLink(item: SignedIPAStore.url(for: record)) {
+                    Label(L("分享"), systemImage: "square.and.arrow.up")
                 }
-                .padding(.top, 4)
+                Button(role: .destructive) {
+                    recordPendingDelete = record
+                    showingDeleteConfirm = true
+                } label: {
+                    Label(L("删除"), systemImage: "trash")
+                }
             }
         }
     }
@@ -2387,34 +2388,6 @@ struct CertTabView: View {
         }
         return parts.joined(separator: " | ")
     }
-
-    /// 已签名行第四行：签名时间 + 证书（Side 原有信息挪到这里，
-    /// 前三行按轻松签格式来，签名时间/证书不丢）。
-    private func signedMetaLine(_ record: SignedIPARecord) -> String {
-        let time = Self.esignDateFormatter.string(from: record.date)
-        if let certLine = signedCertLine(record) {
-            return L("签名时间:%@ · %@", time, certLine)
-        }
-        return L("签名时间:%@", time)
-    }
-
-    /// 已签名行第四行里的证书部分：iPhone Distribution: 证书名 (团队ID)。
-    /// 老记录没这两个字段就不显示这一行；团队 ID 没有就只显示证书名。
-    private func signedCertLine(_ record: SignedIPARecord) -> String? {
-        guard let certName = record.certName, !certName.isEmpty else { return nil }
-        if let teamID = record.teamID, !teamID.isEmpty {
-            return "\(certName) (\(teamID))"
-        }
-        return certName
-    }
-
-    /// 签名时间的固定格式（轻松签同款 yyyy-MM-dd HH:mm:ss）。
-    private static let esignDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
 }
 
 /// 签名流程两种去向：仅签名存已签名，或签名后走配对安装。
@@ -2423,15 +2396,13 @@ private enum CertSignKind {
     case signAndInstall
 }
 
-/// 企业证书页切栏：证书 / 签名 / 应用库。
+/// 企业证书页切栏：签名 / 应用库（证书段已并进签名段顶部作证书组）。
 private enum CertPage: Identifiable {
-    case certificate
     case signing
     case library
 
     var id: String {
         switch self {
-        case .certificate: return "certificate"
         case .signing: return "signing"
         case .library: return "library"
         }
