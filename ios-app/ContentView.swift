@@ -711,7 +711,10 @@ struct ContentView: View {
                 }
 
                 pairingImportButton
-                sideStorePairingButton
+                if engine.canGetSideStorePairing {
+                    orDivider
+                    sideStorePairingButton
+                }
                 pairingDocsLink
             }
         }
@@ -719,9 +722,11 @@ struct ContentView: View {
     }
 
     /// Asks SideStore for the pairing file it already has. SideStore opens and
-    /// sends it back, and the import asks before replacing anything.
+    /// sends it back, and the import asks before replacing anything. Inside
+    /// LiveContainer nothing opens: the built-in SideStore's file is read.
     private var sideStorePairingButton: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let insideLiveContainer = Engine.runsInLiveContainer
+        return VStack(alignment: .leading, spacing: 6) {
             Button { CZFHaptics.impact(); engine.requestSideStorePairing() } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.uturn.backward.circle")
@@ -729,16 +734,20 @@ struct ContentView: View {
                     Text(L("Get it from SideStore"))
                         .foregroundStyle(.primary)
                     Spacer()
-                    Image(systemName: "arrow.up.forward.app")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Theme.accent2)
+                    if !insideLiveContainer {
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Theme.accent2)
+                    }
                 }
                 .fieldBackground()
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain, sound: .tap)
             .disabled(engine.isImportingPairing)
-            Text(L("SideStore opens and sends back the pairing file it has."))
+            Text(insideLiveContainer
+                 ? L("SideInstaller takes the pairing file LiveContainer's built-in SideStore has.")
+                 : L("SideStore opens and sends back the pairing file it has."))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1589,9 +1598,16 @@ struct InstallPopup: View {
     }
 
     private func pairingLinkMessage(_ file: LinkedPairingFile) -> String {
-        let base = file.fromSideStore
-            ? L("SideStore sent back the pairing file it has. SideInstaller will connect to this iPhone with it.")
-            : L("A link sent SideInstaller a pairing file. Only import it if you asked for one: SideInstaller will connect to this iPhone with it.")
+        let base: String
+        if !file.fromSideStore {
+            base = L("A link sent SideInstaller a pairing file. Only import it if you asked for one: SideInstaller will connect to this iPhone with it.")
+        } else if Engine.runsInLiveContainer {
+            // SideStore's reply can't get there, so it's the file read from
+            // the built-in SideStore.
+            base = L("This is the pairing file LiveContainer's built-in SideStore has. SideInstaller will connect to this iPhone with it.")
+        } else {
+            base = L("SideStore sent back the pairing file it has. SideInstaller will connect to this iPhone with it.")
+        }
         if let current = engine.importedPairingName {
             return base + " " + L("It replaces %@.", current)
         }
@@ -1600,18 +1616,41 @@ struct InstallPopup: View {
 
     // MARK: Certificate conflict (Apple error 7460)
 
-    /// Shown on error 7460. The button loads the certificates; the dialog asks
-    /// which one to revoke, then retries the install.
+    /// Shown on error 7460. With SideStore's certificate to be had, the first
+    /// button gets it (from SideStore, or inside LiveContainer from
+    /// LiveContainer), signs with that and retries the install. The other
+    /// loads the certificates; the dialog asks which one to revoke, then
+    /// retries the install.
     private var certConflictPopup: some View {
-        PopupCard(title: L("A certificate already exists"),
-                  systemImage: "exclamationmark.shield.fill",
-                  tint: .orange,
-                  onClose: close) {
+        let sideStoreCertificate = engine.canUseSideStoreCertificate
+        return PopupCard(title: L("A certificate already exists"),
+                         systemImage: "exclamationmark.shield.fill",
+                         tint: .orange,
+                         onClose: close) {
             VStack(alignment: .leading, spacing: 14) {
-                Text(L("Apple won't issue a second signing certificate for this Apple ID. Revoking the one it already has lets the install continue — but it can't be undone."))
+                Text(sideStoreCertificate
+                     ? L("Apple won't issue a second signing certificate for this Apple ID. If SideStore made the one it has, SideInstaller can sign with that one too, and nothing is revoked. Revoking it lets the install continue as well — but it can't be undone.")
+                     : L("Apple won't issue a second signing certificate for this Apple ID. Revoking the one it already has lets the install continue — but it can't be undone."))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if sideStoreCertificate {
+                    Button {
+                        certManager.requestSideStoreCertificate(retryInstall: true)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if certManager.isImporting {
+                                ProgressView().tint(.white)
+                                Text(L("Checking the certificate"))
+                            } else {
+                                Image(systemName: "checkmark.seal.fill")
+                                Text(L("Use SideStore's certificate"))
+                            }
+                        }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(certManager.isBusy)
+                }
                 Button {
                     // Load first, so the chooser can name the certificates.
                     certManager.ensureLoaded { showRevokeChooser = true }

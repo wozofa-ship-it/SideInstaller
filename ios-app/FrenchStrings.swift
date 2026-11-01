@@ -309,6 +309,12 @@ let frenchStrings: [String: String] = [
     "Couldn't use that certificate: %@": "Impossible d'utiliser ce certificat : %@",
     "SideStore isn't installed on this iPhone, so there's no certificate to get from it.":
         "SideStore n'est pas installé sur cet iPhone, il n'y a donc aucun certificat à récupérer.",
+    "Inside LiveContainer, SideStore can't send its certificate back to SideInstaller, and LiveContainer doesn't hold one yet. In LiveContainer's Settings, tap “Import Certificate From SideStore” (sign in to SideStore first if it has no certificate), then try again here.":
+        "Dans LiveContainer, SideStore ne peut pas renvoyer son certificat à SideInstaller, et LiveContainer n'en a pas encore. Dans les Settings de LiveContainer, touchez « Import Certificate From SideStore » (connectez-vous d'abord à SideStore s'il n'a pas de certificat), puis réessayez ici.",
+    "The certificate LiveContainer holds for SideStore isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID. Nothing was changed. If SideStore has made a new one since, tap “Refresh Certificate from SideStore” in LiveContainer's Settings, then try again here.":
+        "Le certificat que LiveContainer garde pour SideStore n'appartient pas à cet Apple ID : il a été révoqué, ou il appartient à un autre Apple ID. Rien n'a été modifié. Si SideStore en a créé un nouveau depuis, touchez « Refresh Certificate from SideStore » dans les Settings de LiveContainer, puis réessayez ici.",
+    "SideInstaller takes SideStore's certificate from LiveContainer and signs with it too, so on a free Apple ID neither app has to revoke the other's.":
+        "SideInstaller récupère le certificat de SideStore dans LiveContainer et signe aussi avec lui : avec un Apple ID gratuit, aucune des deux apps n'a plus à révoquer celui de l'autre.",
     "Sign with this certificate?": "Signer avec ce certificat ?",
     "A link sent SideInstaller a signing certificate. Only use it if you asked for one: SideInstaller will sign apps with it from now on, in place of its own. It's used only if it's one of your Apple ID's certificates.":
         "Un lien a envoyé un certificat de signature à SideInstaller. Ne l'utilisez que si vous l'avez demandé : SideInstaller signera désormais les apps avec lui, à la place du sien. Il n'est utilisé que s'il fait partie des certificats de votre Apple ID.",
@@ -1095,6 +1101,14 @@ let frenchStrings: [String: String] = [
         "SideStore s'ouvre et renvoie le fichier de jumelage qu'il possède.",
     "SideStore isn't installed on this iPhone, so there's no pairing file to get from it.":
         "SideStore n'est pas installé sur cet iPhone, il n'y a donc aucun fichier de jumelage à récupérer.",
+    "SideInstaller takes the pairing file LiveContainer's built-in SideStore has.":
+        "SideInstaller prend le fichier de jumelage du SideStore intégré à LiveContainer.",
+    "This is the pairing file LiveContainer's built-in SideStore has. SideInstaller will connect to this iPhone with it.":
+        "Voici le fichier de jumelage du SideStore intégré à LiveContainer. SideInstaller s'en servira pour se connecter à cet iPhone.",
+    "In LiveContainer's Multitask Mode, SideInstaller can't open the built-in SideStore's files. Open SideInstaller in LiveContainer without Multitask Mode, then try again, or tap “Import pairing file” and pick the file your computer made.":
+        "En mode multitâche de LiveContainer, SideInstaller ne peut pas ouvrir les fichiers du SideStore intégré. Ouvrez SideInstaller dans LiveContainer sans le mode multitâche, puis réessayez, ou touchez « Importer le fichier de jumelage » et choisissez le fichier créé par votre ordinateur.",
+    "Inside LiveContainer, SideStore can't send its pairing file back to SideInstaller, and LiveContainer's built-in SideStore has none that SideInstaller can use. Tap “Import pairing file” and pick the file your computer made, or import one into SideStore first, then try again here.":
+        "Dans LiveContainer, SideStore ne peut pas renvoyer son fichier de jumelage à SideInstaller, et le SideStore intégré à LiveContainer n'en a aucun que SideInstaller puisse utiliser. Touchez « Importer le fichier de jumelage » et choisissez le fichier créé par votre ordinateur, ou importez-en d'abord un dans SideStore, puis réessayez ici.",
     "That install link has no .ipa in it. It needs ?url= followed by the https:// address the .ipa downloads from.":
         "Ce lien d'installation ne contient aucun .ipa. Il lui faut ?url= suivi de l'adresse https:// d'où se télécharge le .ipa.",
     "That link was meant to carry a pairing file, but what it holds can't be read.":

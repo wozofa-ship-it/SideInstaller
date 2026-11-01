@@ -22,6 +22,9 @@ struct CertsView: View {
                 header.cascadeItem(0)
                 loadButton.cascadeItem(1)
                 exportButton.cascadeItem(2)
+                if manager.canUseSideStoreCertificate {
+                    sideStoreCard.cascadeItem(3)
+                }
                 // Errors show as a popup, which `RootView` lays over the app.
                 certList
             }
@@ -125,6 +128,42 @@ struct CertsView: View {
             }
             if let err = exportError {
                 Text(err).font(.caption).foregroundColor(.red)
+            }
+        }
+    }
+
+    // MARK: SideStore's certificate
+
+    /// Signs with SideStore's certificate instead of a certificate of its own,
+    /// which a free Apple ID can't have alongside SideStore's. Inside
+    /// LiveContainer it's read from LiveContainer, as SideStore can't send it.
+    private var sideStoreCard: some View {
+        PanelCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(Engine.runsInLiveContainer
+                     ? L("SideInstaller takes SideStore's certificate from LiveContainer and signs with it too, so on a free Apple ID neither app has to revoke the other's.")
+                     : L("SideStore opens and sends back its certificate. SideInstaller then signs with it too, so on a free Apple ID neither app has to revoke the other's."))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    manager.requestSideStoreCertificate(retryInstall: false)
+                } label: {
+                    HStack(spacing: 6) {
+                        if manager.isImporting {
+                            ProgressView().controlSize(.small)
+                            Text(L("Checking the certificate"))
+                        } else {
+                            Image(systemName: "checkmark.seal")
+                            Text(L("Use SideStore's certificate"))
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered, sound: .tap)
+                .tint(Theme.accent)
+                .disabled(manager.isBusy)
             }
         }
     }

@@ -308,6 +308,12 @@ let italianStrings: [String: String] = [
     "Couldn't use that certificate: %@": "Impossibile usare quel certificato: %@",
     "SideStore isn't installed on this iPhone, so there's no certificate to get from it.":
         "SideStore non è installato su questo iPhone, quindi non c'è nessun certificato da prendere.",
+    "Inside LiveContainer, SideStore can't send its certificate back to SideInstaller, and LiveContainer doesn't hold one yet. In LiveContainer's Settings, tap “Import Certificate From SideStore” (sign in to SideStore first if it has no certificate), then try again here.":
+        "Dentro LiveContainer, SideStore non può restituire il suo certificato a SideInstaller, e LiveContainer non ne ha ancora uno. Nelle Settings di LiveContainer tocca “Import Certificate From SideStore” (prima accedi a SideStore se non ha un certificato), poi riprova qui.",
+    "The certificate LiveContainer holds for SideStore isn't one of this Apple ID's: it has been revoked, or it belongs to another Apple ID. Nothing was changed. If SideStore has made a new one since, tap “Refresh Certificate from SideStore” in LiveContainer's Settings, then try again here.":
+        "Il certificato che LiveContainer conserva per SideStore non è di questo Apple ID: è stato revocato, oppure appartiene a un altro Apple ID. Non è stato modificato nulla. Se nel frattempo SideStore ne ha creato uno nuovo, tocca “Refresh Certificate from SideStore” nelle Settings di LiveContainer, poi riprova qui.",
+    "SideInstaller takes SideStore's certificate from LiveContainer and signs with it too, so on a free Apple ID neither app has to revoke the other's.":
+        "SideInstaller prende il certificato di SideStore da LiveContainer e firma anche con quello, così con un Apple ID gratuito nessuna delle due app deve revocare quello dell'altra.",
     "Sign with this certificate?": "Firmare con questo certificato?",
     "A link sent SideInstaller a signing certificate. Only use it if you asked for one: SideInstaller will sign apps with it from now on, in place of its own. It's used only if it's one of your Apple ID's certificates.":
         "Un link ha inviato a SideInstaller un certificato di firma. Usalo solo se l'hai chiesto tu: d'ora in poi SideInstaller firmerà le app con esso, al posto del proprio. Viene usato solo se è uno dei certificati del tuo Apple ID.",
@@ -1089,6 +1095,14 @@ let italianStrings: [String: String] = [
         "SideStore si apre e rimanda il file di abbinamento che ha.",
     "SideStore isn't installed on this iPhone, so there's no pairing file to get from it.":
         "SideStore non è installato su questo iPhone, quindi non c'è nessun file di abbinamento da prendere.",
+    "SideInstaller takes the pairing file LiveContainer's built-in SideStore has.":
+        "SideInstaller prende il file di abbinamento del SideStore integrato in LiveContainer.",
+    "This is the pairing file LiveContainer's built-in SideStore has. SideInstaller will connect to this iPhone with it.":
+        "Questo è il file di abbinamento del SideStore integrato in LiveContainer. SideInstaller lo userà per collegarsi a questo iPhone.",
+    "In LiveContainer's Multitask Mode, SideInstaller can't open the built-in SideStore's files. Open SideInstaller in LiveContainer without Multitask Mode, then try again, or tap “Import pairing file” and pick the file your computer made.":
+        "Nella modalità Multitasking di LiveContainer, SideInstaller non può aprire i file del SideStore integrato. Apri SideInstaller in LiveContainer senza la modalità Multitasking, poi riprova, oppure tocca “Importa il file di abbinamento” e scegli il file creato dal tuo computer.",
+    "Inside LiveContainer, SideStore can't send its pairing file back to SideInstaller, and LiveContainer's built-in SideStore has none that SideInstaller can use. Tap “Import pairing file” and pick the file your computer made, or import one into SideStore first, then try again here.":
+        "Dentro LiveContainer, SideStore non può restituire il suo file di abbinamento a SideInstaller, e il SideStore integrato in LiveContainer non ne ha nessuno che SideInstaller possa usare. Tocca “Importa il file di abbinamento” e scegli il file creato dal tuo computer, oppure importane prima uno in SideStore, poi riprova qui.",
     "That install link has no .ipa in it. It needs ?url= followed by the https:// address the .ipa downloads from.":
         "Quel link di installazione non contiene nessun .ipa. Serve ?url= seguito dall'indirizzo https:// da cui si scarica l'.ipa.",
     "That link was meant to carry a pairing file, but what it holds can't be read.":

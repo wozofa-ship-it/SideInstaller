@@ -2,6 +2,31 @@
 
 All notable changes to SideInstaller are documented here.
 
+## 1.6.4
+
+### Fixed
+- **“Use SideStore's certificate” works inside LiveContainer.** There, SideStore showed its Export
+  prompt but its certificate never came back, because iOS only opens LiveContainer's links, not
+  SideInstaller's (#95). Inside LiveContainer, SideInstaller now takes the certificate LiveContainer
+  holds instead: its built-in SideStore's, or the copy LiveContainer imported from SideStore. It is
+  checked against your Apple ID as before. If LiveContainer has none yet, SideInstaller says how to
+  import it there.
+- **“Get it from SideStore” works inside LiveContainer.** There, the pairing-file button opened
+  SideStore, but nothing came back, because iOS only opens LiveContainer's links, not
+  SideInstaller's (the same cause as #95). Inside LiveContainer, SideInstaller now reads the
+  pairing file LiveContainer's built-in SideStore keeps and asks before importing it, as before.
+  When there's none to read, or SideInstaller runs in LiveContainer's Multitask Mode, it says what
+  to do instead. The button no longer shows in a LiveContainer without a built-in SideStore,
+  which has no pairing file to give.
+
+## 1.6.3
+
+### Fixed
+- **The device link opens with a pairing file made on a computer.** Before iOS 26.4, “Open the
+  device link” could stop with “peer closed connection without sending TLS close_notify” (#105,
+  #107). iOS closes what an app starts through LocalDevVPN unless the app answers its heartbeat,
+  as SideStore and StikDebug do. SideInstaller now answers it for as long as the link is open.
+
 ## 1.6.2
 
 ### Added

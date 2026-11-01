@@ -1929,7 +1929,7 @@ final class Engine: ObservableObject {
             // User-fixable failures get an explanatory card. A certificate that
             // already exists offers revoke-and-retry, never revoked automatically.
             if case EngineError.certExists = error {
-                setGuide(Guides.certExists)
+                setGuide(Guides.certExists(sideStoreCertificate: canUseSideStoreCertificate))
                 certConflict = true
             }
             if case let EngineError.deviceRegistration(udid, raw) = error {
@@ -2988,6 +2988,13 @@ final class Engine: ObservableObject {
         Self.appPresence(scheme: "sidestore") != .missing
     }
 
+    /// True when “Use SideStore's certificate” has somewhere to get it: SideStore
+    /// is on this iPhone, or SideInstaller runs inside LiveContainer, which
+    /// keeps SideStore's certificate itself (`LiveContainerCertificate`).
+    var canUseSideStoreCertificate: Bool {
+        Self.runsInLiveContainer || sideStoreInstalled
+    }
+
     /// True unless LiveContainer is known to be missing (see `appPresence`).
     /// Opening it reports when it isn't there.
     var liveContainerInstalled: Bool {
@@ -3065,10 +3072,26 @@ final class Engine: ObservableObject {
         }
     }
 
+    /// True when “Get it from SideStore” has somewhere to get the pairing file:
+    /// SideStore is on this iPhone, or, inside LiveContainer, LiveContainer
+    /// carries the built-in SideStore whose file is read instead. A SideStore
+    /// installed on its own can't hand its file to a LiveContainer guest.
+    var canGetSideStorePairing: Bool {
+        Self.runsInLiveContainer
+            ? LiveContainerSideStorePairing.hasBuiltInSideStore != false
+            : sideStoreInstalled
+    }
+
     /// Opens SideStore, which sends back the pairing file it has as a
     /// `sideinstaller://pairingFile` link. That link asks before importing.
+    /// Inside LiveContainer, which the link can't reach, the pairing file the
+    /// built-in SideStore keeps is read instead, and the same popup asks.
     @MainActor
     func requestSideStorePairing() {
+        if Self.runsInLiveContainer {
+            offerBuiltInSideStorePairing()
+            return
+        }
         guard let url = URL(string: "sidestore://pairing?urlname=\(DeepLink.scheme)") else { return }
         lastError = nil
         sideStorePairingRequestedAt = Date()
@@ -3080,6 +3103,27 @@ final class Engine: ObservableObject {
                 self.lastError = ErrorHelp.explained(L("SideStore isn't installed on this iPhone, so there's no pairing file to get from it."))
                 self.log("⛔️ Pairing import: \(self.lastError ?? "")")
             }
+        }
+    }
+
+    /// Puts up the link popup with the pairing file LiveContainer's built-in
+    /// SideStore keeps (see `LiveContainerSideStorePairing`), or says what to
+    /// do when there's none to be had.
+    @MainActor
+    private func offerBuiltInSideStorePairing() {
+        lastError = nil
+        log("Pairing import: inside LiveContainer, SideStore can't send its pairing file back, so SideInstaller reads the one LiveContainer's built-in SideStore keeps.")
+        switch LiveContainerSideStorePairing.find(log: { self.log($0) }) {
+        case let .found(file, from: names):
+            let link = DeepLink.pairingFile(file)
+            pendingLink = link
+            log("Pairing import: \(link.logDescription), from \(names.joined(separator: " + ")). Waiting for the go-ahead.")
+        case .unreachable:
+            lastError = ErrorHelp.explained(L("In LiveContainer's Multitask Mode, SideInstaller can't open the built-in SideStore's files. Open SideInstaller in LiveContainer without Multitask Mode, then try again, or tap “Import pairing file” and pick the file your computer made."))
+            log("⛔️ Pairing import: \(lastError ?? "")")
+        case .notFound:
+            lastError = ErrorHelp.explained(L("Inside LiveContainer, SideStore can't send its pairing file back to SideInstaller, and LiveContainer's built-in SideStore has none that SideInstaller can use. Tap “Import pairing file” and pick the file your computer made, or import one into SideStore first, then try again here."))
+            log("⛔️ Pairing import: \(lastError ?? "")")
         }
     }
 
@@ -3818,13 +3862,17 @@ enum Guides {
     }
 
     /// Shown when Apple refuses a certificate because one exists (error 7460).
-    static var certExists: Guide {
+    /// When SideStore's certificate can be had, using it comes first.
+    static func certExists(sideStoreCertificate: Bool) -> Guide {
         Guide(
             title: L("A signing certificate already exists"),
             systemImage: "exclamationmark.shield",
             steps: [
                 L("Apple returned error 7460: this Apple ID already has an iOS development certificate, or a request for one is still pending."),
                 L("SideInstaller couldn't reuse it. That happens when the certificate was issued somewhere else — AltStore, SideStore, Sideloadly or Xcode on another device — so the private key it needs isn't on this iPhone."),
+                sideStoreCertificate
+                    ? L("If SideStore made it, tap “Use SideStore's certificate” above: SideInstaller signs with that one too, and nothing is revoked.")
+                    : nil,
                 L("Use “Revoke and retry” above, or open Certificates in the Tools tab, tap “Load certificates”, and revoke it there."),
                 L("Revoking is permanent: every app already signed with that certificate stops launching, on every device."),
                 L("Alternatively, sign in with a different (or spare) Apple ID above, then tap Install again."),
