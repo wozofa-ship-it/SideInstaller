@@ -65,6 +65,9 @@ struct CertTabView: View {
     @State private var signBusy = false
     @State private var signOnlyMessage: String?
     @State private var signOnlyFailed = false
+    // 点红/仅签名按钮时被前置条件拦住的明说（代替静默禁用）：
+    // 显示在按钮正下方，条件一满足就清掉，不残留旧话。
+    @State private var signBlockedMessage: String?
     // 轻松签式“签名后立即安装”开关：开 = 开始签名后直接装，
     // 关 = 开始签名只签存已签名；“仅签名”按钮仍在下面。
     @AppStorage("CZFEnterpriseInstallWhenSign") private var installWhenSign = true
@@ -152,6 +155,13 @@ struct CertTabView: View {
     @State private var showingLogClearConfirm = false
 
     private var certReady: Bool { hasP12 && hasProvision && !password.isEmpty }
+    /// 证书组收起行缺件状态：三件（p12、描述文件、密码）缺哪件说哪件，
+    /// 别笼统报“未就绪”；全齐不会走到这里（certReady 分支已处理）。
+    private var certStatusText: String {
+        if !hasP12 { return L("未导入证书") }
+        if !hasProvision { return L("未导入描述文件") }
+        return L("缺密码")
+    }
     /// 选中 IPA 的 Info.plist 解析结果：select() 时算一次存下来，
     /// 后续表单重绘直接复用，不再每敲一键就重新解压读盘。
     /// select() 是唯一的选中入口（库里点选、别页传过来都走它），
@@ -171,12 +181,14 @@ struct CertTabView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
-                ScrollView {
-                    pageContent
-                        .padding([.horizontal, .top], 20)
-                        .padding(.bottom, 20)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        pageContent(proxy)
+                            .padding([.horizontal, .top], 20)
+                            .padding(.bottom, 20)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
                 }
-                .scrollBounceBehavior(.basedOnSize)
             }
             .background(AppBackground())
         }
@@ -288,10 +300,10 @@ struct CertTabView: View {
     /// 企业证书页分屏：一次只显示一段（轻松签式）；证书段已并进
     /// 签名段顶部作证书组，这里只剩签名/应用库两段。
     @ViewBuilder
-    private var pageContent: some View {
+    private func pageContent(_ proxy: ScrollViewProxy) -> some View {
         switch certPage {
         case .signing:
-            signCard.cascadeItem(2)
+            signCard(proxy).cascadeItem(2)
         case .library:
             libraryCard.cascadeItem(3)
         }
@@ -691,7 +703,21 @@ struct CertTabView: View {
     /// 自定义名为主名；重名时签名那一刻自动加序号，见 uniqueOutputURL）。
     private var predictedOutputName: String {
         guard let url = selectedIPA else { return "" }
-        return "\(url.deletingPathExtension().lastPathComponent)-已签.ipa"
+        // 源文件本身已是签过的（主名尾带“-已签”）就不再重复加，
+        // 否则占位与实际输出都会成“X-已签-已签.ipa”。
+        return "\(SignedIPAStore.stripSignedSuffix(url.deletingPathExtension().lastPathComponent))-已签.ipa"
+    }
+
+    /// 打包文件名组下面明说的实际输出名：手填了就按手填的
+    /// （没写 .ipa 也补上显示），空着就是推导名。占位灰字
+    /// 容易被当成“已经填好了”，这行才是准话；重名仍在签名
+    /// 那一刻自动加序号（见 uniqueOutputURL）。
+    private var effectiveOutputName: String {
+        let custom = mods.outputName.trimmingCharacters(in: .whitespaces)
+        if !custom.isEmpty {
+            return custom.lowercased().hasSuffix(".ipa") ? custom : "\(custom).ipa"
+        }
+        return predictedOutputName
     }
 
     /// 签名段：轻松签签名页式分组列表（v68 UI）。分组标题 + 行：
@@ -701,10 +727,11 @@ struct CertTabView: View {
     /// 功能一个不少，只是换版式：框里还是原值、改了才生效；
     /// 预设/插件注入/多开/仅签名收进“更多设置”里，点蓝按钮展开。
     /// 步骤进度/诊断日志/安装状态/提示文案位置跟原来一样，在按钮下面。
-    private var signCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+    private func signCard(_ proxy: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
             // 证书组（原证书段整体搬进签名段顶部）：未就绪默认展开、
-            // 就绪默认收起只留状态行，点标题切换。
+            // 就绪默认收起只留状态行，点标题切换。组 id 供“选择证书”
+            // 点开后滚回顶部用（组在视口外时展开了也看不见）。
             VStack(alignment: .leading, spacing: 12) {
                 Button {
                     certGroupExpanded = !(certGroupExpanded ?? !certReady)
@@ -730,7 +757,9 @@ struct CertTabView: View {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         } else {
-                            Text(L("未就绪"))
+                            // 收起时也明说到底缺哪一件，别只给一句“未就绪”
+                            // 让用户自己展开去猜（轻松签式一眼看全）。
+                            Text(certStatusText)
                                 .font(.footnote)
                                 .foregroundStyle(.orange)
                         }
@@ -744,6 +773,7 @@ struct CertTabView: View {
                     certCard
                 }
             }
+            .id("certGroup")
             // 证书组与下面签名表单的分界线：收起时只留状态行，分界线
             // 让“证书组到此结束”一眼看出来，展开时同样适用。
             Divider()
@@ -760,25 +790,25 @@ struct CertTabView: View {
                 }
                 signGroup(title: L("App 名字")) {
                     TextField(selectedInfo?.name ?? "", text: $mods.name)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
                 signGroup(title: L("Bundle Identifier")) {
                     TextField(selectedInfo?.bundleID ?? "", text: $mods.bundleID)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
                 signGroup(title: L("版本号")) {
                     TextField(selectedInfo?.version ?? "", text: $mods.version)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
                 signGroup(title: L("最低系统版本")) {
                     TextField(L("如 15.0"), text: $mods.minOS)
-                        .textFieldStyle(.plain)
+                        .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                 }
@@ -794,6 +824,11 @@ struct CertTabView: View {
                 signGroup(title: L("选择证书")) {
                     Button {
                         certGroupExpanded = true
+                        // 证书组在表单顶部，滚下去点这行时展开发生在
+                        // 视口外、看着像没反应：直接滚回组顶。
+                        Task { @MainActor in
+                            withAnimation { proxy.scrollTo("certGroup", anchor: .top) }
+                        }
                     } label: {
                         HStack {
                             Text(certRowText)
@@ -809,9 +844,10 @@ struct CertTabView: View {
                 signGroup(title: L("打包文件名")) {
                     VStack(alignment: .leading, spacing: 4) {
                         TextField(predictedOutputName, text: $mods.outputName)
+                            .textFieldStyle(.roundedBorder)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                        Text(L("空着用推导名；重名自动加序号"))
+                        Text(L("将保存为：%@；重名自动加序号", effectiveOutputName))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -823,13 +859,16 @@ struct CertTabView: View {
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
-                // 底部两个通栏大按钮（轻松签签名页同款）：大红立即签名
-                //（走开关：开 = 签名并安装，关 = 仅签名），大蓝更多设置
-                //（展开预设/插件/多开/仅签名）。禁用时半透明，免得看着
-                // 能点实际点不了（plain 样式本身不做禁用变灰）。
+                // 底部两个通栏大按钮（轻松签签名页同款层级）：主按钮
+                // 大红实心（走开关：开 = 签名并安装，关 = 仅签名），
+                // 次按钮蓝色浅底（展开预设/插件/多开/瘦身/仅签名）。
+                // 按压态走 CZFPressButtonStyle（plain 样式按着没反馈，
+                // 看着像没点）；前置条件不满足时按钮不直接禁用——点
+                // 了必在正下方红字明说原因（批量签名同例），绝不静默。
+                // 半透明只是“现在签不了”的视觉提示，不是禁用。
                 Button {
                     CZFHaptics.impact(.medium)
-                    startSign(kind: installWhenSign ? .signAndInstall : .signOnly)
+                    signFromMainButton(kind: installWhenSign ? .signAndInstall : .signOnly, proxy: proxy)
                 } label: {
                     HStack {
                         if signBusy { ProgressView().tint(.white) }
@@ -837,14 +876,39 @@ struct CertTabView: View {
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(height: 54)
+                    .background(Color.red)
+                    .foregroundStyle(.white)
+                    .cornerRadius(16)
+                    .shadow(color: Color.red.opacity(0.25), radius: 8, y: 4)
                 }
-                .buttonStyle(.plain)
-                .background(Color.red)
-                .foregroundStyle(.white)
-                .cornerRadius(12)
+                .buttonStyle(CZFPressButtonStyle())
                 .opacity(signBusy || engine.isRunning || !certReady ? 0.5 : 1)
-                .disabled(signBusy || engine.isRunning || !certReady)
+                // 按钮正下方的实时状态行（轻松签式一眼看全，优先级
+                // 从高到低）：点按被拦的原因 > 正在签名 > 正在安装
+                // 的阶段 > 安装失败原因 > 签名结果。原来结果/缺件
+                // 提示在诊断日志下面、要翻到底才看见，现挪到这里。
+                if let signBlockedMessage {
+                    Text(signBlockedMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else if signBusy {
+                    Text(L("正在签名，请稍候…"))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if enterpriseInstallInFlight {
+                    Text(installStageText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if let error = enterpriseInstallErrorText {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else if let signOnlyMessage {
+                    Text(signOnlyMessage)
+                        .font(.footnote)
+                        .foregroundStyle(signOnlyFailed ? .red : .green)
+                }
                 // 多开与立即安装静默冲突提示：多开只对“仅签名”生效，
                 // 开着“签名后立即安装”时红按钮只签装 1 个——这句以前
                 // 只藏在默认收起的更多设置里，红按钮处直接说明，
@@ -865,12 +929,12 @@ struct CertTabView: View {
                             .font(.footnote)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 50)
+                    .frame(height: 54)
+                    .background(Color.blue.opacity(0.12))
+                    .foregroundStyle(.blue)
+                    .cornerRadius(16)
                 }
-                .buttonStyle(.plain)
-                .background(Color.blue)
-                .foregroundStyle(.white)
-                .cornerRadius(12)
+                .buttonStyle(CZFPressButtonStyle())
                 if showMoreSettings {
                     PanelCard {
                         VStack(alignment: .leading, spacing: 12) {
@@ -880,9 +944,11 @@ struct CertTabView: View {
                             Divider()
                             multiOpenSection
                             Divider()
+                            slimSection
+                            Divider()
                             Button {
                                 CZFHaptics.impact(.medium)
-                                startSign(kind: .signOnly)
+                                signFromMainButton(kind: .signOnly, proxy: proxy)
                             } label: {
                                 HStack {
                                     if signBusy { ProgressView() }
@@ -891,23 +957,19 @@ struct CertTabView: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(signBusy || engine.isRunning || !certReady)
+                            .opacity(signBusy || engine.isRunning || !certReady ? 0.5 : 1)
+                            if let signBlockedMessage {
+                                Text(signBlockedMessage)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
                         }
                     }
+                    .id("moreSettingsPanel")
                 }
                 enterpriseInstallStatus
                 enterpriseStepProgress
                 installDiagnosticLogSection
-                if let signOnlyMessage {
-                    Text(signOnlyMessage)
-                        .font(.footnote)
-                        .foregroundStyle(signOnlyFailed ? .red : .green)
-                }
-                if !certReady {
-                    Text(L("先在上方证书组把证书、描述文件和密码备齐。"))
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                }
             } else {
                 PanelCard {
                     VStack(alignment: .leading, spacing: 12) {
@@ -958,6 +1020,18 @@ struct CertTabView: View {
         } message: {
             Text(pendingWarnings.joined(separator: "\n"))
         }
+        // 更多设置展开后滚到面板顶（按钮在屏底时展开发生在视口外，
+        // 看着像没反应）；前置条件一满足就清掉按钮下的拦阻提示。
+        .onChange(of: showMoreSettings) { _, expanded in
+            if expanded {
+                Task { @MainActor in
+                    withAnimation { proxy.scrollTo("moreSettingsPanel", anchor: .top) }
+                }
+            }
+        }
+        .onChange(of: engine.isRunning || !certReady) { _, blocked in
+            if !blocked { signBlockedMessage = nil }
+        }
     }
 
     /// 多开：数量与起始序号。iOS 不给 App 装完回调，逐个自动
@@ -995,6 +1069,40 @@ struct CertTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // 非法输入以前静默按边界算（“abc”变 1、“99”变 20），
+            // 用户不知道自己填错了：非空非法时橙字明说。正在
+            // 输入中途（清空了还没填完）不提示，别闪。
+            if multiCountTextInvalid {
+                Text(L("数量填 1–20 的数字，超出按边界算。"))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    /// 多开数量输入是否非法：空着是输入中途，不算；非数字、
+    /// 小于 1、大于 20 都算（multiCount 会静默 clamp）。
+    private var multiCountTextInvalid: Bool {
+        guard !multiCountText.isEmpty else { return false }
+        guard let n = Int(multiCountText) else { return true }
+        return n < 1 || n > 20
+    }
+
+    /// 瘦身与兼容（签名时先改包再签，默认全关）：删 Watch 应用
+    /// 与扩展插件能减小体积、去掉设备限制让 iPad 等设备也能装；
+    /// 改包只删东西，不动签名流程本身，改坏直接报错不签。
+    /// 批量/多开同样带上（走同一份 mods）；不进预设，换 IPA 即清。
+    private var slimSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(L("去掉 Watch 应用（瘦身）"), isOn: $mods.stripWatch)
+                .font(.footnote)
+            Toggle(L("去掉扩展插件（瘦身）"), isOn: $mods.stripExtensions)
+                .font(.footnote)
+            Toggle(L("去掉设备限制（兼容）"), isOn: $mods.stripDeviceLimits)
+                .font(.footnote)
+            Text(L("签名时先改包再签：删 Watch / 扩展能减小体积，去设备限制让更多设备能装；顺手清掉包里 .DS_Store 等垃圾。"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1139,17 +1247,31 @@ struct CertTabView: View {
             // 更换按钮/签名逻辑一律不动。
             libraryIcon(for: url.path, signed: false)
             VStack(alignment: .leading, spacing: 2) {
-                Text(selectedInfo?.name ?? url.lastPathComponent)
+                // 名字 + 版本放同一行（轻松签式一眼认出是哪个包、
+                // 哪个版本），下面依次是 Bundle ID、文件名、用哪个
+                // 证书签——IPA 与证书同框，不用翻到证书组去对。
+                Text("\(selectedInfo?.name ?? url.lastPathComponent)\(selectedInfo?.version.map { " · V\($0)" } ?? "")")
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
+                if let info = selectedInfo {
+                    Text(info.bundleID)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Text(url.lastPathComponent)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if let info = selectedInfo {
-                    Text("\(info.bundleID)\(info.version.map { " · \($0)" } ?? "")")
+                if certReady {
+                    Text(L("用证书：%@", certRowText))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text(L("证书未就绪，签不了"))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                         .lineLimit(1)
                 }
             }
@@ -1160,6 +1282,7 @@ struct CertTabView: View {
                 signError = nil
                 resetMods()
                 signOnlyMessage = nil
+                signBlockedMessage = nil
             } label: {
                 Text(L("更换"))
                     .font(.footnote)
@@ -1247,6 +1370,7 @@ struct CertTabView: View {
         resetMods()
         iconItem = nil
         signOnlyMessage = nil
+        signBlockedMessage = nil
         signError = nil
         // 框里预填这个 IPA 的原值，用户在原值上改；解析结果存下来，
         // 后续表单重绘直接复用，不再每敲一键重新解压读盘。
@@ -1287,11 +1411,35 @@ struct CertTabView: View {
         return result
     }
 
+    /// 红按钮 / 面板内“仅签名”的统一入口：前置条件不满足时
+    /// 不静默 return（startSign 原样），而是在按钮下方红字明说
+    /// 原因；证书缺件时顺手展开证书组并滚回组顶，让用户一步
+    /// 看到缺什么（组在表单顶部，滚下去点按钮时光展开看不见）。
+    /// 正在签（按钮里已有转圈）时点按不重复提示。
+    private func signFromMainButton(kind: CertSignKind, proxy: ScrollViewProxy) {
+        if signBusy { return }
+        if engine.isRunning {
+            signBlockedMessage = L("Engine 正在运行，等它跑完再签。")
+            return
+        }
+        if !certReady {
+            signBlockedMessage = L("证书还没备齐：点上方证书组，把 .p12、描述文件和密码补齐。")
+            certGroupExpanded = true
+            Task { @MainActor in
+                withAnimation { proxy.scrollTo("certGroup", anchor: .top) }
+            }
+            return
+        }
+        signBlockedMessage = nil
+        startSign(kind: kind)
+    }
+
     /// 签名入口：先在后台做签前警告检查（脱壳要解压，耗时），
     /// 有警告先弹提醒（警告不拦截，点继续才执行），没警告直接执行。
     /// 吊销状态读上次手动检查的结果——没查过就不警告，不猜。
     private func startSign(kind: CertSignKind) {
         guard let url = selectedIPA, !signBusy, certReady else { return }
+        signBlockedMessage = nil
         signBusy = true
         signOnlyMessage = nil
         let currentMods = effectiveMods
@@ -1760,7 +1908,9 @@ struct CertTabView: View {
     private func batchSign() {
         guard !batchBusy, !selectedUnsignedIDs.isEmpty else { return }
         guard certReady else {
-            batchMessage = L("先去上方证书组把证书、描述文件和密码备齐。")
+            // 应用库页没有“上方证书组”（证书组在签名页顶部），
+            // 原文案会把用户指到不存在的地方：改指签名页。
+            batchMessage = L("先去「签名」页的证书组把证书、描述文件和密码备齐。")
             batchFailed = true
             return
         }
@@ -2162,6 +2312,9 @@ struct CertTabView: View {
                 }
                 .font(.footnote)
                 .disabled(localInstall.diagnosticLog.isEmpty && engine.lines.isEmpty)
+                // 禁用态没有视觉提示时看着能点实际点不了（跟红按钮
+                // 同例）：没日志就半透明，别让人空点。
+                .opacity(localInstall.diagnosticLog.isEmpty && engine.lines.isEmpty ? 0.5 : 1)
             }
         } label: {
             Text(L("安装诊断日志"))

@@ -571,9 +571,20 @@ struct CertSignMods {
     var icon: Data? = nil
     /// 要注入的插件文件（已复制到暂存目录的 .dylib/.deb/.zip）。
     var plugins: [URL] = []
+    /// 瘦身与兼容（签名段“更多设置”里的三个开关，默认全关）：
+    /// stripWatch 删 Payload/*.app/Watch，stripExtensions 删
+    /// PlugIns，stripDeviceLimits 删主 Info.plist 里的设备限制键。
+    /// 只在签名时先生效（见 CertSigner.preSignRepack），不进预设。
+    var stripWatch = false
+    var stripExtensions = false
+    var stripDeviceLimits = false
+
+    /// 有任一瘦身/兼容开关开着才需要先改包再签。
+    var needsPreSignRepack: Bool { stripWatch || stripExtensions || stripDeviceLimits }
 
     var isEmpty: Bool {
         name.isEmpty && bundleID.isEmpty && version.isEmpty && minOS.isEmpty && outputName.isEmpty && icon == nil && plugins.isEmpty
+            && !stripWatch && !stripExtensions && !stripDeviceLimits
     }
 
     func json(iconPath: String?, outIpaPath: String?) -> String {
@@ -766,6 +777,17 @@ enum SignedIPAStore {
         save(records)
     }
 
+    /// 去掉主名末尾已带的“-已签”后缀（可重复，如二次签已签好的包）：
+    /// uniqueOutputURL 还会再加一次“-已签”，不去重就会出
+    /// “X-已签-已签.ipa”。去完变空就返回原名，不造空文件名。
+    static func stripSignedSuffix(_ stem: String) -> String {
+        var result = stem
+        while result.hasSuffix("-已签") {
+            result = String(result.dropLast("-已签".count))
+        }
+        return result.isEmpty ? stem : result
+    }
+
     /// 给源 IPA 起一个不重名的输出文件（Documents/Signed 内）。
     static func uniqueOutputURL(baseName: String) -> URL {
         let stem = baseName.isEmpty ? "App" : baseName
@@ -928,7 +950,90 @@ enum CertSigner {
         var raw = mods.outputName.trimmingCharacters(in: .whitespaces)
         if raw.lowercased().hasSuffix(".ipa") { raw = String(raw.dropLast(4)) }
         raw = raw.replacingOccurrences(of: "/", with: "")
-        return raw.isEmpty ? ipa.deletingPathExtension().lastPathComponent : raw
+        if raw.isEmpty { raw = ipa.deletingPathExtension().lastPathComponent }
+        // 手填名已带“-已签”也先去掉，uniqueOutputURL 只加一次。
+        return SignedIPAStore.stripSignedSuffix(raw)
+    }
+
+    /// 签前改包（瘦身/兼容开关开着才跑）：把 IPA 解到 tmp、按开关
+    /// 改完、只把 Payload 重新压成一个新 IPA 给签名器；原文件不动。
+    /// 改动只删东西、不改签名流程本身：删 Watch 目录、删 PlugIns
+    /// 目录、删主 Info.plist 里的设备限制键（UISupportedDevices /
+    /// UIRequiredDeviceCapabilities）、顺手清 .DS_Store / __MACOSX。
+    /// 删 Watch 时一并删主 plist 里的 WKCompanionAppBundleIdentifier
+    ///（指向已不存在的 Watch 应用，留着无意义）。任何一步不对
+    /// （包里 App 不是唯一一个、plist 读不出来、主程序找不着、
+    /// 压包失败）都直接抛错，不签一个半改的包；开关全关时不跑。
+    /// 注意：解压/压包走的都是 App 已有的 Rust zip 实现（FileZipTool），
+    /// 压包只压 Payload 目录——签名器本来也只取 Payload 里的 .app，
+    /// 顶层杂项（iTunesMetadata 等）签完本来就不会留下，丢了无妨。
+    private static func preSignRepack(ipa: URL, mods: CertSignMods, tmp: URL) throws -> URL {
+        let fm = FileManager.default
+        let work = tmp.appendingPathComponent("slim", isDirectory: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        if let error = FileZipTool.unzip(archive: ipa, to: work) {
+            throw EngineError.message(L("瘦身改包解压失败：%@", error))
+        }
+        let payload = work.appendingPathComponent("Payload", isDirectory: true)
+        let apps = (try? fm.contentsOfDirectory(at: payload, includingPropertiesForKeys: nil))
+            .map { $0.filter { $0.pathExtension == "app" } } ?? []
+        guard apps.count == 1, let appDir = apps.first else {
+            throw EngineError.message(L("瘦身改包失败：包里 App 不是唯一一个"))
+        }
+        if mods.stripWatch {
+            let watch = appDir.appendingPathComponent("Watch", isDirectory: true)
+            if fm.fileExists(atPath: watch.path) {
+                do { try fm.removeItem(at: watch) } catch {
+                    throw EngineError.message(L("瘦身改包失败：Watch 目录删不掉"))
+                }
+            }
+        }
+        if mods.stripExtensions {
+            let plugins = appDir.appendingPathComponent("PlugIns", isDirectory: true)
+            if fm.fileExists(atPath: plugins.path) {
+                do { try fm.removeItem(at: plugins) } catch {
+                    throw EngineError.message(L("瘦身改包失败：PlugIns 目录删不掉"))
+                }
+            }
+        }
+        if mods.stripDeviceLimits || mods.stripWatch {
+            let plistURL = appDir.appendingPathComponent("Info.plist")
+            guard let data = try? Data(contentsOf: plistURL),
+                  var dict = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+                throw EngineError.message(L("瘦身改包失败：主 Info.plist 读不出来"))
+            }
+            if mods.stripDeviceLimits {
+                dict.removeValue(forKey: "UISupportedDevices")
+                dict.removeValue(forKey: "UIRequiredDeviceCapabilities")
+            }
+            if mods.stripWatch {
+                dict.removeValue(forKey: "WKCompanionAppBundleIdentifier")
+            }
+            guard let out = try? PropertyListSerialization.data(fromPropertyList: dict, format: .xml, options: 0) else {
+                throw EngineError.message(L("瘦身改包失败：主 Info.plist 写不出来"))
+            }
+            try out.write(to: plistURL)
+            // 主程序还在才算包没改坏（plist 里 CFBundleExecutable 指谁就查谁）。
+            if let exe = dict["CFBundleExecutable"] as? String, !exe.isEmpty,
+               !fm.fileExists(atPath: appDir.appendingPathComponent(exe).path) {
+                throw EngineError.message(L("瘦身改包失败：主程序找不到了"))
+            }
+        }
+        // 垃圾清理：先收齐再删，枚举途中不改目录。
+        var junk: [URL] = []
+        if let enumerator = fm.enumerator(at: work, includingPropertiesForKeys: nil) {
+            for case let url as URL in enumerator {
+                if url.lastPathComponent == ".DS_Store" || url.lastPathComponent == "__MACOSX" {
+                    junk.append(url)
+                }
+            }
+        }
+        for url in junk { try? fm.removeItem(at: url) }
+        let out = tmp.appendingPathComponent("slimmed.ipa")
+        if let error = FileZipTool.zip(paths: [payload], to: out) {
+            throw EngineError.message(L("瘦身改包压包失败：%@", error))
+        }
+        return out
     }
 
     /// 用企业证书把 IPA 签好并存进「已签名」，返回记录。
@@ -957,9 +1062,14 @@ enum CertSigner {
             let outURL = SignedIPAStore.uniqueOutputURL(
                 baseName: Self.outputBaseName(mods: mods, ipa: ipa))
             let json = mods.json(iconPath: iconPath, outIpaPath: outURL.path)
+            // 瘦身/兼容开关开着：先改包再签，改坏直接抛错不签；
+            // 开关全关走原包，一字不动。
+            let signIPA = mods.needsPreSignRepack
+                ? try Self.preSignRepack(ipa: ipa, mods: mods, tmp: tmp)
+                : ipa
             var signed: UnsafeMutablePointer<CChar>?
             var error: UnsafeMutablePointer<CChar>?
-            let rc = si_sign_ipa_with_cert_ex(ipa.path, certPath.path, keyPath.path,
+            let rc = si_sign_ipa_with_cert_ex(signIPA.path, certPath.path, keyPath.path,
                                               EnterpriseCertStore.provisionURL.path,
                                               json, &signed, &error)
             if rc != 0 {
@@ -968,7 +1078,7 @@ enum CertSigner {
                 throw EngineError.message(L("企业证书签名失败：%@", msg))
             }
             signed.map { si_string_free($0) }
-            let info = IPALibrary.appInfo(at: ipa)
+            let info = IPALibrary.appInfo(at: signIPA)
             let size = (try? fm.attributesOfItem(atPath: outURL.path))?[.size] as? Int ?? 0
             // 已签名行第三行用：证书名取 p12 的名头，团队 ID 取描述文件
             // 的 TeamIdentifier；读不出来就留空，行里不显示第三行。

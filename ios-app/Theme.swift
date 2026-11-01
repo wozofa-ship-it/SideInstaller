@@ -195,6 +195,18 @@ enum CZFHaptics {
     }
 }
 
+/// 大按钮按压态（plain 样式本身不给按压反馈，点着像没点）：
+/// 按下时整块微缩 + 变淡，松手复原；只改观感，不改点击行为。
+/// 签名页红/蓝大按钮用，别的 plain 按钮不动。
+struct CZFPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
 /// What a card is made of: a pane of glass with nothing in it. The backdrop
 /// shows through untouched, under the faintest wash, and the pane is drawn by
 /// its rim: lit along the top, dim down the sides, catching a little light
