@@ -126,8 +126,8 @@ struct FilesTabView: View {
     /// 文件页搜索（轻松签文件列表顶部搜索条同款）：按名字过滤当前视图。
     @State private var fileSearchText = ""
     /// 轻松签文件列表式切栏：未签名 = 不在 Signed 目录的 IPA，
-    /// 已签名 = 在 Signed 目录的 IPA；只过滤 IPA 行，其他文件、
-    /// 文件夹、系统文件不受切栏影响。
+    /// 已签名 tab 只显示已签名 IPA；未签名 tab 显示未签名 IPA +
+    /// 其他文件 + 系统文件。
     @State private var fileTab = FileListTab.unsigned
     /// IPA 行信息缓存（路径 → Info.plist 解析结果）：行格式第二行
     /// 要版本/Bundle ID，文件页以前只取图标不解析，这里按行在后台
@@ -182,10 +182,16 @@ struct FilesTabView: View {
         matching(ipas).filter { fileTabMatches($0) }
     }
 
-    /// 当前文件夹视图里切栏过滤后的可见项：非 IPA 行不受切栏影响，
-    /// IPA 行按切栏过滤（搜不到/切栏外就不显示，不进空文件夹误判）。
+    /// 当前文件夹视图里切栏过滤后的可见项：未签名 tab 显示未签名 IPA
+    /// + 其他文件 + 系统文件；已签名 tab 只显示已签名 IPA（其他文件、
+    /// 系统文件与文件夹内的非 IPA 行一律不显示）。
     private var visibleDirItems: [LocalFileItem] {
-        currentDirItems.filter { !$0.isIPA || fileTabMatches($0) }
+        currentDirItems.filter { item in
+            if fileTab == .signed {
+                return item.isIPA && item.isInSignedDir
+            }
+            return !item.isIPA || !item.isInSignedDir
+        }
     }
 
     /// IPA 行显示名：解析出的 App 名优先，解析不到回落文件名去后缀。
@@ -252,6 +258,105 @@ struct FilesTabView: View {
         fileSearchText = ""
         opMessage = L("已定位到：%@", item.relativeDir.isEmpty ? L("根目录") : item.relativeDir)
         opFailed = false
+    }
+
+    /// 文件行统一动作集：点行底部菜单与长按菜单共用同一批按钮，
+    /// 适用性按行类型裁剪——IPA 全套；非 IPA 文件除签名/安装/提取库
+    /// 外都有；文件夹只留重命名/移动/复制/删除。提取库映射到现有的
+    /// Mach-O 依赖查看；查看文件位置不另震（切栏变化会震一次）。
+    /// useIcons 为真时用 Label + 图标（长按菜单），否则纯文字（底部菜单）。
+    @ViewBuilder
+    private func fileActionButtons(for item: LocalFileItem, useIcons: Bool) -> some View {
+        if item.isIPA {
+            Button {
+                CZFHaptics.impact(.light)
+                workspace.selectedIPA = item.url
+                onGoCert()
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("签名"), systemImage: "checkmark.seal") } else { Text(L("签名")) }
+            }
+            if item.isInSignedDir {
+                Button {
+                    CZFHaptics.impact(.light)
+                    installSignedFile(item)
+                    actionItem = nil
+                } label: {
+                    if useIcons { Label(L("安装"), systemImage: "square.and.arrow.down") } else { Text(L("安装")) }
+                }
+            }
+            Button {
+                CZFHaptics.impact(.light)
+                machoItem = item
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("提取库"), systemImage: "list.bullet.rectangle") } else { Text(L("提取库")) }
+            }
+        }
+        if !item.isDirectory {
+            Button {
+                CZFHaptics.impact(.light)
+                detailItem = item
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("详情"), systemImage: "info.circle") } else { Text(L("详情")) }
+            }
+            Button {
+                CZFHaptics.impact(.light)
+                shareFile(item)
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("分享"), systemImage: "square.and.arrow.up") } else { Text(L("分享")) }
+            }
+            Button {
+                locateFile(item)
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("查看文件位置"), systemImage: "magnifyingglass") } else { Text(L("查看文件位置")) }
+            }
+        }
+        Button {
+            renameText = item.name
+            renameItem = item
+            actionItem = nil
+        } label: {
+            if useIcons { Label(L("重命名"), systemImage: "pencil") } else { Text(L("重命名")) }
+        }
+        Button {
+            moveItem = item
+            actionItem = nil
+        } label: {
+            if useIcons { Label(L("移动"), systemImage: "folder") } else { Text(L("移动")) }
+        }
+        Button {
+            duplicate(item)
+            actionItem = nil
+        } label: {
+            if useIcons { Label(L("复制"), systemImage: "doc.on.doc") } else { Text(L("复制")) }
+        }
+        if !item.isDirectory {
+            Button {
+                zipSingle(item)
+                actionItem = nil
+            } label: {
+                if useIcons { Label(L("压缩成 ZIP"), systemImage: "archivebox") } else { Text(L("压缩成 ZIP")) }
+            }
+            if item.isZip {
+                Button {
+                    unzip(item)
+                    actionItem = nil
+                } label: {
+                    if useIcons { Label(L("解压"), systemImage: "tray.and.arrow.up") } else { Text(L("解压")) }
+                }
+            }
+        }
+        Button(role: .destructive) {
+            CZFHaptics.impact(.light)
+            pendingDeleteItem = item
+            actionItem = nil
+        } label: {
+            if useIcons { Label(L("删除"), systemImage: "trash") } else { Text(L("删除")) }
+        }
     }
 
     /// 搜索过滤（当前视图）：名字或行上显示的 Bundle ID 含查询串就算，不区分大小写。
@@ -420,13 +525,16 @@ struct FilesTabView: View {
                     } else {
                         // IPA 行不再单开「IPA 文件」组：切栏 + 搜索过滤
                         // 后的 ipaList 就是全部 IPA（轻松签文件列表式，
-                        // 无卡片头）；其他文件、系统文件仍用旧组。
+                        // 无卡片头）；未签名 tab 下其他文件、系统文件仍用
+                        // 旧组，已签名 tab 只显示已签名 IPA，两组都收起。
                         ipaList.cascadeItem(2)
-                        if !matching(others).isEmpty {
-                            fileSection(title: L("其他文件"), items: matching(others)).cascadeItem(3)
-                        }
-                        if !matching(systemFiles).isEmpty {
-                            systemSection.cascadeItem(4)
+                        if fileTab == .unsigned {
+                            if !matching(others).isEmpty {
+                                fileSection(title: L("其他文件"), items: matching(others)).cascadeItem(3)
+                            }
+                            if !matching(systemFiles).isEmpty {
+                                systemSection.cascadeItem(4)
+                            }
                         }
                     }
                 }
@@ -483,68 +591,15 @@ struct FilesTabView: View {
         } message: {
             Text(L("删除后无法恢复"))
         }
-        // 点 IPA 行弹出的底部动作菜单（轻松签文件列表同款顺序）：
-        // 签名 / 安装（仅已签名行）/ 提取库 / 详情 / 分享 / 查看文件
-        // 位置 / 删除 / 取消。提取库在 Side 没有同名功能，映射到现
-        // 有的 Mach-O 依赖查看（看包里带了哪些库）；详情是原有的
-        // FileDetailSheet；分享走系统分享面板；查看文件位置切到该
-        // 行所在的切栏 + 文件夹并清搜索，让行直接可见。
+        // 点行弹出的底部动作菜单：与长按菜单同一动作集（见 fileActionButtons），
+        // 适用性按行类型裁剪；查看文件位置切到该行所在的切栏 + 文件夹
+        // 并清搜索，让行直接可见。
         .confirmationDialog("", isPresented: Binding(
             get: { actionItem != nil },
             set: { if !$0 { actionItem = nil } }
         )) {
-            if let item = actionItem, item.isIPA {
-                Button {
-                    CZFHaptics.impact(.light)
-                    workspace.selectedIPA = item.url
-                    onGoCert()
-                    actionItem = nil
-                } label: {
-                    Text(L("签名"))
-                }
-                if item.isInSignedDir {
-                    Button {
-                        CZFHaptics.impact(.light)
-                        installSignedFile(item)
-                        actionItem = nil
-                    } label: {
-                        Text(L("安装"))
-                    }
-                }
-                Button {
-                    CZFHaptics.impact(.light)
-                    machoItem = item
-                    actionItem = nil
-                } label: {
-                    Text(L("提取库"))
-                }
-                Button {
-                    CZFHaptics.impact(.light)
-                    detailItem = item
-                    actionItem = nil
-                } label: {
-                    Text(L("详情"))
-                }
-                Button {
-                    CZFHaptics.impact(.light)
-                    shareFile(item)
-                    actionItem = nil
-                } label: {
-                    Text(L("分享"))
-                }
-                Button {
-                    locateFile(item)
-                    actionItem = nil
-                } label: {
-                    Text(L("查看文件位置"))
-                }
-                Button(role: .destructive) {
-                    CZFHaptics.impact(.light)
-                    pendingDeleteItem = item
-                    actionItem = nil
-                } label: {
-                    Text(L("删除"))
-                }
+            if let item = actionItem {
+                fileActionButtons(for: item, useIcons: false)
             }
             Button(L("取消"), role: .cancel) {
                 actionItem = nil
@@ -1138,78 +1193,21 @@ struct FilesTabView: View {
                 }
             } else if item.isDirectory {
                 // 点文件夹行就进文件夹（轻松签文件列表同款入口，
-                // 不藏在详情或长按里）；非 IPA 文件行点着没事
-                //（操作在行内按钮 / 长按菜单里）。
+                // 不藏在详情或长按里）。
                 currentDir = folderPath(item)
             } else if item.isIPA {
-                // 点 IPA 行弹底部动作菜单（轻松签文件列表同款），
-                // 不再是点着没事；长按菜单仍在，更多操作走长按。
+                // 点 IPA 行弹底部动作菜单（轻松签文件列表同款）。
+                actionItem = item
+            } else {
+                // 非 IPA 文件行点按同样弹底部动作菜单（按文件类型
+                // 裁剪后的子集），不再点着没事；长按菜单仍在。
                 actionItem = item
             }
         }
         .contextMenu {
-            // 文件夹是新增的行：分享/Mach-O/压缩/解压/签名/安装都是
-            // 文件的操作，文件夹是重命名/移动/复制/删除。
-            if !item.isDirectory {
-                ShareLink(item: item.url) {
-                    Label(L("分享"), systemImage: "square.and.arrow.up")
-                }
-                Button {
-                    machoItem = item
-                } label: {
-                    Label(L("Mach-O 依赖"), systemImage: "list.bullet.rectangle")
-                }
-            }
-            Button {
-                renameText = item.name
-                renameItem = item
-            } label: {
-                Label(L("重命名"), systemImage: "pencil")
-            }
-            Button {
-                moveItem = item
-            } label: {
-                Label(L("移动"), systemImage: "folder")
-            }
-            Button {
-                duplicate(item)
-            } label: {
-                Label(L("复制"), systemImage: "doc.on.doc")
-            }
-            if !item.isDirectory {
-                Button {
-                    zipSingle(item)
-                } label: {
-                    Label(L("压缩成 ZIP"), systemImage: "archivebox")
-                }
-                if item.isZip {
-                    Button {
-                        unzip(item)
-                    } label: {
-                        Label(L("解压"), systemImage: "tray.and.arrow.up")
-                    }
-                }
-                if item.isIPA {
-                    Button {
-                        workspace.selectedIPA = item.url
-                        onGoCert()
-                    } label: {
-                        Label(L("去企业证书签名"), systemImage: "checkmark.seal")
-                    }
-                    if item.isInSignedDir {
-                        Button {
-                            installSignedFile(item)
-                        } label: {
-                            Label(L("安装"), systemImage: "square.and.arrow.down")
-                        }
-                    }
-                }
-            }
-            Button(role: .destructive) {
-                pendingDeleteItem = item
-            } label: {
-                Label(L("删除"), systemImage: "trash")
-            }
+            // 与点行底部菜单同一动作集（见 fileActionButtons），
+            // 适用性按行类型裁剪；文件夹只留重命名/移动/复制/删除。
+            fileActionButtons(for: item, useIcons: true)
         }
     }
 

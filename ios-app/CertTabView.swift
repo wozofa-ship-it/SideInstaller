@@ -45,6 +45,8 @@ struct CertTabView: View {
     // 轻松签式“导入证书库”：一次选 .p12 + 描述文件，配对才进。
     @State private var showCertLibraryPicker = false
     @State private var importError: String?
+    // 密码解不开 p12 时的红字提示（密码组下显示，不等到签名才说）。
+    @State private var certPasswordError: String?
     @State private var confirmingRemoveCert = false
 
     // 吊销状态（手动刷新，警告不拦截）
@@ -354,7 +356,12 @@ struct CertTabView: View {
             }
             if let cert = certInfo, !cert.name.isEmpty {
                 signGroup(title: L("证书")) {
-                    infoRow(L("证书"), cert.name)
+                    VStack(alignment: .leading, spacing: 8) {
+                        infoRow(L("证书"), cert.name)
+                        if let expiration = cert.expiration {
+                            infoRow(L("证书到期日"), "\(expiration.formatted(date: .abbreviated, time: .omitted))\(remainingText(expiration))")
+                        }
+                    }
                 }
             }
             // 吊销状态：手动刷新，系统信任评估联网查（OCSP）。
@@ -463,6 +470,11 @@ struct CertTabView: View {
                         refreshCertState()
                     }
             }
+            if let certPasswordError {
+                Text(certPasswordError)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
             if let importError {
                 Text(importError)
                     .font(.footnote)
@@ -543,6 +555,12 @@ struct CertTabView: View {
             try EnterpriseCertStore.importP12(from: p12)
             try EnterpriseCertStore.importProvision(from: provision)
             importError = nil
+            // 导入时就比对配对：对不上就地报错，不要等到签名才发现。
+            // p12 解不开（比如密码不对）时查不出来，不在这里重复报错，
+            // 密码那档由 refreshCertState 的解锁校验明说。
+            if EnterpriseCertStore.certMatchesProvision == false {
+                importError = L("描述文件里的证书和已导入的 .p12 对不上，签出来的包装上去也装不上，先换一张和这张证书配对的描述文件。")
+            }
         } catch {
             importError = L("证书库导入失败：%@", error.localizedDescription)
         }
@@ -603,6 +621,13 @@ struct CertTabView: View {
         hasProvision = EnterpriseCertStore.hasProvision
         provisionInfo = EnterpriseCertStore.provisionInfo
         certInfo = EnterpriseCertStore.certInfo
+        // 密码错不要等到签名才说：p12 解不开就在密码组下红字明说。
+        // 只在已导入 p12 时校验；没导入、或解得开，都不提示。
+        if hasP12, (try? EnterpriseCertStore.identityDERs()) == nil {
+            certPasswordError = L("密码错误，请重新输入")
+        } else {
+            certPasswordError = nil
+        }
     }
 
     private var revocationText: String {
@@ -1097,7 +1122,8 @@ struct CertTabView: View {
     }
 
     /// 新图标行（分组里用，标题已在组上面，不再另起 92 宽标签）：
-    /// 没选显示相册选择，选了显示 40 图 + 清除。
+    /// 没选显示相册选择，选了显示 40 图 + 清除；两边都有“修复图标”，
+    /// 无图标或白图标时补一张默认图标（App 内已有的 AppLogo 资源）。
     private var iconRow: some View {
         HStack(spacing: 10) {
             if let icon = mods.icon, let image = UIImage(data: icon) {
@@ -1113,14 +1139,34 @@ struct CertTabView: View {
                     Text(L("清除"))
                         .font(.footnote)
                 }
+                Button {
+                    repairIcon()
+                } label: {
+                    Text(L("修复图标"))
+                        .font(.footnote)
+                }
             } else {
                 PhotosPicker(selection: $iconItem, matching: .images) {
                     Text(L("从相册选择"))
                         .font(.footnote)
                 }
+                Button {
+                    repairIcon()
+                } label: {
+                    Text(L("修复图标"))
+                        .font(.footnote)
+                }
             }
             Spacer()
         }
+    }
+
+    /// 修复图标：把 App 内已有的 AppLogo 图设为新图标，走
+    /// mods.icon 既有签名路，不新造生成逻辑；资源取不到时不动。
+    private func repairIcon() {
+        guard let data = UIImage(named: "AppLogo")?.pngData() else { return }
+        mods.icon = data
+        iconItem = nil
     }
 
     /// 换一个 IPA 时清掉修改项，并删掉已暂存的插件文件。
@@ -2009,9 +2055,10 @@ struct CertTabView: View {
 
     /// 安装诊断日志（只读展示，不动行为）：读单例 localInstall
     /// .diagnosticLog 原样展示（不解析、不重排、不过滤；
-    /// 最新行在最下，往下翻）。这里现在只记企业页自己的步骤行
-    ///（开始签名/签名成功/失败/配对安装开始/完成/失败），Engine
-    /// 自己的管线日志在「安装」页那边看，不进这里。签名/安装
+    /// 最新行在最下，往下翻）。上面是企业页自己的步骤行
+    ///（开始签名/签名成功/失败/配对安装开始/完成/失败），下面一并
+    /// 展示 Engine 最近的步骤行（只读，不动 Engine 传输逻辑），
+    /// 安装失败不用切到「安装」页也能看到详细步骤。签名/安装
     /// 进行中强制展开，日志当场可见（不再只藏在收起的组里）；
     /// 平时跟随用户手动开关；失败后仍可点开看全文（步骤区另有
     /// 复制按钮，不展开也能复制）。签名段与应用库段各放一处、
@@ -2033,6 +2080,17 @@ struct CertTabView: View {
                                     .textSelection(.enabled)
                             }
                         }
+                        if !engine.lines.isEmpty {
+                            Divider()
+                            Text(L("Engine 步骤日志（最近 40 行）"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(Array(engine.lines.suffix(40).enumerated()), id: \.offset) { _, entry in
+                                Text(verbatim: "\(entry.stamp)  \(entry.text)")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                            }
+                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -2040,10 +2098,16 @@ struct CertTabView: View {
                 .background(Color.secondary.opacity(0.08))
                 .cornerRadius(8)
                 Button(L("复制日志")) {
-                    UIPasteboard.general.string = localInstall.diagnosticLog.joined(separator: "\n")
+                    var text = localInstall.diagnosticLog.joined(separator: "\n")
+                    let recentEngine = engine.lines.suffix(40)
+                    if !recentEngine.isEmpty {
+                        if !text.isEmpty { text += "\n" }
+                        text += "--- Engine ---\n" + recentEngine.map { "\($0.stamp)  \($0.text)" }.joined(separator: "\n")
+                    }
+                    UIPasteboard.general.string = text
                 }
                 .font(.footnote)
-                .disabled(localInstall.diagnosticLog.isEmpty)
+                .disabled(localInstall.diagnosticLog.isEmpty && engine.lines.isEmpty)
             }
         } label: {
             Text(L("安装诊断日志"))
@@ -2404,14 +2468,9 @@ private struct LibraryIPAPicker: View {
                 Button {
                     onPick(item.url)
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.name)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text("\(item.relativeDir.isEmpty ? L("根目录") : item.relativeDir) · \(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(item.name)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
                 }
             }
             .navigationTitle(L("选择 IPA"))

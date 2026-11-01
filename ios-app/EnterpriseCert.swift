@@ -189,16 +189,17 @@ enum EnterpriseCertStore {
         return rawIdentity as! SecIdentity
     }
 
-    /// 证书本身的信息（名头）：证书卡上要显示。解不开（比如
+    /// 证书本身的信息（名头 + 到期日）：证书卡上要显示。解不开（比如
     /// 密码不对）就返回 nil，不拦着原来的显示；密码错到签名
     /// 那步还是会明说。
     /// 注意：证书到期日不要用 SecCertificateCopyValues 拿——
     /// 它和 kSecOIDX509V1ValidityNotAfter 是 macOS 才有的，
-    /// iOS 上编不过（构建 #50 红字实证）。iOS 没有现成的
-    /// 证书到期 API，所以证书过期那一档不做，过期校验只看
-    /// 描述文件（描述文件到期日从 plist 里直接读得到）。
+    /// iOS 上编不过（构建 #50 红字实证）。证书到期日改走 DER
+    /// 解析：SecCertificateCopyData 取 DER 后由 X509Validity 读
+    /// validity 的 NotAfter；解析失败只让 expiration 为 nil，不拦显示。
     struct CertInfo {
         let name: String
+        let expiration: Date?
     }
 
     static var certInfo: CertInfo? {
@@ -207,7 +208,8 @@ enum EnterpriseCertStore {
         guard SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess,
               let cert = certRef else { return nil }
         let name = SecCertificateCopySubjectSummary(cert) as String? ?? ""
-        return CertInfo(name: name)
+        let expiration = X509Validity.notAfter(der: SecCertificateCopyData(cert) as Data)
+        return CertInfo(name: name, expiration: expiration)
     }
 
     /// 描述文件里内嵌的开发证书 DER 列表（DeveloperCertificates）。
@@ -221,6 +223,16 @@ enum EnterpriseCertStore {
         guard let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil),
               let dict = plist as? [String: Any] else { return nil }
         return dict["DeveloperCertificates"] as? [Data]
+    }
+
+    /// p12 证书是否在描述文件内嵌证书列表里：true = 对得上，
+    /// false = 对不上，nil = 查不出来（p12 解不开、描述文件里
+    /// 没有内嵌证书列表时，不拦）。签名校验和导入时配对检查共用。
+    static var certMatchesProvision: Bool? {
+        guard let certDER = try? identityDERs().cert,
+              let devCerts = provisionDeveloperCertificates,
+              !devCerts.isEmpty else { return nil }
+        return devCerts.contains(certDER)
     }
 
     /// 签名前校验（两条签名路共用：CertSigner 和 Engine 流水线）。
@@ -237,12 +249,119 @@ enum EnterpriseCertStore {
         }
         // p12 解不开（比如密码不对）时这里不重复报错：后面签
         // 名那步的 identityDERs 会明说，校验直接跳过这一档。
-        if let certDER = try? identityDERs().cert,
-           let devCerts = provisionDeveloperCertificates,
-           !devCerts.isEmpty,
-           !devCerts.contains(certDER) {
+        if certMatchesProvision == false {
             throw EngineError.message(L("描述文件里的证书和已导入的 .p12 对不上，签出来的包装上去也装不上，先换一张和这张证书配对的描述文件。"))
         }
+    }
+}
+
+/// X.509 证书 DER 里 validity 的 NotAfter（证书本身到期日）。
+/// 只做最小解析：Certificate → TBSCertificate → 跳过可选 version、
+/// serial、signature、issuer → validity SEQUENCE 的第二个时间项。
+/// 时间只认 UTCTime（0x17）与 GeneralizedTime（0x18）；任何一步
+/// 对不上都返回 nil，不抛错、不拦显示。
+private enum X509Validity {
+    static func notAfter(der: Data) -> Date? {
+        var outer = DERReader(data: der)
+        guard let cert = outer.readTLV(), cert.tag == 0x30 else { return nil }
+        var certBody = DERReader(data: cert.value)
+        guard let tbs = certBody.readTLV(), tbs.tag == 0x30 else { return nil }
+        var fields = DERReader(data: tbs.value)
+        // version 是 [0] 显式构造标签（0xA0），有则跳过，没有直接就是 serial。
+        if fields.peekTag() == 0xA0 { _ = fields.readTLV() }
+        guard fields.readTLV() != nil,  // serialNumber
+              fields.readTLV() != nil,  // signature
+              fields.readTLV() != nil,  // issuer
+              let validity = fields.readTLV(), validity.tag == 0x30 else { return nil }
+        var times = DERReader(data: validity.value)
+        guard times.readTLV() != nil,  // notBefore
+              let notAfter = times.readTLV(),
+              notAfter.tag == 0x17 || notAfter.tag == 0x18 else { return nil }
+        return parseTime(tag: notAfter.tag, bytes: notAfter.value)
+    }
+
+    /// 最小 DER TLV 读取器：单字节 tag + 定长 length（DER 无不定长）。
+    private struct DERReader {
+        let data: Data
+        var offset = 0
+
+        func peekTag() -> UInt8? {
+            offset < data.count ? data[offset] : nil
+        }
+
+        mutating func readTLV() -> (tag: UInt8, value: Data)? {
+            guard offset < data.count else { return nil }
+            let tag = data[offset]
+            offset += 1
+            guard offset < data.count else { return nil }
+            let lengthByte = data[offset]
+            offset += 1
+            let length: Int
+            if lengthByte & 0x80 == 0 {
+                length = Int(lengthByte)
+            } else {
+                let count = Int(lengthByte & 0x7F)
+                guard count > 0, count <= 4, offset + count <= data.count else { return nil }
+                var len = 0
+                for i in 0..<count { len = (len << 8) | Int(data[offset + i]) }
+                offset += count
+                length = len
+            }
+            guard offset + length <= data.count else { return nil }
+            let value = data[offset..<offset + length]
+            offset += length
+            return (tag, value)
+        }
+    }
+
+    /// UTCTime：YYMMDDHHMM[SS]Z；GeneralizedTime：YYYYMMDDHHMM[SS]Z；
+    /// 时区也认 ±HHMM（换算回 UTC）。秒可省，缺省按 0 算。
+    private static func parseTime(tag: UInt8, bytes: Data) -> Date? {
+        guard var str = String(data: bytes, encoding: .ascii) else { return nil }
+        var offsetSeconds = 0
+        if str.hasSuffix("Z") {
+            str.removeLast()
+        } else if let range = str.range(of: "[+-]\\d{4}$", options: .regularExpression) {
+            let sign = str[range].hasPrefix("+") ? 1 : -1
+            let digits = str[range].dropFirst()
+            let hh = Int(digits.prefix(2)) ?? 0
+            let mm = Int(digits.suffix(2)) ?? 0
+            offsetSeconds = sign * (hh * 3600 + mm * 60)
+            str = String(str[..<range.lowerBound])
+        } else {
+            return nil
+        }
+        if let dot = str.firstIndex(of: ".") { str = String(str[..<dot]) }
+        let digits = Array(str)
+        guard digits.allSatisfy({ $0.isNumber }) else { return nil }
+        let year: Int
+        let rest: [Character]
+        if tag == 0x17 {
+            guard digits.count == 12 || digits.count == 10 else { return nil }
+            let yy = Int(String(digits[0..<2])) ?? 0
+            year = yy < 50 ? 2000 + yy : 1900 + yy
+            rest = Array(digits[2...])
+        } else {
+            guard digits.count == 14 || digits.count == 12 else { return nil }
+            year = Int(String(digits[0..<4])) ?? 0
+            rest = Array(digits[4...])
+        }
+        guard rest.count == 10 || rest.count == 8 else { return nil }
+        let month = Int(String(rest[0..<2])) ?? 0
+        let day = Int(String(rest[2..<4])) ?? 0
+        let hour = Int(String(rest[4..<6])) ?? 0
+        let minute = Int(String(rest[6..<8])) ?? 0
+        let second = rest.count == 10 ? (Int(String(rest[8..<10])) ?? 0) : 0
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = hour
+        components.minute = minute
+        components.second = second
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        guard let date = Calendar(identifier: .gregorian).date(from: components) else { return nil }
+        return date.addingTimeInterval(TimeInterval(-offsetSeconds))
     }
 }
 
