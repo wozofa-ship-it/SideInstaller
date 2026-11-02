@@ -1801,6 +1801,17 @@ struct CertTabView: View {
     }
 
     private func executeSign(kind: CertSignKind, url: URL, mods: CertSignMods) {
+        // 源文件早拦：签名页记住的是旧路径，文件被移走/删掉后
+        // 再点签名，isideload 只会报看不懂的 Application path
+        // does not exist（2026-11-02 19:17 实证）。这里先验
+        // 文件在不在，不在就明说重选，不走到签名那步。
+        // 放 executeSign 而不是 startSign：警告弹框的“继续签名”
+        // 也走这里，一处拦住两条路。
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            signBusy = false
+            signBlockedMessage = L("要签的源文件已不在，请从文件库重新选择后再签。")
+            return
+        }
         signBusy = true
         // 上次安装失败的旧错误在这里清掉：不然一次成功的仅签名
         // 仍在按钮下顶着旧安装错误（状态行优先级里错误排在签名
