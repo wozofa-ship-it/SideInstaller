@@ -186,6 +186,7 @@ enum EnterpriseCertStore {
     private static var activeProfileIDValue: UUID? {
         guard let raw = UserDefaults.standard.string(forKey: activeProfileIDKey),
               let id = UUID(uuidString: raw) else { return nil }
+        return id
     }
 
     private static func profileDir(for profile: EnterpriseCertProfile) -> URL {
