@@ -1965,6 +1965,11 @@ struct CertTabView: View {
             return
         }
         localInstall.appendStepLog(L("本机回环安装开始：%@", record.appName))
+        // 0.9.14 曾有、0.9.21 清理 local-HTTP 时误删：回环安装前先停内置隧道。
+        // 跑着的隧道会干扰 installd 的 localhost 连接（0.9.14 实证、0.9.21
+        // 之后弹窗回归）；fire-and-forget，停失败不阻断安装。ID 操作需要时
+        // 隧道会自动再拉起来。别再以“清理”为名删掉这一行。
+        Task { await BuiltinTunnel.stop() }
         otaServer.install(ipaURL: SignedIPAStore.url(for: record), appName: record.appName,
                           bundleID: record.bundleID, version: record.version ?? "1.0")
     }
