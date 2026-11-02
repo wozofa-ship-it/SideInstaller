@@ -138,6 +138,8 @@ let japaneseStrings: [String: String] = [
     "Replace": "置き換え",
     "or": "または",
     "Paste a download link": "ダウンロードリンクを貼り付け",
+    "SideInstaller recognizes this as %@ and sets it up just like its own download.":
+        "SideInstaller はこれを %@ と認識し、自分でダウンロードした場合と同じように設定します。",
     "Downloading… %d%%": "ダウンロード中… %d%%",
     "iOS %@ required": "iOS %@ が必要です",
     "This iPhone runs iOS %@, which SideInstaller can't install on. Update to iOS %@ or later in Settings › General › Software Update.":
@@ -278,10 +280,11 @@ let japaneseStrings: [String: String] = [
         "書き出せるのは SideInstaller が署名に使っている証明書だけです。ほかの証明書の秘密鍵は、それを Apple に要求したデバイスにしかありません。",
     "Couldn't export the certificate: %@": "証明書を書き出せませんでした: %@",
     "Export certificate": "証明書を書き出す",
+    "Password (optional)": "パスワード（任意）",
     "Export": "書き出す",
     "Exporting": "書き出し中",
-    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
-        "この証明書と秘密鍵を .p12 ファイルとして保存し、ほかの署名アプリやコンピュータで署名に使えるようにします。パスワードを決めてください。ファイルを読み込むときに必要です。ファイルは誰にも渡さないでください。",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password, which you'll need to import the file, or leave it empty: signing apps import it without one, but a Mac won't. Keep the file to yourself.":
+        "この証明書と秘密鍵を .p12 ファイルとして保存し、ほかの署名アプリやコンピュータで署名に使えるようにします。パスワードを決めると、ファイルを読み込むときに必要になります。空欄のままでも署名アプリは読み込めますが、Mac では読み込めません。ファイルは誰にも渡さないでください。",
     "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
         "SideInstaller が書き出せるのは署名に使っている証明書だけですが、この中にはありません。証明書の秘密鍵は、それを Apple に要求したデバイスにしかありません。",
     "SideInstaller signs with this one": "SideInstaller はこの証明書で署名します",
@@ -702,6 +705,15 @@ let japaneseStrings: [String: String] = [
         "それでもインストールするには、信頼できる入手先から .ipa を入手し、名前を %@ にして「ファイル › このiPhone内 › SideInstaller」にコピーしてください。",
     "Then tap Install again — SideInstaller uses your file instead of downloading one.":
         "その後、もう一度「インストール」をタップしてください。SideInstaller はダウンロードの代わりにそのファイルを使います。",
+    "If you reach GitHub through a VPN or proxy app, turn off LocalDevVPN and turn that one on: iOS runs only one VPN at a time.":
+        "VPN やプロキシのアプリで GitHub に接続している場合は、LocalDevVPN をオフにしてそのアプリをオンにしてください。iOS では一度に 1 つの VPN しか動作しません。",
+    "Tap “Get the .ipa” below and save the file, or download it on another device and bring it over.":
+        "下の「.ipa を入手」をタップしてファイルを保存するか、別のデバイスでダウンロードしてこちらに移してください。",
+    "Back in SideInstaller, pick Custom .ipa under Install, tap “Import .ipa” and choose the file. SideInstaller recognizes %@ and sets it up just like its own download.":
+        "SideInstaller に戻り、「インストール」で「カスタム .ipa」を選んでから「.ipa をインポート」をタップし、ファイルを選択してください。SideInstaller は %@ を認識し、自分でダウンロードした場合と同じように設定します。",
+    "Turn LocalDevVPN back on, then tap Install.":
+        "LocalDevVPN をもう一度オンにしてから、「インストール」をタップしてください。",
+    "Get the .ipa": ".ipa を入手",
     "Pair this iPhone in Settings": "「設定」でこの iPhone をペアリング",
     "Open the Settings app, then go to Privacy & Security › Developer Mode.":
         "「設定」アプリを開き、「プライバシーとセキュリティ › デベロッパモード」に進んでください。",

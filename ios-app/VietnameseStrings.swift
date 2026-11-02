@@ -140,6 +140,8 @@ let vietnameseStrings: [String: String] = [
     "Replace": "Thay",
     "or": "hoặc",
     "Paste a download link": "Dán liên kết tải xuống",
+    "SideInstaller recognizes this as %@ and sets it up just like its own download.":
+        "SideInstaller nhận ra đây là %@ và thiết lập nó y như bản tự tải về.",
     "Downloading… %d%%": "Đang tải… %d%%",
     "iOS %@ required": "Yêu cầu iOS %@",
     "This iPhone runs iOS %@, which SideInstaller can't install on. Update to iOS %@ or later in Settings › General › Software Update.":
@@ -283,10 +285,11 @@ let vietnameseStrings: [String: String] = [
         "Chỉ có thể xuất chứng chỉ mà SideInstaller dùng để ký: khóa riêng của mọi chứng chỉ khác nằm trên thiết bị đã yêu cầu nó từ Apple.",
     "Couldn't export the certificate: %@": "Không thể xuất chứng chỉ: %@",
     "Export certificate": "Xuất chứng chỉ",
+    "Password (optional)": "Mật khẩu (không bắt buộc)",
     "Export": "Xuất",
     "Exporting": "Đang xuất",
-    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
-        "Lưu chứng chỉ này và khóa riêng của nó thành tệp .p12, để một ứng dụng ký khác hoặc máy tính ký bằng nó. Hãy chọn mật khẩu: bạn sẽ cần nó để nhập tệp. Đừng đưa tệp cho ai.",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password, which you'll need to import the file, or leave it empty: signing apps import it without one, but a Mac won't. Keep the file to yourself.":
+        "Lưu chứng chỉ này và khóa riêng của nó thành tệp .p12, để một ứng dụng ký khác hoặc máy tính ký bằng nó. Hãy chọn mật khẩu (bạn sẽ cần nó để nhập tệp) hoặc để trống: các ứng dụng ký nhập được tệp không có mật khẩu, nhưng máy Mac thì không. Đừng đưa tệp cho ai.",
     "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
         "SideInstaller chỉ có thể xuất chứng chỉ mà nó dùng để ký, và không chứng chỉ nào ở đây là nó: khóa riêng của một chứng chỉ nằm trên thiết bị đã yêu cầu nó từ Apple.",
     "SideInstaller signs with this one": "SideInstaller ký bằng chứng chỉ này",
@@ -810,6 +813,15 @@ let vietnameseStrings: [String: String] = [
         "Để vẫn cài được, hãy lấy tệp .ipa của nó từ một nguồn bạn tin cậy, đặt tên là %@ rồi chép vào Tệp › Trên iPhone của tôi › SideInstaller.",
     "Then tap Install again — SideInstaller uses your file instead of downloading one.":
         "Sau đó chạm vào Cài ứng dụng lần nữa — SideInstaller sẽ dùng tệp của bạn thay vì tải về.",
+    "If you reach GitHub through a VPN or proxy app, turn off LocalDevVPN and turn that one on: iOS runs only one VPN at a time.":
+        "Nếu bạn vào GitHub qua một ứng dụng VPN hoặc proxy, hãy tắt LocalDevVPN rồi bật ứng dụng đó: iOS chỉ chạy một VPN tại một thời điểm.",
+    "Tap “Get the .ipa” below and save the file, or download it on another device and bring it over.":
+        "Chạm vào “Lấy tệp .ipa” bên dưới và lưu tệp, hoặc tải tệp trên thiết bị khác rồi chuyển sang đây.",
+    "Back in SideInstaller, pick Custom .ipa under Install, tap “Import .ipa” and choose the file. SideInstaller recognizes %@ and sets it up just like its own download.":
+        "Quay lại SideInstaller, chọn IPA tùy chọn trong mục Cài ứng dụng, chạm vào “Nhập .ipa” rồi chọn tệp. SideInstaller nhận ra %@ và thiết lập nó y như bản tự tải về.",
+    "Turn LocalDevVPN back on, then tap Install.":
+        "Bật lại LocalDevVPN, rồi chạm vào Cài ứng dụng.",
+    "Get the .ipa": "Lấy tệp .ipa",
     "Pair this iPhone in Settings": "Ghép nối iPhone này trong Cài đặt",
     "Open the Settings app, then go to Privacy & Security › Developer Mode.":
         "Mở ứng dụng Cài đặt, rồi vào Quyền riêng tư & Bảo mật › Chế độ nhà phát triển.",

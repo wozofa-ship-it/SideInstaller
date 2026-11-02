@@ -139,6 +139,8 @@ let chineseStrings: [String: String] = [
     "Replace": "更换",
     "or": "或",
     "Paste a download link": "粘贴下载链接",
+    "SideInstaller recognizes this as %@ and sets it up just like its own download.":
+        "SideInstaller 识别出这是 %@，会像它自己下载的版本一样完成设置。",
     "Downloading… %d%%": "正在下载… %d%%",
     "iOS %@ required": "需要 iOS %@",
     "This iPhone runs iOS %@, which SideInstaller can't install on. Update to iOS %@ or later in Settings › General › Software Update.":
@@ -278,10 +280,11 @@ let chineseStrings: [String: String] = [
         "只能导出 SideInstaller 用来签名的证书：其他证书的私钥只保存在向 Apple 申请它的设备上。",
     "Couldn't export the certificate: %@": "无法导出证书：%@",
     "Export certificate": "导出证书",
+    "Password (optional)": "密码（可选）",
     "Export": "导出",
     "Exporting": "正在导出",
-    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
-        "将此证书及其私钥存为 .p12 文件，供其他签名 App 或电脑签名使用。请为它设置密码：导入文件时需要输入。请勿将文件交给他人。",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password, which you'll need to import the file, or leave it empty: signing apps import it without one, but a Mac won't. Keep the file to yourself.":
+        "将此证书及其私钥存为 .p12 文件，供其他签名 App 或电脑签名使用。可以为它设置密码（导入文件时需要输入），也可以留空：签名 App 无需密码即可导入，但 Mac 不行。请勿将文件交给他人。",
     "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
         "SideInstaller 只能导出它用来签名的证书，而这里没有：证书的私钥只保存在向 Apple 申请它的设备上。",
     "SideInstaller signs with this one": "SideInstaller 用此证书签名",
@@ -792,6 +795,14 @@ let chineseStrings: [String: String] = [
         "如果仍想安装，请从你信任的来源取得它的 .ipa，命名为 %@，然后复制到 文件 › 我的 iPhone › SideInstaller。",
     "Then tap Install again — SideInstaller uses your file instead of downloading one.":
         "然后再次轻点“安装”—— SideInstaller 会使用你的文件，而不再下载。",
+    "If you reach GitHub through a VPN or proxy app, turn off LocalDevVPN and turn that one on: iOS runs only one VPN at a time.":
+        "如果你需要通过 VPN 或代理 App 才能访问 GitHub，请关闭 LocalDevVPN，再打开那个 App：iOS 一次只能运行一个 VPN。",
+    "Tap “Get the .ipa” below and save the file, or download it on another device and bring it over.":
+        "轻点下方的“获取 .ipa”并保存文件，或者在另一台设备上下载后再传到这台 iPhone。",
+    "Back in SideInstaller, pick Custom .ipa under Install, tap “Import .ipa” and choose the file. SideInstaller recognizes %@ and sets it up just like its own download.":
+        "回到 SideInstaller，在“安装”下选择“自定义 .ipa”，轻点“导入 .ipa”并选取该文件。SideInstaller 会识别出 %@，并像它自己下载的版本一样完成设置。",
+    "Turn LocalDevVPN back on, then tap Install.": "重新打开 LocalDevVPN，然后轻点“安装”。",
+    "Get the .ipa": "获取 .ipa",
     "Pair this iPhone in Settings": "在 设置 中配对此 iPhone",
     "Open the Settings app, then go to Privacy & Security › Developer Mode.":
         "打开 设置 应用，然后进入 隐私与安全性 › 开发者模式。",

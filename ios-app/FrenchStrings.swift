@@ -140,6 +140,8 @@ let frenchStrings: [String: String] = [
     "Replace": "Remplacer",
     "or": "ou",
     "Paste a download link": "Collez un lien de téléchargement",
+    "SideInstaller recognizes this as %@ and sets it up just like its own download.":
+        "SideInstaller reconnaît ici %@ et le configure comme s'il l'avait téléchargé lui-même.",
     "Downloading… %d%%": "Téléchargement… %d%%",
     "iOS %@ required": "iOS %@ requis",
     "This iPhone runs iOS %@, which SideInstaller can't install on. Update to iOS %@ or later in Settings › General › Software Update.":
@@ -283,10 +285,11 @@ let frenchStrings: [String: String] = [
         "Seul le certificat avec lequel SideInstaller signe peut être exporté : la clé privée de tout autre reste sur l'appareil qui l'a demandé à Apple.",
     "Couldn't export the certificate: %@": "Impossible d'exporter le certificat : %@",
     "Export certificate": "Exporter le certificat",
+    "Password (optional)": "Mot de passe (facultatif)",
     "Export": "Exporter",
     "Exporting": "Exportation",
-    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
-        "Enregistre ce certificat et sa clé privée dans un fichier .p12, avec lequel une autre app de signature ou un ordinateur peut signer. Choisissez un mot de passe : il vous faudra pour importer le fichier. Ne le donnez à personne.",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password, which you'll need to import the file, or leave it empty: signing apps import it without one, but a Mac won't. Keep the file to yourself.":
+        "Enregistre ce certificat et sa clé privée dans un fichier .p12, avec lequel une autre app de signature ou un ordinateur peut signer. Choisissez un mot de passe, qu'il vous faudra pour importer le fichier, ou laissez le champ vide : les apps de signature l'importent sans mot de passe, mais pas un Mac. Ne le donnez à personne.",
     "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
         "SideInstaller ne peut exporter que le certificat avec lequel il signe, et aucun de ceux-ci ne l'est : la clé privée d'un certificat reste sur l'appareil qui l'a demandé à Apple.",
     "SideInstaller signs with this one": "SideInstaller signe avec celui-ci",
@@ -816,6 +819,15 @@ let frenchStrings: [String: String] = [
         "Pour l'installer quand même, récupérez son .ipa auprès d'une source de confiance, nommez-le %@ et copiez-le dans Fichiers › Sur mon iPhone › SideInstaller.",
     "Then tap Install again — SideInstaller uses your file instead of downloading one.":
         "Touchez ensuite à nouveau Installer — SideInstaller utilise votre fichier au lieu d'en télécharger un.",
+    "If you reach GitHub through a VPN or proxy app, turn off LocalDevVPN and turn that one on: iOS runs only one VPN at a time.":
+        "Si vous accédez à GitHub via une app VPN ou proxy, désactivez LocalDevVPN et activez celle-ci : iOS n'exécute qu'un seul VPN à la fois.",
+    "Tap “Get the .ipa” below and save the file, or download it on another device and bring it over.":
+        "Touchez « Obtenir le .ipa » ci-dessous et enregistrez le fichier, ou téléchargez-le sur un autre appareil et transférez-le ici.",
+    "Back in SideInstaller, pick Custom .ipa under Install, tap “Import .ipa” and choose the file. SideInstaller recognizes %@ and sets it up just like its own download.":
+        "De retour dans SideInstaller, choisissez IPA personnalisé sous Installer, touchez « Importer un .ipa » et sélectionnez le fichier. SideInstaller reconnaît %@ et le configure comme s'il l'avait téléchargé lui-même.",
+    "Turn LocalDevVPN back on, then tap Install.":
+        "Réactivez LocalDevVPN, puis touchez Installer.",
+    "Get the .ipa": "Obtenir le .ipa",
     "Pair this iPhone in Settings": "Jumelez cet iPhone dans Réglages",
     "Open the Settings app, then go to Privacy & Security › Developer Mode.":
         "Ouvrez l'app Réglages, puis allez dans Confidentialité et sécurité › Mode développeur.",

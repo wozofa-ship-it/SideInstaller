@@ -141,6 +141,8 @@ let spanishStrings: [String: String] = [
     "Replace": "Sustituir",
     "or": "o",
     "Paste a download link": "Pega un enlace de descarga",
+    "SideInstaller recognizes this as %@ and sets it up just like its own download.":
+        "SideInstaller lo reconoce como %@ y lo configura igual que si lo hubiera descargado él mismo.",
     "Downloading… %d%%": "Descargando… %d%%",
     "iOS %@ required": "Se requiere iOS %@",
     "This iPhone runs iOS %@, which SideInstaller can't install on. Update to iOS %@ or later in Settings › General › Software Update.":
@@ -284,10 +286,11 @@ let spanishStrings: [String: String] = [
         "Solo se puede exportar el certificado con el que firma SideInstaller: la clave privada de cualquier otro se queda en el dispositivo que se lo pidió a Apple.",
     "Couldn't export the certificate: %@": "No se pudo exportar el certificado: %@",
     "Export certificate": "Exportar certificado",
+    "Password (optional)": "Contraseña (opcional)",
     "Export": "Exportar",
     "Exporting": "Exportando",
-    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password for it: you'll need it to import the file. Keep the file to yourself.":
-        "Guarda este certificado y su clave privada en un archivo .p12, para que otra app de firma o un ordenador firme con él. Elige una contraseña: la necesitarás para importar el archivo. No se lo des a nadie.",
+    "Saves this certificate and its private key as a .p12 file, for another signing app or a computer to sign with. Choose a password, which you'll need to import the file, or leave it empty: signing apps import it without one, but a Mac won't. Keep the file to yourself.":
+        "Guarda este certificado y su clave privada en un archivo .p12, para que otra app de firma o un ordenador firme con él. Elige una contraseña, que necesitarás para importar el archivo, o deja el campo vacío: las apps de firma lo importan sin ella, pero un Mac no. No se lo des a nadie.",
     "SideInstaller can export only the certificate it signs with, and none of these is it: a certificate's private key stays on the device that asked Apple for it.":
         "SideInstaller solo puede exportar el certificado con el que firma, y ninguno de estos lo es: la clave privada de un certificado se queda en el dispositivo que se lo pidió a Apple.",
     "SideInstaller signs with this one": "SideInstaller firma con este",
@@ -813,6 +816,15 @@ let spanishStrings: [String: String] = [
         "Para instalarlo de todos modos, consigue su .ipa de un sitio en el que confíes, llámalo %@ y cópialo en Archivos › En mi iPhone › SideInstaller.",
     "Then tap Install again — SideInstaller uses your file instead of downloading one.":
         "Después, toca Instalar otra vez — SideInstaller usará tu archivo en lugar de descargar uno.",
+    "If you reach GitHub through a VPN or proxy app, turn off LocalDevVPN and turn that one on: iOS runs only one VPN at a time.":
+        "Si llegas a GitHub con una app de VPN o proxy, desactiva LocalDevVPN y activa esa: iOS ejecuta solo una VPN a la vez.",
+    "Tap “Get the .ipa” below and save the file, or download it on another device and bring it over.":
+        "Toca “Obtener el .ipa” abajo y guarda el archivo, o descárgalo en otro dispositivo y pásalo a este.",
+    "Back in SideInstaller, pick Custom .ipa under Install, tap “Import .ipa” and choose the file. SideInstaller recognizes %@ and sets it up just like its own download.":
+        "De vuelta en SideInstaller, elige IPA personalizado en Instalar, toca “Importar .ipa” y selecciona el archivo. SideInstaller reconoce %@ y lo configura igual que si lo hubiera descargado él mismo.",
+    "Turn LocalDevVPN back on, then tap Install.":
+        "Vuelve a activar LocalDevVPN y toca Instalar.",
+    "Get the .ipa": "Obtener el .ipa",
     "Pair this iPhone in Settings": "Empareja este iPhone en Ajustes",
     "Open the Settings app, then go to Privacy & Security › Developer Mode.":
         "Abre la app Ajustes y ve a Privacidad y seguridad › Modo desarrollador.",
