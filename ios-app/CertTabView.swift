@@ -49,6 +49,25 @@ struct CertTabView: View {
     @State private var certPasswordError: String?
     @State private var confirmingRemoveCert = false
 
+    // 多证书库：profile 列表与激活 profile（见 EnterpriseCertStore）。
+    @State private var profiles = EnterpriseCertStore.profiles()
+    @State private var activeProfileID: UUID? = EnterpriseCertStore.activeProfile()?.id
+    @State private var showNewProfilePicker = false
+    @State private var pendingNewProfileP12: URL?
+    @State private var pendingNewProfileProvision: URL?
+    @State private var newProfilePassword = ""
+    @State private var showingNewProfilePasswordAlert = false
+    @State private var deletingProfile: EnterpriseCertProfile?
+    @State private var showingDeleteProfileAlert = false
+    @State private var editingProfileID: UUID?
+    @State private var editingProfileName = ""
+    // 本机回环安装兜底：回环起不来时弹框，点了才走配对安装。
+    // 单例（不用 StateObject 的实例）：切 tab 重建视图也不能
+    // 把跑着的回环服务连同视图一起释放掉。
+    @ObservedObject private var otaServer = OTAInstallServer.shared
+    @State private var showingLoopbackFallbackAlert = false
+    @State private var loopbackFailureText: String?
+
     // 吊销状态（手动刷新，警告不拦截）
     @State private var revocationStatus: CertRevocationStatus = .unknown
     @State private var revocationChecking = false
@@ -333,10 +352,109 @@ struct CertTabView: View {
 
     // MARK: 证书管理
 
+    /// 证书库列表（证书组最顶上）：一行一张证书，点行切换激活；
+    /// 只有一个 profile 时就是一行带“激活”，其余界面照常。
+    /// 到期日只读各 profile 自己的描述文件（不用切激活就能算）；
+    /// 证书名那栏仍是激活那张的（证书卡里已有）。
+    @ViewBuilder
+    private var profileGroup: some View {
+        signGroup(title: L("证书库")) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(profiles) { profile in
+                    HStack(spacing: 8) {
+                        if editingProfileID == profile.id {
+                            TextField("", text: $editingProfileName)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    EnterpriseCertStore.renameProfile(profile, to: editingProfileName)
+                                    editingProfileID = nil
+                                    profiles = EnterpriseCertStore.profiles()
+                                }
+                        } else {
+                            Button {
+                                if profile.id != activeProfileID {
+                                    EnterpriseCertStore.setActiveProfile(profile)
+                                    refreshCertState()
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(profile.name)
+                                        .font(.footnote.weight(profile.id == activeProfileID ? .semibold : .regular))
+                                        .lineLimit(1)
+                                    if profile.id == activeProfileID {
+                                        Text(L("激活"))
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.green)
+                                    }
+                                    if let expiration = EnterpriseCertStore.provisionInfo(for: profile)?.expiration {
+                                        Text(expiration.formatted(date: .abbreviated, time: .omitted) + remainingText(expiration))
+                                            .font(.caption)
+                                            .foregroundStyle(expirySoon(expiration) ? Color.red : Color.secondary)
+                                    }
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Button {
+                            if editingProfileID == profile.id {
+                                EnterpriseCertStore.renameProfile(profile, to: editingProfileName)
+                                editingProfileID = nil
+                                profiles = EnterpriseCertStore.profiles()
+                            } else {
+                                editingProfileID = profile.id
+                                editingProfileName = profile.name
+                            }
+                        } label: {
+                            Text(editingProfileID == profile.id ? L("完成") : L("改名"))
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.bordered)
+                        Button(role: .destructive) {
+                            deletingProfile = profile
+                            showingDeleteProfileAlert = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                Button {
+                    showNewProfilePicker = true
+                } label: {
+                    Text(L("导入新证书"))
+                }
+                .buttonStyle(.bordered)
+                Text(L("点一行切换当前证书；新证书导入后要填一次它的密码。"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 新证书导入确认：文件已在 picker 里配对过（p12 + 描述文件
+    /// 都有），这里按密码建 profile、切激活；失败只报 importError，
+    /// 不建半截 profile（importProfile 写失败自删目录）。
+    private func confirmNewProfileImport() {
+        guard let p12 = pendingNewProfileP12, let provision = pendingNewProfileProvision else { return }
+        do {
+            _ = try EnterpriseCertStore.importProfile(p12: p12, provision: provision, p12Password: newProfilePassword)
+            importError = nil
+        } catch {
+            importError = L("证书库导入失败：%@", error.localizedDescription)
+        }
+        pendingNewProfileP12 = nil
+        pendingNewProfileProvision = nil
+        newProfilePassword = ""
+        refreshCertState()
+    }
+
     /// 证书组内容（原证书段，签名段顶部的证书组展开时显示；标题行
     /// 由证书组自己提供，这里不再另起“证书管理”头）。
     private var certCard: some View {
         VStack(alignment: .leading, spacing: 16) {
+            profileGroup
             expiryWarning
             if let info = provisionInfo {
                 signGroup(title: L("描述文件")) {
@@ -567,6 +685,72 @@ struct CertTabView: View {
                 importCertLibrary(urls)
             }
         }
+        // 新证书导入：先选 p12 + 描述文件（配对才进，跟导入证书库
+        // 同一套报错），再弹密码框——密码用来给新 profile 定默认名
+        //（证书名）和写进它自己的钥匙串 account；取消就不建 profile。
+        .sheet(isPresented: $showNewProfilePicker) {
+            FileImporterRepresentableView(
+                allowedContentTypes: [UTType(filenameExtension: "p12") ?? .data,
+                                      UTType(filenameExtension: "mobileprovision") ?? .data],
+                allowsMultipleSelection: true
+            ) { urls in
+                let p12 = urls.first { $0.pathExtension.lowercased() == "p12" }
+                let provision = urls.first { $0.pathExtension.lowercased() == "mobileprovision" }
+                guard let p12, let provision else {
+                    importError = L("未找到与本证书相匹配的mobileprovision文件，请将mobileprovision文件放在与p12文件相同的目录下。")
+                    return
+                }
+                pendingNewProfileP12 = p12
+                pendingNewProfileProvision = provision
+                newProfilePassword = ""
+                showingNewProfilePasswordAlert = true
+            }
+        }
+        .alert(L("新证书密码"), isPresented: $showingNewProfilePasswordAlert) {
+            SecureField(L("证书密码"), text: $newProfilePassword)
+            Button(L("导入")) {
+                confirmNewProfileImport()
+            }
+            Button(L("取消"), role: .cancel) {
+                pendingNewProfileP12 = nil
+                pendingNewProfileProvision = nil
+                newProfilePassword = ""
+            }
+        } message: {
+            Text(L("输入这张 .p12 的密码，导完就切到这张证书。"))
+        }
+        .alert(L("删除证书？"), isPresented: $showingDeleteProfileAlert) {
+            Button(L("取消"), role: .cancel) {
+                deletingProfile = nil
+            }
+            Button(L("删除"), role: .destructive) {
+                if let profile = deletingProfile {
+                    EnterpriseCertStore.removeProfile(profile)
+                    deletingProfile = nil
+                    refreshCertState()
+                }
+            }
+        } message: {
+            Text(L("会删掉这张证书的 .p12、描述文件和保存的密码；删的是当前激活的那张时，自动切到另一张。"))
+        }
+        // 回环兜底：回环起不来时 server 置 unavailableMessage，
+        // 这里弹框；点了“改用配对安装”才走 Engine，绝不静默回落。
+        .onChange(of: otaServer.unavailableMessage) { _, message in
+            if let message {
+                loopbackFailureText = message
+                showingLoopbackFallbackAlert = true
+            }
+        }
+        .alert(L("本机回环安装起不来"), isPresented: $showingLoopbackFallbackAlert) {
+            Button(L("改用配对安装")) {
+                if let record = enterpriseInstallRecord {
+                    startEngineInstall(record: record)
+                }
+            }
+            Button(L("取消"), role: .cancel) {}
+        } message: {
+            Text(loopbackFailureText ?? "")
+        }
     }
 
     /// 轻松签式“导入证书库”：一次选 .p12 + 描述文件，配对才进；
@@ -644,6 +828,28 @@ struct CertTabView: View {
         return L("（剩 %d 天）", days)
     }
 
+    /// 签前到期警告（7 天内到期，只警告不拦截；已过期走 S4
+    /// 拦截，不在这里重复报）：复用 S7 的 remainingDays（startOfDay
+    /// 自然日）。单签与批量共用同一句，批量一次运行只拼一次。
+    private func expiryWarningText() -> String? {
+        var parts: [String] = []
+        let now = Date()
+        if let expiration = certInfo?.expiration, expiration >= now {
+            let days = remainingDays(to: expiration)
+            if days <= 7 {
+                parts.append(days == 0 ? L("证书今天到期") : L("证书 %d 天后到期", days))
+            }
+        }
+        if let expiration = provisionInfo?.expiration, expiration >= now {
+            let days = remainingDays(to: expiration)
+            if days <= 7 {
+                parts.append(days == 0 ? L("描述文件今天到期") : L("描述文件 %d 天后到期", days))
+            }
+        }
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "，") + L("，仍要签名吗？")
+    }
+
     /// 剩余天数 ≤7 天（已过期也算）即提醒；跟 remainingText 同一套算法。
     private func expirySoon(_ expiration: Date) -> Bool {
         remainingDays(to: expiration) <= 7
@@ -701,6 +907,12 @@ struct CertTabView: View {
         hasProvision = EnterpriseCertStore.hasProvision
         provisionInfo = EnterpriseCertStore.provisionInfo
         certInfo = EnterpriseCertStore.certInfo
+        // 多证书库：列表、激活、密码（密码 @State 跟着激活走，
+        // 切 profile 后这里重读新 profile 的密码；onChange 写回
+        // 的是同一个值，无害）。
+        profiles = EnterpriseCertStore.profiles()
+        activeProfileID = EnterpriseCertStore.activeProfile()?.id
+        password = EnterpriseCertStore.password
         // 密码错不要等到签名才说：p12 解不开就在密码组下红字明说。
         // 只在已导入 p12 时校验；没导入、或解得开，都不提示。
         if hasP12, (try? EnterpriseCertStore.identityDERs()) == nil {
@@ -1554,6 +1766,9 @@ struct CertTabView: View {
                     // 名字就是包里那个 .app，不再含糊说“程序”。
                     warnings.append(L("以下程序未脱壳，签名后可能无法安装，建议重新脱壳签名：%@", undumped.joined(separator: "、")))
                 }
+                if let expiry = self.expiryWarningText() {
+                    warnings.append(expiry)
+                }
                 if warnings.isEmpty {
                     self.executeSign(kind: kind, url: url, mods: currentMods)
                 } else {
@@ -1673,12 +1888,10 @@ struct CertTabView: View {
         case .signAndInstall:
             Task {
                 do {
-                    // 先签好存进「已签名」，再走配对安装（Engine
-                    // 设备链路，v45 那套）。日志：跑完由 onChange
-                    // 按 finished/lastError 记（成功/失败各一条），
-                    // 这里不再分头记，免得成功失败各记一次；前置
-                    // 失败（Engine 根本没跑起来）由 startEngineInstall
-                    // 后那段直接记（见下面 MainActor 块）。
+                    // 先签好存进「已签名」，再走本机回环安装（起不来
+                    // 时兜底弹框才走配对安装）。回环拉起后没有完成
+                    // 回调，不记完成日志；同步失败（Engine 在跑、
+                    // 回环没起）才由下面这段记一条失败日志。
                     let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
@@ -1687,13 +1900,13 @@ struct CertTabView: View {
                         self.localInstall.appendStepLog(L("签名成功：%@", record.appName))
                         self.engineInstallLogAppName = record.appName
                         self.engineInstallLogKind = .signAndInstall
-                        self.startEngineInstall(record: record)
-                        if !self.engine.isRunning, let reason = self.enterpriseInstallErrorText {
+                        self.startLoopbackInstall(record: record)
+                        if let reason = self.enterpriseInstallErrorText {
                             CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                                 appName: record.appName, kind: .signAndInstall, success: false,
                                 detail: reason))
                             self.logEntries = CertSignLogStore.load()
-                            // 前置失败不会触发 onChange，日志名额在这里清，
+                            // 同步失败不会触发 onChange，日志名额在这里清，
                             // 不然之后一次已签名行安装跑完会误记成这条。
                             self.engineInstallLogAppName = nil
                         }
@@ -1716,17 +1929,37 @@ struct CertTabView: View {
         }
     }
 
-    /// 已签名行「安装」：走配对安装（Engine 设备链路，v45 那套）。
-    /// 前置失败（缺配对文件/隧道）时原因只在企业页内显示 +
-    /// 重试配对安装，绝不去共享「安装」页。跑完由 onChange
-    /// 记一条「仅安装」日志，不记成“签名并安装”。
+    /// 已签名行「安装」：默认走本机回环安装（起不来时兜底弹框
+    /// 才走配对安装）。回环没有完成回调，不记完成日志；Engine
+    /// 兜底路跑完仍由 onChange 记一条「仅安装」日志。
     private func installSigned(_ record: SignedIPARecord) {
         engineInstallLogKind = .installOnly
-        startEngineInstall(record: record)
+        startLoopbackInstall(record: record)
     }
 
-    /// 企业安装统一入口（签名并安装、已签名行安装、重试都走它）：
-    /// 调 Engine 的 runInstallSignedIPA（配对设备链路，v45 那套）；
+    /// 企业安装默认入口（签名并安装、已签名行安装都走它）：
+    /// 先走本机回环（明文 http://localhost + itms-services，轻松签
+    /// 同款）：签好的包只在本机回环上走一圈，系统安装器直接装，
+    /// 不走配对、不走隧道、不要 WiFi。回环起不来时不静默回落——
+    /// 兜底弹框让用户点“改用配对安装”才走 startEngineInstall；
+    /// 回环拉起后装成装不成系统安装器那边才知道，App 内不假报
+    /// 成功（不记完成日志、不弹成功框，只记一步日志）。
+    /// Engine 在跑时不新起（两路安装撞在一起没好处）。
+    private func startLoopbackInstall(record: SignedIPARecord) {
+        enterpriseInstallRecord = record
+        enterpriseInstallErrorText = nil
+        guard !engine.isRunning else {
+            enterpriseInstallErrorText = L("已有安装在进行，先等当前安装完成再试。")
+            if !enterpriseInstallInFlight { engineInstallLogAppName = nil }
+            return
+        }
+        localInstall.appendStepLog(L("本机回环安装开始：%@", record.appName))
+        otaServer.install(ipaURL: SignedIPAStore.url(for: record), appName: record.appName,
+                          bundleID: record.bundleID, version: record.version ?? "1.0")
+    }
+
+    /// 配对安装兜底入口（本机回环起不来时用户点了“改用配对安装”
+    /// 才走它）：调 Engine 的 runInstallSignedIPA（配对设备链路，
     /// 前置检查（配对文件、隧道、设备 IP）不过时 Engine 直接返回、
     /// isRunning 根本没置位——这时就别留着进行中标志（否则之后
     /// 别的 tab 一次成功安装也会误弹），并把原因快照到页内：
@@ -2118,6 +2351,9 @@ struct CertTabView: View {
                     if !names.isEmpty {
                         warnings.append(L("以下程序未脱壳，签名后可能无法安装，建议重新脱壳签名：%@", names.joined(separator: "、")))
                     }
+                }
+                if let expiry = self.expiryWarningText() {
+                    warnings.append(expiry)
                 }
                 if warnings.isEmpty {
                     self.runBatchSign(targets: targets, mods: mods)

@@ -3,18 +3,33 @@ import Network
 import Security
 import UIKit
 
-/// 本机直装：App 内起一个本地 HTTPS 服务，生成 OTA 清单，
-/// 用 itms-services 拉起系统安装——不走配对、不走隧道、不要 WiFi。
-/// 路子就是轻松签 / 易能签那套「本机安装」：签好的包只在本机
-/// 回环上走一圈，系统安装器直接把它装进桌面。
+/// 本机直装：App 内起一个本地明文 HTTP 服务（http://localhost），
+/// 生成 OTA 清单，用 itms-services 拉起系统安装——不走配对、
+/// 不走隧道、不要 WiFi。路子就是轻松签那套「本机安装」：
+/// 签好的包只在本机回环上走一圈，系统安装器直接把它装进桌面。
+/// 旧版走 https://127.0.0.1 + 企业证书 TLS：TLS 身份就是用户
+/// 导入的这张企业证书，系统安装器建不起这个连接——8 代安装
+/// 弹窗失败的实证病根；本版起一律明文，不再挂证书。
 /// 限制先说明白：
 /// - 只能装企业证书签好的包（个人 ID 签的包走这条路装不上，
 ///   系统安装器验签名那关就过不了，仍走配对安装）。
-/// - 服务只在安装期间跑，装完自动停；路径带随机 ID，不猜到；
-///   TLS 身份就是用户自己导入的这张企业证书，不出本机。
+/// - 服务只在安装期间跑，装完自动停；路径带随机 ID，不猜到。
+/// - 回环起不来时不静默回落：unavailableMessage 置位，证书页
+///   弹兜底，用户点了“改用配对安装”才走 Engine。
+/// - itms-services 接不接受明文 localhost 清单、以及安装器
+///   半路失败时 App 内能不能感知，没有真机可测，CI 也验不出，
+///   必须上真机验证。
 final class OTAInstallServer: ObservableObject {
+    /// 全局唯一：证书页切 tab 重建视图也不能把跑着的回环服务
+    /// 连同视图一起释放掉（LocalHTTPInstallServer.shared 同款）。
+    static let shared = OTAInstallServer()
+    private init() {}
+
     @Published private(set) var isRunning = false
     @Published private(set) var status: String?
+    /// 回环失败时置位（证书页 onChange 弹兜底用）；正常结束
+    /// （发完包停、600 秒硬停）绝不置位，见 failLoopback。
+    @Published private(set) var unavailableMessage: String?
 
     private var listener: NWListener?
     private var activeCandidate = 0
@@ -25,6 +40,7 @@ final class OTAInstallServer: ObservableObject {
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var stopWork: DispatchWorkItem?
     private var hardStopWork: DispatchWorkItem?
+    private var unavailableReported = false
 
     /// 对一个已签好的 IPA 拉起本机安装。
     func install(record: SignedIPARecord) {
@@ -39,6 +55,10 @@ final class OTAInstallServer: ObservableObject {
     /// 对一个刚签好的文件拉起本机安装（签名页「签名并安装」用）。
     func install(ipaURL: URL, appName: String, bundleID: String, version: String) {
         stop()
+        // 失败上报复位：上一轮的失败文案先清掉，不然同一句失败
+        // 再来一次时 onChange 认不出变化、兜底弹不出来。
+        unavailableReported = false
+        DispatchQueue.main.async { self.unavailableMessage = nil }
         guard FileManager.default.fileExists(atPath: ipaURL.path) else {
             setStatus(L("签好的文件找不到了，先重签一次。"))
             return
@@ -77,24 +97,30 @@ final class OTAInstallServer: ObservableObject {
 
     private var pendingMeta: (appName: String, bundleID: String, version: String)?
 
+    /// 回环失败统一出口：只报一次，stop() 本身不报——600 秒硬停、
+    /// 发完包 20 秒停这些正常结束绝不能被当成失败弹兜底。
+    /// 失败只由这几处进：端口全占、清单/链接生成失败、清单已发出
+    /// 后服务断掉；文件找不着那档不进这里（配对安装同样装不了）。
+    private func failLoopback(_ message: String) {
+        setStatus(message)
+        if !unavailableReported {
+            unavailableReported = true
+            DispatchQueue.main.async { self.unavailableMessage = message }
+        }
+        stop()
+    }
+
     private func tryPort(_ candidate: Int) {
         guard candidate <= 18090 else {
-            setStatus(L("本机端口 18080-18090 都被占用了，本机安装起不来，改用配对安装。"))
-            stop()
+            failLoopback(L("本机端口 18080-18090 都被占用了，本机安装起不来，改用配对安装。"))
             return
         }
+        // 明文 TCP，不再挂企业证书 TLS：TLS 身份就是用户导入的
+        // 这张企业证书，系统安装器建不起这个连接——8 代安装
+        // 弹窗失败的实证病根。轻松签同款是明文 http://localhost。
+        let params = NWParameters.tcp
+        params.allowLocalEndpointReuse = true
         do {
-            let tlsOptions = NWProtocolTLS.Options()
-            let identity = try EnterpriseCertStore.identity()
-            // 构建 #50 红字：这调用只要 2 个参数（多传 queue 编不过），
-            // 且 sec_identity_create 返回的是 Optional，必须解包。
-            guard let secIdentity = sec_identity_create(identity) else {
-                throw EngineError.message(L("本机安装服务身份创建失败，改用配对安装。"))
-            }
-            sec_protocol_options_set_local_identity(
-                tlsOptions.securityProtocolOptions, secIdentity)
-            let params = NWParameters(tls: tlsOptions)
-            params.allowLocalEndpointReuse = true
             let listener = try NWListener(
                 using: params, on: NWEndpoint.Port(rawValue: UInt16(candidate))!)
             activeCandidate = candidate
@@ -111,8 +137,7 @@ final class OTAInstallServer: ObservableObject {
                     } else {
                         // 清单已发出、安装进行中，服务挂了就明说，
                         // 别悄悄换端口（安装器手里的旧地址就失效了）。
-                        self.setStatus(L("本机安装服务断了，改用配对安装。"))
-                        self.stop()
+                        self.failLoopback(L("本机安装服务断了，改用配对安装。"))
                     }
                 default:
                     break
@@ -124,15 +149,15 @@ final class OTAInstallServer: ObservableObject {
             self.listener = listener
             listener.start(queue: queue)
         } catch {
-            setStatus((error as? LocalizedError)?.errorDescription
-                ?? String(describing: error))
-            stop()
+            // 监听器建不起来（端口被占）就换下一个端口，不要
+            // 直接停掉——旧代码这里直接停，端口被占一次就全失败。
+            tryPort(candidate + 1)
         }
     }
 
     private func onReady(port: Int) {
         guard let meta = pendingMeta else { return }
-        let base = "https://127.0.0.1:\(port)/\(installID)"
+        let base = "http://localhost:\(port)/\(installID)"
         let manifestURL = "\(base)/manifest.plist"
         let item: [String: Any] = [
             "assets": [
@@ -147,8 +172,7 @@ final class OTAInstallServer: ObservableObject {
         ]
         guard let data = try? PropertyListSerialization.data(
             fromPropertyList: ["items": [item]], format: .xml, options: 0) else {
-            setStatus(L("安装清单生成失败，改用配对安装。"))
-            stop()
+            failLoopback(L("安装清单生成失败，改用配对安装。"))
             return
         }
         manifestData = data
@@ -157,8 +181,7 @@ final class OTAInstallServer: ObservableObject {
         let encoded = manifestURL.addingPercentEncoding(
             withAllowedCharacters: .urlQueryAllowed) ?? manifestURL
         guard let link = URL(string: "itms-services://?action=download-manifest&url=\(encoded)") else {
-            setStatus(L("安装链接生成失败，改用配对安装。"))
-            stop()
+            failLoopback(L("安装链接生成失败，改用配对安装。"))
             return
         }
         setStatus(L("已拉起系统安装：点「安装」后服务保持到下载完成，装完自动停。"))

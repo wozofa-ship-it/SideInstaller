@@ -73,8 +73,9 @@ struct SideInstallerApp: App {
                         .environmentObject(updateChecker)
                         .environmentObject(localizer)
                         .environmentObject(accounts)
-                        // Version update check disabled (user request: no nagging)
-                        // .task { await updateChecker.check() }
+                        // 更新检查：只在 latest_version.txt 比本机新时才亮横幅，
+                        // 相等/取不到都不打扰；txt 由发版同步改（见 UpdateChecker）。
+                        .task { await updateChecker.check() }
                         .onAppear {
                             // Start background keep-alive for Shortcuts resign
                             keepAlive.startAudio()

@@ -9,6 +9,17 @@ import UniformTypeIdentifiers
 /// UserDefaults）。注意：这里是导入证书时填的密码，和证书页
 /// 导出个人证书 p12 的密码“1”完全是两回事，那处在
 /// rust-core/src/certs.rs 里，本文件不碰它。
+/// 多证书库：EnterpriseCert/profiles/<id>/ 下每 profile 一套
+/// cert.p12 + profile.mobileprovision，密码每 profile 一个钥匙串
+/// account；老单证书首次打开列表时自动迁成第一个 profile。
+/// 全部取用口（p12URL/provisionURL/password/hasP12/hasProvision/
+/// ready/certInfo/provisionInfo/certMatchesProvision/importP12/
+/// importProvision）都解析到当前激活 profile，调用方不用改。
+struct EnterpriseCertProfile: Codable, Identifiable, Equatable {
+    var id: UUID
+    var name: String
+}
+
 enum EnterpriseCertStore {
     static var dir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -16,8 +27,23 @@ enum EnterpriseCertStore {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         return base
     }
-    static var p12URL: URL { dir.appendingPathComponent("cert.p12") }
-    static var provisionURL: URL { dir.appendingPathComponent("profile.mobileprovision") }
+    /// 当前激活 profile 的 p12 / 描述文件：有 profile 时走
+    /// profiles/<id>/ 下的文件，没有 profile 时回落到老单证书
+    /// 路径（EnterpriseCert/cert.p12），老用户没建过 profile
+    /// 时行为与以前一模一样；profile 列表一打开就迁移（见
+    /// migrateIfNeeded），之后一律走 profile 路径。
+    static var p12URL: URL {
+        if let active = activeProfile() {
+            return profileDir(for: active).appendingPathComponent("cert.p12")
+        }
+        return dir.appendingPathComponent("cert.p12")
+    }
+    static var provisionURL: URL {
+        if let active = activeProfile() {
+            return profileDir(for: active).appendingPathComponent("profile.mobileprovision")
+        }
+        return dir.appendingPathComponent("profile.mobileprovision")
+    }
     static var hasP12: Bool { FileManager.default.fileExists(atPath: p12URL.path) }
     static var hasProvision: Bool { FileManager.default.fileExists(atPath: provisionURL.path) }
     static var password: String {
@@ -26,14 +52,22 @@ enum EnterpriseCertStore {
             // 旧条目，getter 也要先认新密码——以前先读钥匙串、
             // 有值直接返回，改密场景下界面显示新密码、签名实际
             // 用旧密码，报错“密码错误”且重输难定位。
-            if memoryFallbackValid, let fallback = memoryFallback { return fallback }
-            if let stored = keychainRead() { return stored }
-            if let fallback = memoryFallback { return fallback }
+            // 多证书库：内存 fallback 只认写进它的那个 profile，
+            // 切 profile 后旧 fallback 不得串到新 profile 上。
+            if memoryFallbackValid, memoryFallbackProfileID == activeProfileIDValue,
+               let fallback = memoryFallback { return fallback }
+            if let stored = keychainRead(account: keychainAccount) { return stored }
+            // 迁移 profile 的旧钥匙串条目兜底：新 account 还没写
+            // 进去之前（迁移写失败那次），旧 account 里仍是有效密码。
+            if keychainAccount != legacyKeychainAccount,
+               let legacy = keychainRead(account: legacyKeychainAccount) { return legacy }
+            if memoryFallbackProfileID == activeProfileIDValue,
+               let fallback = memoryFallback { return fallback }
             // 一次性迁移：旧版存在 UserDefaults 的明文密码搬进
             // 钥匙串后清掉旧键，之后再读就只走钥匙串。
             let legacy = UserDefaults.standard.string(forKey: "CZFEnterpriseCertPassword") ?? ""
             if !legacy.isEmpty {
-                if keychainWrite(legacy) == nil {
+                if keychainWrite(legacy, account: keychainAccount) == nil {
                     UserDefaults.standard.removeObject(forKey: "CZFEnterpriseCertPassword")
                     memoryFallbackValid = false
                 } else {
@@ -42,6 +76,7 @@ enum EnterpriseCertStore {
                     // 标记有效，免得钥匙串旧条目把刚迁的盖回去。
                     memoryFallback = legacy
                     memoryFallbackValid = true
+                    memoryFallbackProfileID = activeProfileIDValue
                 }
                 return legacy
             }
@@ -49,15 +84,16 @@ enum EnterpriseCertStore {
         }
         set {
             UserDefaults.standard.removeObject(forKey: "CZFEnterpriseCertPassword")
+            memoryFallbackProfileID = activeProfileIDValue
             if newValue.isEmpty {
-                keychainDelete()
+                keychainDelete(account: keychainAccount)
                 memoryFallback = nil
                 memoryFallbackValid = false
             } else {
                 // 钥匙串万一写不进（极少见），只留在内存里撑到
                 // App 退出，不回写 UserDefaults 明文；同时标记
                 // 有效（见 S10），下次读先认它，不认旧条目。
-                if keychainWrite(newValue) == nil {
+                if keychainWrite(newValue, account: keychainAccount) == nil {
                     memoryFallback = nil
                     memoryFallbackValid = false
                 } else {
@@ -75,21 +111,30 @@ enum EnterpriseCertStore {
     /// 功或密码清空时为 false。首次导入无旧条目时钥匙串读本
     /// 来就是空，fallback 正常工作，本标志不改变那条路径。
     private static var memoryFallbackValid = false
+    /// memoryFallback 是哪个 profile 的密码：切 profile 时清掉，
+    /// 免得旧 profile 的内存密码串到新 profile 上。
+    private static var memoryFallbackProfileID: UUID?
     static var ready: Bool { hasP12 && hasProvision && !password.isEmpty }
 
     // MARK: - 钥匙串（AccountStore 的 Keychain 模板同款）
 
     private static var keychainService: String { "czf.enterprise.cert" }
-    private static var keychainAccount: String { "password" }
+    /// 当前激活 profile 的钥匙串 account：没 profile 时就是老
+    /// 单证书的 "password"，老用户密码不用重填。
+    private static var keychainAccount: String {
+        if let id = activeProfileIDValue { return "password-\(id.uuidString)" }
+        return legacyKeychainAccount
+    }
+    private static var legacyKeychainAccount: String { "password" }
 
-    private static func keychainQuery() -> [String: Any] {
+    private static func keychainQuery(account: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: keychainService,
-         kSecAttrAccount as String: keychainAccount]
+         kSecAttrAccount as String: account]
     }
 
-    private static func keychainRead() -> String? {
-        var query = keychainQuery()
+    private static func keychainRead(account: String) -> String? {
+        var query = keychainQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
@@ -100,21 +145,21 @@ enum EnterpriseCertStore {
 
     /// 成功返回 nil，失败返回 OSStatus（调用方据此决定要不要
     /// 用内存 fallback）。
-    private static func keychainWrite(_ value: String) -> OSStatus? {
+    private static func keychainWrite(_ value: String, account: String) -> OSStatus? {
         let data = Data(value.utf8)
-        let update = SecItemUpdate(keychainQuery() as CFDictionary,
+        let update = SecItemUpdate(keychainQuery(account: account) as CFDictionary,
                                    [kSecValueData as String: data] as CFDictionary)
         if update == errSecSuccess { return nil }
         guard update == errSecItemNotFound else { return update }
-        var add = keychainQuery()
+        var add = keychainQuery(account: account)
         add[kSecValueData as String] = data
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let status = SecItemAdd(add as CFDictionary, nil)
         return status == errSecSuccess ? nil : status
     }
 
-    private static func keychainDelete() {
-        SecItemDelete(keychainQuery() as CFDictionary)
+    private static func keychainDelete(account: String) {
+        SecItemDelete(keychainQuery(account: account) as CFDictionary)
     }
 
     static func importP12(from url: URL) throws {
@@ -122,6 +167,235 @@ enum EnterpriseCertStore {
     }
     static func importProvision(from url: URL) throws {
         try Data(contentsOf: url).write(to: provisionURL, options: .atomic)
+    }
+
+    // MARK: - 多证书库（profile）
+
+    private static var profilesDir: URL {
+        let d = dir.appendingPathComponent("profiles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    private static var indexURL: URL { dir.appendingPathComponent("profiles.json") }
+
+    private static var activeProfileIDKey: String { "CZFEnterpriseCertActiveProfileID" }
+
+    /// UserDefaults 里记的激活 profile id（只读原始值，不触发
+    /// 迁移、不读列表；密码 getter 走这条，免得跟迁移递归）。
+    private static var activeProfileIDValue: UUID? {
+        guard let raw = UserDefaults.standard.string(forKey: activeProfileIDKey),
+              let id = UUID(uuidString: raw) else { return nil }
+    }
+
+    private static func profileDir(for profile: EnterpriseCertProfile) -> URL {
+        profilesDir.appendingPathComponent(profile.id.uuidString, isDirectory: true)
+    }
+
+    private static func saveProfiles(_ profiles: [EnterpriseCertProfile]) {
+        if let data = try? JSONEncoder().encode(profiles) {
+            try? data.write(to: indexURL, options: .atomic)
+        }
+    }
+
+    /// 老单证书一次性迁移：index 还没有、且顶层还有老文件时，
+    /// 把顶层 cert.p12 / profile.mobileprovision 拷进第一个
+    /// profile（不丢数据、不要求重导），密码从老钥匙串 account
+    /// 迁到新 profile 的 account；index 一建好之后不再跑，
+    /// 顶层残留文件（迁移中途崩溃留下的）之后一律忽略。
+    /// 只读显式旧路径，不走 p12URL/certInfo（那两条会解析到
+    /// 激活 profile，迁移里调它们就递归了）。
+    private static func migrateIfNeeded() {
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: indexURL.path) else { return }
+        let oldP12 = dir.appendingPathComponent("cert.p12")
+        let oldProvision = dir.appendingPathComponent("profile.mobileprovision")
+        let hasOldP12 = fm.fileExists(atPath: oldP12.path)
+        let hasOldProvision = fm.fileExists(atPath: oldProvision.path)
+        guard hasOldP12 || hasOldProvision else { return }
+        let id = UUID()
+        let pdir = profilesDir.appendingPathComponent(id.uuidString, isDirectory: true)
+        do {
+            try fm.createDirectory(at: pdir, withIntermediateDirectories: true)
+            if hasOldP12 {
+                try Data(contentsOf: oldP12).write(to: pdir.appendingPathComponent("cert.p12"), options: .atomic)
+            }
+            if hasOldProvision {
+                try Data(contentsOf: oldProvision).write(to: pdir.appendingPathComponent("profile.mobileprovision"), options: .atomic)
+            }
+        } catch {
+            try? fm.removeItem(at: pdir)
+            return
+        }
+        // 名：证书名优先（老密码直接读老 account，不触发迁移
+        // 副作用），解不开退到描述文件名，再退到“证书”。
+        var name = ""
+        let oldPassword = keychainRead(account: legacyKeychainAccount)
+            ?? UserDefaults.standard.string(forKey: "CZFEnterpriseCertPassword") ?? ""
+        if hasOldP12,
+           let data = try? Data(contentsOf: oldP12),
+           let certName = certName(p12Data: data, password: oldPassword), !certName.isEmpty {
+            name = certName
+        } else if hasOldProvision,
+                  let pname = provisionInfo(at: oldProvision)?.name, !pname.isEmpty {
+            name = pname
+        } else {
+            name = L("证书")
+        }
+        saveProfiles([EnterpriseCertProfile(id: id, name: name)])
+        UserDefaults.standard.set(id.uuidString, forKey: activeProfileIDKey)
+        // 密码：新 account 写成了才删老 account；写失败就留着，
+        // password 读时新 account 为空会回落到老 account。
+        if !oldPassword.isEmpty,
+           keychainWrite(oldPassword, account: "password-\(id.uuidString)") == nil {
+            keychainDelete(account: legacyKeychainAccount)
+            UserDefaults.standard.removeObject(forKey: "CZFEnterpriseCertPassword")
+        }
+        // 顶层旧文件：拷过去的已验证存在才删；删不掉也无妨
+        //（index 在，迁移不再跑，旧文件从此被忽略）。
+        if hasOldP12, fm.fileExists(atPath: pdir.appendingPathComponent("cert.p12").path) {
+            try? fm.removeItem(at: oldP12)
+        }
+        if hasOldProvision, fm.fileExists(atPath: pdir.appendingPathComponent("profile.mobileprovision").path) {
+            try? fm.removeItem(at: oldProvision)
+        }
+    }
+
+    /// profile 列表（导入顺序）：先跑一次迁移；目录被外删的
+    /// profile 自动掉出列表，下次写 index 时顺带清掉残条。
+    static func profiles() -> [EnterpriseCertProfile] {
+        migrateIfNeeded()
+        guard let data = try? Data(contentsOf: indexURL),
+              let all = try? JSONDecoder().decode([EnterpriseCertProfile].self, from: data) else { return [] }
+        return all.filter { FileManager.default.fileExists(atPath: profileDir(for: $0).path) }
+    }
+
+    /// 当前激活 profile：记的 id 找不着（删激活后已回落过、
+    /// 或 index 被外改）就回落到第一个；一个没有就 nil。
+    static func activeProfile() -> EnterpriseCertProfile? {
+        let all = profiles()
+        if let id = activeProfileIDValue, let found = all.first(where: { $0.id == id }) { return found }
+        return all.first
+    }
+
+    static func setActiveProfile(_ profile: EnterpriseCertProfile) {
+        UserDefaults.standard.set(profile.id.uuidString, forKey: activeProfileIDKey)
+        memoryFallback = nil
+        memoryFallbackValid = false
+        memoryFallbackProfileID = nil
+    }
+
+    /// 新建一个 profile（证书库“导入新证书”用）：文件先拷进
+    /// 新目录，名默认取证书名（p12 + 刚填的密码现解），解不开
+    /// 退到描述文件名，再退到“证书 N”；建好就切成激活，密码
+    /// 写进新 profile 的钥匙串 account（空密码就不写，证书组
+    /// 里再填）。配对检查这里不做——没密码时查不出来，签名
+    /// 时 validateForSigning 自会拦对不上的。
+    static func importProfile(p12: URL, provision: URL, p12Password: String) throws -> EnterpriseCertProfile {
+        migrateIfNeeded()
+        let id = UUID()
+        let pdir = profilesDir.appendingPathComponent(id.uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: pdir, withIntermediateDirectories: true)
+            try Data(contentsOf: p12).write(to: pdir.appendingPathComponent("cert.p12"), options: .atomic)
+            try Data(contentsOf: provision).write(to: pdir.appendingPathComponent("profile.mobileprovision"), options: .atomic)
+        } catch {
+            try? FileManager.default.removeItem(at: pdir)
+            throw error
+        }
+        var name = ""
+        if let data = try? Data(contentsOf: pdir.appendingPathComponent("cert.p12")),
+           let certName = certName(p12Data: data, password: p12Password), !certName.isEmpty {
+            name = certName
+        } else if let pname = provisionInfo(at: pdir.appendingPathComponent("profile.mobileprovision"))?.name, !pname.isEmpty {
+            name = pname
+        } else {
+            name = L("证书 %d", profiles().count + 1)
+        }
+        let profile = EnterpriseCertProfile(id: id, name: name)
+        var all = profiles()
+        all.append(profile)
+        saveProfiles(all)
+        UserDefaults.standard.set(id.uuidString, forKey: activeProfileIDKey)
+        memoryFallback = nil
+        memoryFallbackValid = false
+        memoryFallbackProfileID = nil
+        if !p12Password.isEmpty {
+            password = p12Password
+        }
+        return profile
+    }
+
+    /// 删一个 profile：文件目录 + 钥匙串 account + index 条目
+    /// 一起清；删的是激活的那张时，激活回落到剩下第一个，
+    /// 一个不剩就清空激活（证书组回空状态）。
+    static func removeProfile(_ profile: EnterpriseCertProfile) {
+        try? FileManager.default.removeItem(at: profileDir(for: profile))
+        keychainDelete(account: "password-\(profile.id.uuidString)")
+        if memoryFallbackProfileID == profile.id {
+            memoryFallback = nil
+            memoryFallbackValid = false
+            memoryFallbackProfileID = nil
+        }
+        let remaining = profiles().filter { $0.id != profile.id }
+        saveProfiles(remaining)
+        if activeProfileIDValue == profile.id {
+            if let first = remaining.first {
+                UserDefaults.standard.set(first.id.uuidString, forKey: activeProfileIDKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: activeProfileIDKey)
+            }
+        }
+    }
+
+    static func renameProfile(_ profile: EnterpriseCertProfile, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var all = profiles()
+        if let index = all.firstIndex(where: { $0.id == profile.id }) {
+            all[index].name = trimmed
+            saveProfiles(all)
+        }
+    }
+
+    /// 只按给定的 p12 数据 + 密码解证书名，不碰 store 状态：
+    /// 新 profile 导入时定默认名用（那时它还不是激活 profile）。
+    /// identity() 那套的轻量版：只要名头，不要私钥 DER。
+    static func certName(p12Data: Data, password: String) -> String? {
+        var items: CFArray?
+        let options: [String: Any] = [kSecImportExportPassphrase as String: password]
+        guard SecPKCS12Import(p12Data as CFData, options as CFDictionary, &items) == errSecSuccess,
+              let array = items as? [[String: Any]],
+              let rawIdentity = array.first?[kSecImportItemIdentity as String] else { return nil }
+        let identity = rawIdentity as! SecIdentity
+        var certRef: SecCertificate?
+        guard SecIdentityCopyCertificate(identity, &certRef) == errSecSuccess, let cert = certRef else { return nil }
+        let name = SecCertificateCopySubjectSummary(cert) as String?
+        return (name?.isEmpty == false) ? name : nil
+    }
+
+    /// 指定路径的描述文件信息：激活 profile 的 provisionInfo
+    /// 走这条（传 provisionURL），列表行里各 profile 的到期日
+    /// 也走这条（传各 profile 自己的路径），不用切激活。
+    static func provisionInfo(at url: URL) -> ProvisionInfo? {
+        guard let data = try? Data(contentsOf: url),
+              let start = data.range(of: Data("<?xml".utf8)),
+              let endMark = data.range(of: Data("</plist>".utf8)) else { return nil }
+        let xml = data[start.lowerBound..<endMark.upperBound]
+        guard let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil),
+              let dict = plist as? [String: Any] else { return nil }
+        return ProvisionInfo(name: dict["Name"] as? String ?? "",
+                             teamName: dict["TeamName"] as? String ?? "",
+                             teamID: (dict["TeamIdentifier"] as? [String])?.first ?? "",
+                             expiration: dict["ExpirationDate"] as? Date,
+                             uuid: dict["UUID"] as? String ?? "",
+                             provisionedDeviceCount: (dict["ProvisionedDevices"] as? [String])?.count ?? 0,
+                             provisionedDevices: dict["ProvisionedDevices"] as? [String] ?? [])
+    }
+
+    /// 某 profile 的描述文件信息（列表行到期日用）。
+    static func provisionInfo(for profile: EnterpriseCertProfile) -> ProvisionInfo? {
+        provisionInfo(at: profileDir(for: profile).appendingPathComponent("profile.mobileprovision"))
     }
 
     /// 已导入描述文件的信息（名称/团队/到期），证书页展示用。
@@ -143,26 +417,21 @@ enum EnterpriseCertStore {
     }
 
     static var provisionInfo: ProvisionInfo? {
-        guard let data = try? Data(contentsOf: provisionURL),
-              let start = data.range(of: Data("<?xml".utf8)),
-              let endMark = data.range(of: Data("</plist>".utf8)) else { return nil }
-        let xml = data[start.lowerBound..<endMark.upperBound]
-        guard let plist = try? PropertyListSerialization.propertyList(from: xml, format: nil),
-              let dict = plist as? [String: Any] else { return nil }
-        return ProvisionInfo(name: dict["Name"] as? String ?? "",
-                             teamName: dict["TeamName"] as? String ?? "",
-                             teamID: (dict["TeamIdentifier"] as? [String])?.first ?? "",
-                             expiration: dict["ExpirationDate"] as? Date,
-                             uuid: dict["UUID"] as? String ?? "",
-                             provisionedDeviceCount: (dict["ProvisionedDevices"] as? [String])?.count ?? 0,
-                             provisionedDevices: dict["ProvisionedDevices"] as? [String] ?? [])
+        provisionInfo(at: provisionURL)
     }
 
-    /// 删除已导入的证书材料（证书页的「移除证书」）。
+    /// 删除已导入的证书材料（证书页的「移除证书」）：多证书
+    /// 库下只清当前激活 profile（文件 + 密码 + index 条目），
+    /// 激活自动回落到另一张；其余 profile 在证书库列表里各删
+    /// 各的。没有 profile 时走老单证书路径（删顶层文件）。
     static func removeAll() {
-        try? FileManager.default.removeItem(at: p12URL)
-        try? FileManager.default.removeItem(at: provisionURL)
-        password = ""
+        if let active = activeProfile() {
+            removeProfile(active)
+        } else {
+            try? FileManager.default.removeItem(at: p12URL)
+            try? FileManager.default.removeItem(at: provisionURL)
+            password = ""
+        }
     }
 
     /// 用 Security 框架解开 .p12，取出证书与私钥的 DER（私钥是

@@ -3,6 +3,10 @@ import Foundation
 /// Compares this build's version against `latest_version.txt` in the repo and
 /// reveals the Install screen's update banner if that one is newer. Every
 /// failure is silent: it only ever means there's nothing to show.
+/// 发版铁律：每次发版必须同步改 latest_version.txt 到新版本号，
+/// 否则旧版永远不提示、新版误提示（1.5.2 stale 误提示实证：
+/// txt 一度停在 1.5.2，比 0.9.x 全线都“新”，恢复调用前必须先
+/// 把 txt 改回当前版本）。
 @MainActor
 final class UpdateChecker: ObservableObject {
 
