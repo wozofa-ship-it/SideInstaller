@@ -1899,10 +1899,11 @@ struct CertTabView: View {
         case .signAndInstall:
             Task {
                 do {
-                    // 先签好存进「已签名」，再走本机回环安装（起不来
-                    // 时兜底弹框才走配对安装）。回环拉起后没有完成
-                    // 回调，不记完成日志；同步失败（Engine 在跑、
-                    // 回环没起）才由下面这段记一条失败日志。
+                    // 先签好存进「已签名」，再走配对安装（WiFi 下签装
+                    // 直接走通；回环在 0.9.80–0.9.82 上反复弹“无法连接
+                    // localhost”，不再当默认入口）。同步失败（Engine
+                    // 在跑）才由下面这段记一条失败日志；配对跑完由
+                    // onChange 按 finished/lastError 记完成日志。
                     let record = try await CertSigner.signToFile(ipa: url, mods: mods)
                     signedRecords = SignedIPAStore.load()
                     unsignedIPAs = unsignedItems()
@@ -1911,7 +1912,7 @@ struct CertTabView: View {
                         self.localInstall.appendStepLog(L("签名成功：%@", record.appName))
                         self.engineInstallLogAppName = record.appName
                         self.engineInstallLogKind = .signAndInstall
-                        self.startLoopbackInstall(record: record)
+                        self.startEngineInstall(record: record)
                         if let reason = self.enterpriseInstallErrorText {
                             CertSignLogStore.append(CertSignLogEntry(id: UUID(), date: Date(),
                                 appName: record.appName, kind: .signAndInstall, success: false,
@@ -1940,19 +1941,21 @@ struct CertTabView: View {
         }
     }
 
-    /// 已签名行「安装」：默认走本机回环安装（起不来时兜底弹框
-    /// 才走配对安装）。回环没有完成回调，不记完成日志；Engine
-    /// 兜底路跑完仍由 onChange 记一条「仅安装」日志。
+    /// 已签名行「安装」：默认走配对安装（WiFi 下签装直接走通；
+    /// 回环在 0.9.80–0.9.82 上反复弹“无法连接 localhost”，不再
+    /// 当默认入口）。配对跑完由 onChange 记一条「仅安装」日志。
     private func installSigned(_ record: SignedIPARecord) {
         engineInstallLogKind = .installOnly
-        startLoopbackInstall(record: record)
+        startEngineInstall(record: record)
     }
 
-    /// 企业安装默认入口（签名并安装、已签名行安装都走它）：
-    /// 先走本机回环（明文 http://localhost + itms-services，轻松签
-    /// 同款）：签好的包只在本机回环上走一圈，系统安装器直接装，
-    /// 不走配对、不走隧道、不要 WiFi。回环起不来时不静默回落——
-    /// 兜底弹框让用户点“改用配对安装”才走 startEngineInstall；
+    /// 本机回环安装（已不是默认入口）：明文 http://localhost +
+    /// itms-services，轻松签同款；签好的包只在本机回环上走一圈，
+    /// 系统安装器直接装，不走配对、不走隧道、不要 WiFi。
+    /// 0.9.80–0.9.82 上反复弹“无法连接 localhost”，默认入口已改
+    /// 回配对安装；这函数与 otaServer 留着没删，回环以后想用
+    /// 再接回来。回环起不来时不静默回落——兜底弹框让用户点
+    /// “改用配对安装”才走 startEngineInstall；
     /// 回环拉起后装成装不成系统安装器那边才知道，App 内不假报
     /// 成功（不记完成日志、不弹成功框，只记一步日志）。
     /// Engine 在跑时不新起（两路安装撞在一起没好处）。
