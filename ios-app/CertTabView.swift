@@ -2559,7 +2559,7 @@ struct CertTabView: View {
                     }
                     Text(signBusy ? L("签名中…") : (signOnlyFailed ? L("签名失败") : L("签名已完成")))
                         .font(.footnote)
-                        .foregroundStyle(signBusy ? .primary : (signOnlyFailed ? .red : .primary))
+                        .foregroundStyle(signBusy ? Color.primary : (signOnlyFailed ? Color.red : Color.primary))
                 }
                 HStack(spacing: 6) {
                     if signBusy {
@@ -2573,7 +2573,7 @@ struct CertTabView: View {
                     }
                     Text(signBusy ? L("打包中…") : (signOnlyFailed ? L("打包未完成") : L("打包已完成")))
                         .font(.footnote)
-                        .foregroundStyle(signBusy ? .primary : (signOnlyFailed ? .red : .primary))
+                        .foregroundStyle(signBusy ? Color.primary : (signOnlyFailed ? Color.red : Color.primary))
                 }
                 HStack(spacing: 6) {
                     if enterpriseInstallInFlight {
