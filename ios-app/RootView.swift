@@ -621,7 +621,6 @@ struct ToolsView: View {
                             .buttonStyle(.plain, sound: .tick)
                             .cascadeItem(rowIndex(5))
                         }
-                    }
                     } else {
                         NavigationLink {
                             SideBySideView(manager: sideBySideManager)
