@@ -590,6 +590,8 @@ final class SideloadedAppsManager: ObservableObject {
                         try await engine.refreshInstalledApp(named: job.name, ipaPath: job.ipa.path)
                         jobs[index].state = .done
                         refreshed += 1
+                        // 记一笔续签源：删文件时凭它提示“这是某 App 续签用的文件”。
+                        RenewalSourceStore.record(bundleID: job.bundleID, appName: job.name, ipaURL: job.ipa)
                     } catch {
                         let message = Self.text(for: error)
                         jobs[index].state = .failed(message)
@@ -835,6 +837,11 @@ struct AppsView: View {
     @State private var confirmRefresh = false
     /// Shows the "LocalDevVPN isn't installed" prompt with a link to get it.
     @State private var showInstallLOCPrompt = false
+    /// 行图标缓存（已装包名 → 配对 IPA 的图标数据）与已试过的键：
+    /// 文件页同款取法（IPALibrary.iconData 只读 central directory +
+    /// 单个图标条目），没配对 IPA 的行继续用虚线占位。
+    @State private var rowIcons: [String: Data] = [:]
+    @State private var rowIconsTried: Set<String> = []
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -1139,8 +1146,49 @@ struct AppsView: View {
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(5 + idx)
+                    .task(id: rowIconKey(for: status)) { loadRowIcon(for: status) }
                 }
             }
+        }
+    }
+
+    /// 行图标取图键：已装包名 + 配对 IPA 路径——可续签列表变了（刚
+    /// 读完设备、或导入新 IPA）就重取。
+    private func rowIconKey(for status: SideloadedAppStatus) -> String {
+        let ipa = manager.refreshable.first { $0.bundleID == status.app.bundleID }?.ipa.path ?? ""
+        return "\(status.app.bundleID)#\(ipa)"
+    }
+
+    /// 行图标：配对 IPA 的真图放后台取，取到写缓存；没配对 IPA、
+    /// 或 Assets.car 独占图标取不到时，继续用虚线占位，不造假图。
+    private func loadRowIcon(for status: SideloadedAppStatus) {
+        let key = rowIconKey(for: status)
+        guard !rowIconsTried.contains(key) else { return }
+        rowIconsTried.insert(key)
+        guard let ipa = manager.refreshable.first(where: { $0.bundleID == status.app.bundleID })?.ipa else { return }
+        let bundleID = status.app.bundleID
+        Task.detached { [ipa, bundleID] in
+            guard let data = IPALibrary.iconData(at: ipa) else { return }
+            await MainActor.run { rowIcons[bundleID] = data }
+        }
+    }
+
+    /// 行首图标：真图 44×44 圆角填满；没图时虚线占位放同尺寸框里，行高对齐。
+    /// 两路不同 View 类型，函数前必须加 @ViewBuilder（AGENTS.md 血泪）。
+    @ViewBuilder
+    private func rowIcon(for status: SideloadedAppStatus) -> some View {
+        if let data = rowIcons[status.app.bundleID],
+           let uiImage = UIImage(data: data) {
+            Image(uiImage: uiImage)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 44, height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        } else {
+            Image(systemName: "app.dashed")
+                .font(.title3)
+                .foregroundStyle(Theme.brand)
+                .frame(width: 44, height: 44)
         }
     }
 
@@ -1149,9 +1197,7 @@ struct AppsView: View {
         let urgency = ExpiryUrgency.of(profile)
         return PanelCard {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "app.dashed")
-                    .font(.title3)
-                    .foregroundStyle(Theme.brand)
+                rowIcon(for: status)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(status.app.name)
                         .font(.subheadline.weight(.semibold))

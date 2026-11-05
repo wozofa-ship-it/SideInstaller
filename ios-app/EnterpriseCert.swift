@@ -1184,6 +1184,62 @@ enum CertSignLogStore {
     static func clear() { save([]) }
 }
 
+// MARK: - 续签源
+
+/// 一次续签用过的 IPA：删文件时要提示“这是某 App 续签用的文件”，
+/// 凭包名 + 文件路径认。只记“哪次续签用了哪个文件”，不记证书密码等
+/// 敏感信息；重签同一 App 会覆盖旧一条，最多留 100 条。
+struct RenewalSourceEntry: Codable, Identifiable {
+    var id: UUID
+    var date: Date
+    var bundleID: String
+    var appName: String
+    /// 续签当时用的 IPA 在 Documents 里的路径。
+    var ipaPath: String
+    var ipaName: String
+}
+
+/// 续签源清单：存 Application Support，最新在前，最多留 100 条。
+enum RenewalSourceStore {
+    private static var fileURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("RenewalSources.json")
+    }
+
+    static func load() -> [RenewalSourceEntry] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let entries = try? JSONDecoder().decode([RenewalSourceEntry].self, from: data)
+        else { return [] }
+        return entries.sorted { $0.date > $1.date }
+    }
+
+    private static func save(_ entries: [RenewalSourceEntry]) {
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    /// 记一次成功的续签：同一包名只留最新一条。
+    static func record(bundleID: String, appName: String, ipaURL: URL) {
+        var entries = load().filter { $0.bundleID != bundleID }
+        entries.insert(RenewalSourceEntry(id: UUID(), date: Date(), bundleID: bundleID,
+                                          appName: appName, ipaPath: ipaURL.path,
+                                          ipaName: ipaURL.lastPathComponent), at: 0)
+        if entries.count > 100 { entries = Array(entries.prefix(100)) }
+        save(entries)
+    }
+
+    /// 这个文件是不是某 App 续签用的源：路径对上，或包名对上（改名/移
+    /// 过文件夹后路径变了，包名还能认出来），都算。
+    static func source(forFileURL url: URL, bundleID: String?) -> RenewalSourceEntry? {
+        let entries = load()
+        if let hit = entries.first(where: { $0.ipaPath == url.path }) { return hit }
+        guard let bundleID, !bundleID.isEmpty else { return nil }
+        return entries.first { $0.bundleID == bundleID }
+    }
+}
+
 // MARK: - 签名预设
 
 /// 一条签名预设：只存跨 App 通用的项。名字/Bundle ID/版本是

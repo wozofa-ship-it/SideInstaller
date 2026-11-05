@@ -608,7 +608,11 @@ struct FilesTabView: View {
             }
             Button(L("取消"), role: .cancel) { pendingDeleteItem = nil }
         } message: {
-            Text(L("删除后无法恢复"))
+            if let item = pendingDeleteItem, let warning = renewalDeleteWarning(for: item) {
+                Text(warning)
+            } else {
+                Text(L("删除后无法恢复"))
+            }
         }
         // 批量删确认，带数量。
         .alert(L("删除所选 %d 个？", selection.count), isPresented: $pendingDeleteSelection) {
@@ -618,7 +622,11 @@ struct FilesTabView: View {
             }
             Button(L("取消"), role: .cancel) { pendingDeleteSelection = false }
         } message: {
-            Text(L("删除后无法恢复"))
+            if let warning = renewalDeleteWarning(forSelection: selection) {
+                Text(warning)
+            } else {
+                Text(L("删除后无法恢复"))
+            }
         }
         // 点行弹出的底部动作菜单：与长按菜单同一动作集（见 fileActionButtons），
         // 适用性按行类型裁剪；查看文件位置切到该行所在的切栏 + 文件夹
@@ -1165,6 +1173,27 @@ struct FilesTabView: View {
             }
         }
         return !FileManager.default.fileExists(atPath: item.url.path)
+    }
+
+    /// 删文件时的续签源提示：这文件是某 App 续签用过的 IPA，删了它
+    /// 下次就续不了。按路径认，改名/移过文件夹后按包名认（行上已解
+    /// 析的 Bundle ID 优先，取不到就现解析，只读 central directory）。
+    private func renewalDeleteWarning(for item: LocalFileItem) -> String? {
+        guard item.isIPA else { return nil }
+        let info = fileIPAInfo[item.url.path] ?? IPALibrary.appInfo(at: item.url)
+        guard let entry = RenewalSourceStore.source(forFileURL: item.url, bundleID: info?.bundleID) else { return nil }
+        return L("这是 %@ 续签用的文件，删了它下次就续不了，要重新导入 IPA 才能续。删除后无法恢复", entry.appName)
+    }
+
+    /// 批量删里的续签源提示：选中的文件里有续签用过的，就把 App 名列出来。
+    private func renewalDeleteWarning(forSelection selected: Set<String>) -> String? {
+        let names = files.filter { selected.contains($0.id) && $0.isIPA }
+            .compactMap { item -> String? in
+                let info = fileIPAInfo[item.url.path] ?? IPALibrary.appInfo(at: item.url)
+                return RenewalSourceStore.source(forFileURL: item.url, bundleID: info?.bundleID)?.appName
+            }
+        guard !names.isEmpty else { return nil }
+        return L("其中 %@ 是续签用的文件，删了它们下次就续不了，要重新导入 IPA 才能续。删除后无法恢复", names.joined(separator: "、"))
     }
 
     /// 单删：磁盘上确认没了才从数组里去掉它（含文件夹子项），
