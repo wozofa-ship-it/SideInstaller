@@ -132,6 +132,10 @@ struct FilesTabView: View {
     /// 解析一次；键带大小 + 修改时间，文件换了就重解析。
     @State private var fileIPAInfo: [String: IPALibrary.AppInfo] = [:]
     @State private var fileIPAInfoTried: Set<String> = []
+    /// 续签源清单缓存（路径/包名 → 续签用的 App）：行内「续签」角标
+    /// 与详情页同认；进页时读一次，不每行读盘。删文件时的提示走
+    /// RenewalSourceStore.source 现读，不用这份缓存。
+    @State private var renewalSources: [RenewalSourceEntry] = []
     /// 点行弹出的底部动作菜单正在操作的行（nil = 不弹）。
     @State private var actionItem: LocalFileItem?
     /// 待确认删除的单个文件（行菜单/行内按钮/详情页点删除后先弹确认）。
@@ -166,6 +170,35 @@ struct FilesTabView: View {
     private var systemFiles: [LocalFileItem] { files.filter { $0.isSystem } }
     private var totalSize: Int { files.reduce(0) { $0 + $1.size } }
 
+    /// 切栏计数：未签名/已签名 IPA 各多少（搜索不影响切栏总数）。
+    private var unsignedCount: Int { ipas.filter { !$0.isInSignedDir }.count }
+    private var signedCount: Int { ipas.filter { $0.isInSignedDir }.count }
+
+    /// 文件列表排序：默认扫描顺序 / 名称 / 大小（大在前）/ 最新
+    /// （修改时间晚在前）。只改显示顺序，不动磁盘顺序。
+    private enum FileSort: String, CaseIterable {
+        case `default`, name, size, newest
+        var label: String {
+            switch self {
+            case .default: return L("默认")
+            case .name: return L("名称")
+            case .size: return L("大小")
+            case .newest: return L("最新")
+            }
+        }
+    }
+    @AppStorage("CZFFileSort") private var fileSortRaw = FileSort.default.rawValue
+    private var fileSort: FileSort { FileSort(rawValue: fileSortRaw) ?? .default }
+
+    private func sortedFiles(_ items: [LocalFileItem]) -> [LocalFileItem] {
+        switch fileSort {
+        case .default: return items
+        case .name: return items.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .size: return items.sorted { $0.size > $1.size }
+        case .newest: return items.sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
+        }
+    }
+
     /// 切栏是否命中这行 IPA：已签名的判定跟行内「安装」按钮同例
     ///（在 Signed 目录里），跟证书页已签名清单的落点一致。
     private func fileTabMatches(_ item: LocalFileItem) -> Bool {
@@ -177,7 +210,7 @@ struct FilesTabView: View {
 
     /// 切栏 + 搜索过滤后的 IPA 列表（根目录视图用，递归扫描的全量）。
     private var filteredIPAs: [LocalFileItem] {
-        matching(ipas).filter { fileTabMatches($0) }
+        sortedFiles(matching(ipas).filter { fileTabMatches($0) })
     }
 
     /// 当前文件夹视图里切栏过滤后的可见项：未签名 tab 显示未签名 IPA
@@ -198,6 +231,16 @@ struct FilesTabView: View {
             return name
         }
         return (item.name as NSString).deletingPathExtension
+    }
+
+    /// 这行 IPA 是不是某 App 续签用的源（行内角标 + 详情页同认）：
+    /// 路径对上，或包名对上（改名/移过文件夹后路径变了，包名还能认）。
+    /// 认进页时读的缓存清单，不每行读盘。
+    private func renewalSource(for item: LocalFileItem) -> RenewalSourceEntry? {
+        if let hit = renewalSources.first(where: { $0.ipaPath == item.url.path }) { return hit }
+        guard item.isIPA else { return nil }
+        guard let bundleID = fileIPAInfo[item.url.path]?.bundleID, !bundleID.isEmpty else { return nil }
+        return renewalSources.first(where: { $0.bundleID == bundleID })
     }
 
     /// IPA 行第二行（轻松签文件列表同款）：V版本 | 大小 | Bundle ID；
@@ -369,7 +412,7 @@ struct FilesTabView: View {
 
     /// 当前文件夹的直接子项（文件夹 + 文件同一列表，扫描顺序）。
     private var currentDirItems: [LocalFileItem] {
-        matching(files.filter { $0.relativeDir == currentDir })
+        sortedFiles(matching(files.filter { $0.relativeDir == currentDir }))
     }
 
     /// 文件夹的相对路径（进文件夹用）：根目录下的文件夹就是名字，
@@ -503,14 +546,35 @@ struct FilesTabView: View {
                     // 轻松签文件列表式切栏（只过滤 IPA 行）：放搜索框上面，
                     // 跟证书页应用库切栏同例，segmented 样式。
                     Picker("", selection: $fileTab) {
-                        Text(L("未签名")).tag(FileListTab.unsigned)
-                        Text(L("已签名")).tag(FileListTab.signed)
+                        Text(L("未签名 (%d)", unsignedCount)).tag(FileListTab.unsigned)
+                        Text(L("已签名 (%d)", signedCount)).tag(FileListTab.signed)
                     }
                     .pickerStyle(.segmented)
                     // 切栏触感：点切栏、或菜单“查看文件位置”切栏变化时
                     // 各震一次 .light；后者菜单按钮本身不另震，免得一次点按震两次。
                     .onChange(of: fileTab) { _, _ in CZFHaptics.impact(.light) }
                     fileSearchBar
+                    // 排序：只改显示顺序（IPA 列表、文件夹内列表、其他文件
+                    // 组都按同一规则排）；默认保持扫描顺序，不动老习惯。
+                    HStack {
+                        Menu {
+                            ForEach(FileSort.allCases, id: \.self) { option in
+                                Button {
+                                    fileSortRaw = option.rawValue
+                                } label: {
+                                    if fileSort == option {
+                                        Label(option.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(L("排序：%@", fileSort.label), systemImage: "arrow.up.arrow.down")
+                                .font(.footnote.weight(.semibold))
+                        }
+                        Spacer()
+                    }
                     if !currentDir.isEmpty {
                         currentDirBar
                         if currentDirItems.isEmpty {
@@ -531,7 +595,7 @@ struct FilesTabView: View {
                         // 扁平列表（过滤逻辑不动）。
                         ipaList.cascadeItem(2)
                         if fileTab == .unsigned {
-                            let flatFiles = matching(others) + matching(systemFiles)
+                            let flatFiles = sortedFiles(matching(others) + matching(systemFiles))
                             if !flatFiles.isEmpty {
                                 PanelCard {
                                     VStack(alignment: .leading, spacing: 12) {
@@ -563,7 +627,10 @@ struct FilesTabView: View {
             .scrollBounceBehavior(.basedOnSize)
             .background(AppBackground())
         }
-        .onAppear { files = AppFileLibrary.scan() }
+        .onAppear {
+            files = AppFileLibrary.scan()
+            renewalSources = RenewalSourceStore.load()
+        }
         // 配对安装跑完：finished 置位才算成功（取消不算）。只认
         // fileInstallInFlight 期间的变化，ID 线的安装跑完不会误弹
         // 到这里；失败原因快照到页内本地量，不直接绑 engine 的
@@ -668,7 +735,7 @@ struct FilesTabView: View {
             MachOView(url: item.url, fileName: item.name)
         }
         .sheet(item: $detailItem) { item in
-            FileDetailSheet(item: item, onDelete: {
+            FileDetailSheet(item: item, renewalAppName: renewalSource(for: item)?.appName, onDelete: {
                 detailItem = nil
                 pendingDeleteItem = item
             }, onRename: {
@@ -1104,6 +1171,16 @@ struct FilesTabView: View {
                     }
                 }
                 Spacer()
+                if let source = renewalSource(for: item) {
+                    // 续签用的源文件：行内一眼认出，删之前先想想。
+                    Text(L("续签"))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.green, in: Capsule())
+                        .accessibilityLabel(L("续签用的文件：%@", source.appName))
+                }
                 // ⓘ 详情：所有行都有（IPA 行也补上，与非 IPA 行一致）；
                 // 文件夹不再另放 chevron，点行就进文件夹。
                 Button {
@@ -1452,6 +1529,8 @@ private enum FileListTab: Hashable {
 /// 文件夹没有字节大小可言，大小那行显示“共 n 项”。
 private struct FileDetailSheet: View {
     let item: LocalFileItem
+    /// 是续签源时传 App 名（nil = 不是续签用的文件）。
+    var renewalAppName: String? = nil
     var onDelete: () -> Void
     var onRename: () -> Void
     var onMove: () -> Void
@@ -1467,6 +1546,9 @@ private struct FileDetailSheet: View {
                           : ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file))
                 detailRow(L("修改时间"), item.modified?.formatted(date: .abbreviated, time: .standard) ?? L("未知"))
                 detailRow(L("路径"), item.url.path)
+                if let renewalAppName {
+                    detailRow(L("续签用的应用"), renewalAppName)
+                }
                 Section {
                     if !item.isDirectory {
                         ShareLink(item: item.url) {

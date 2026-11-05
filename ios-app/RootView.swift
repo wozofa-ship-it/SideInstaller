@@ -554,155 +554,92 @@ struct ToolsView: View {
     @ObservedObject var sideBySideManager: SideBySideManager
 
     @State private var showSettings = false
-    @AppStorage("CZFToolsGridView") private var toolsGrid = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     header.cascadeItem(0)
-                    // 网格/列表切换：上游的方块网格与 fork 的列表行都留，
-                    // 不重复放两套入口；默认列表（fork 原有样式）。
-                    Picker(selection: $toolsGrid) {
-                        Text(L("列表")).tag(false)
-                        Text(L("网格")).tag(true)
+                    NavigationLink {
+                        SideBySideView(manager: sideBySideManager)
                     } label: {
-                        Text(L("工具显示"))
+                        ToolRow(icon: "square.on.square", color: .purple,
+                                title: L("Side by Side"),
+                                beta: true)
                     }
-                    .pickerStyle(.segmented)
-                    if toolsGrid {
-                        LazyVGrid(columns: Self.columns, spacing: 12) {
-                            NavigationLink {
-                                SideBySideView(manager: sideBySideManager)
-                            } label: {
-                                ToolTile(image: "SideBySideLogo",
-                                         title: L("Side by Side"),
-                                         beta: true)
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(1)
-                            // The Pairing page generates a pairing file on-device, which
-                            // needs iOS 27+. Older iOS imports it on the Install screen.
-                            if Engine.deviceCanSelfPair {
-                                NavigationLink {
-                                    PairingView(manager: pairingManager)
-                                } label: {
-                                    ToolTile(image: "PairingLogo", title: L("Pairing"))
-                                }
-                                .buttonStyle(.plain, sound: .tick)
-                                .cascadeItem(2)
-                            }
-                            NavigationLink {
-                                CertsView(manager: certManager)
-                            } label: {
-                                ToolTile(image: "CertsLogo", title: L("Certificates"))
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(rowIndex(2))
-                            NavigationLink {
-                                EntitlementsView(manager: entitlementsManager)
-                            } label: {
-                                ToolTile(image: "EntitlementsLogo", title: L("Entitlements"))
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(rowIndex(3))
-                            NavigationLink {
-                                LocationView(manager: locationManager)
-                            } label: {
-                                ToolTile(image: "LocationLogo", title: L("Location spoofing"))
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(rowIndex(4))
-                            NavigationLink {
-                                AppsView(manager: appsManager)
-                            } label: {
-                                ToolTile(image: "AppsLogo", title: L("Sideloaded apps"))
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(rowIndex(5))
-                        }
-                    } else {
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(1)
+                    // The Pairing page generates a pairing file on-device, which
+                    // needs iOS 27+. Older iOS imports it on the Install screen.
+                    if Engine.deviceCanSelfPair {
                         NavigationLink {
-                            SideBySideView(manager: sideBySideManager)
+                            PairingView(manager: pairingManager)
                         } label: {
-                            ToolRow(icon: "square.on.square", color: .purple,
-                                    title: L("Side by Side"),
-                                    beta: true)
+                            ToolRow(icon: "link", color: .teal, title: L("Pairing"))
                         }
                         .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(1)
-                        // The Pairing page generates a pairing file on-device, which
-                        // needs iOS 27+. Older iOS imports it on the Install screen.
-                        if Engine.deviceCanSelfPair {
-                            NavigationLink {
-                                PairingView(manager: pairingManager)
-                            } label: {
-                                ToolRow(icon: "link", color: .teal, title: L("Pairing"))
-                            }
-                            .buttonStyle(.plain, sound: .tick)
-                            .cascadeItem(2)
-                        }
-                        NavigationLink {
-                            CertsView(manager: certManager)
-                        } label: {
-                            ToolRow(icon: "checkmark.seal", color: .blue, title: L("Apple ID 证书"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(2))
-                        // 别走错：这里是上游的 Apple ID 证书管理，企业证书
-                        // 在底部第一栏「签名」页，不在这里。
-                        NavigationLink {
-                            EntitlementsView(manager: entitlementsManager)
-                        } label: {
-                            ToolRow(icon: "checklist", color: .orange, title: L("Entitlements"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(3))
-                        NavigationLink {
-                            LocationView(manager: locationManager)
-                        } label: {
-                            ToolRow(icon: "location.fill", color: .green, title: L("Location spoofing"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(4))
-                        NavigationLink {
-                            AppsView(manager: appsManager)
-                        } label: {
-                            ToolRow(icon: "app.badge.clock", color: .red, title: L("Sideloaded apps"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(5))
-                        // 下载独立页（轻松签下载顶级 tab 的等价物）：
-                        // 内容就是设置页下载区（复用 DownloadsManager），
-                        // 只是以前只藏在设置 sheet 里，这里在工具 tab
-                        // 给一个固定入口，不另起顶级 tab（5 tab 已满，
-                        // 第 6 个会被收进 More，反而更难找）。
-                        NavigationLink {
-                            DownloadsListView()
-                        } label: {
-                            ToolRow(icon: "arrow.down.circle", color: .pink, title: L("下载"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(6))
-                        // 设置固定入口（轻松签设置顶级 tab 的等价物）：
-                        // 设置页本就存在，只是以前只在各页 toolbar 里
-                        // 弹 sheet，这里在工具 tab 给一个固定行。
-                        Button {
-                            CZFHaptics.impact()
-                            showSettings = true
-                        } label: {
-                            ToolRow(icon: "gearshape", color: .indigo, title: L("设置"))
-                        }
-                        .buttonStyle(.plain, sound: .tick)
-                        .cascadeItem(rowIndex(7))
+                        .cascadeItem(2)
                     }
+                    NavigationLink {
+                        CertsView(manager: certManager)
+                    } label: {
+                        ToolRow(icon: "checkmark.seal", color: .blue, title: L("Apple ID 证书"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(2))
+                    // 别走错：这里是上游的 Apple ID 证书管理，企业证书
+                    // 在底部第一栏「签名」页，不在这里。
+                    NavigationLink {
+                        EntitlementsView(manager: entitlementsManager)
+                    } label: {
+                        ToolRow(icon: "checklist", color: .orange, title: L("Entitlements"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(3))
+                    NavigationLink {
+                        LocationView(manager: locationManager)
+                    } label: {
+                        ToolRow(icon: "location.fill", color: .green, title: L("Location spoofing"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(4))
+                    NavigationLink {
+                        AppsView(manager: appsManager)
+                    } label: {
+                        ToolRow(icon: "app.badge.clock", color: .red, title: L("Sideloaded apps"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(5))
+                    // 下载独立页（轻松签下载顶级 tab 的等价物）：
+                    // 内容就是设置页下载区（复用 DownloadsManager），
+                    // 只是以前只藏在设置 sheet 里，这里在工具 tab
+                    // 给一个固定入口，不另起顶级 tab（5 tab 已满，
+                    // 第 6 个会被收进 More，反而更难找）。
+                    NavigationLink {
+                        DownloadsListView()
+                    } label: {
+                        ToolRow(icon: "arrow.down.circle", color: .pink, title: L("下载"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(6))
+                    // 设置固定入口（轻松签设置顶级 tab 的等价物）：
+                    // 设置页本就存在，只是以前只在各页 toolbar 里
+                    // 弹 sheet，这里在工具 tab 给一个固定行。
+                    Button {
+                        CZFHaptics.impact()
+                        showSettings = true
+                    } label: {
+                        ToolRow(icon: "gearshape", color: .indigo, title: L("设置"))
+                    }
+                    .buttonStyle(.plain, sound: .tick)
+                    .cascadeItem(rowIndex(7))
                 }
                 // No bottom padding: the tab bar's inset already clears the last
-                // row of tiles, and the extra 20pt would make a page that fits scroll.
+                // row, and the extra 20pt would make a page that fits scroll.
                 .padding([.horizontal, .top], 20)
                 .pageColumn()
             }
-            // Still unless the tiles don't all fit on the screen.
+            // Still unless the rows don't all fit on the screen.
             .scrollBounceBehavior(.basedOnSize)
             // The darker backdrop is set by the tab switch, not by this page
             // appearing, so pushed pages keep the same level.
@@ -712,15 +649,12 @@ struct ToolsView: View {
         }
     }
 
-    /// Two square tiles to a row.
-    private static let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 2)
-
     /// Cascade index for rows below Pairing, shifted by one when that row is shown.
     private func rowIndex(_ position: Int) -> Int {
         Engine.deviceCanSelfPair ? position + 1 : position
     }
 
-    /// Just the title: the tiles below carry the iconography on this page.
+    /// Just the title: the rows below carry the iconography on this page.
     private var header: some View {
         Text(L("Tools"))
             .font(.largeTitle.weight(.bold))
@@ -771,52 +705,3 @@ private struct ToolRow: View {
     }
 }
 
-/// One Tools menu tile: a square with the logo above the name. Pages without
-/// logo art pass an SF Symbol, drawn on the brand gradient at the same size.
-private struct ToolTile: View {
-    var image: String? = nil
-    var icon: String? = nil
-    var title: String
-    /// Shows a Beta badge in the top corner.
-    var beta: Bool = false
-
-    var body: some View {
-        VStack(spacing: 12) {
-            glyph
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Text(title)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .aspectRatio(1, contentMode: .fit)
-        .overlay(alignment: .topTrailing) {
-            if beta {
-                BetaBadge()
-                    .padding(10)
-            }
-        }
-        .cardSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    @ViewBuilder
-    private var glyph: some View {
-        if let image {
-            Image(image)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                Rectangle().fill(Theme.brand)
-                Image(systemName: icon ?? "questionmark")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-}
