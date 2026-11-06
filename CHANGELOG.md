@@ -10,6 +10,17 @@ All notable changes to SideInstaller are documented here.
   for the translation (#111), who's now in About › Special thanks.
 
 ### Changed
+- **Side by Side goes step by step, and installs SideStore and LiveContainer too.** It was one
+  long form that could only put SideInstaller on someone else's iPhone. It now takes one page at
+  a time: what to install, whether you have their iPhone's IP address (optional: without it,
+  their iPhone pairs from its own Settings, on iOS 27), which Apple ID signs it, and getting their
+  iPhone ready, with a summary to check and edit before the install starts. Like iLoader, it
+  installs SideInstaller, SideStore or LiveContainer + SideStore, Stable or Nightly. Whichever it
+  installs gets the pairing file on their iPhone, so it opens ready to use: a SideStore build with
+  its settings, as on the Install tab, and SideInstaller as an imported pairing file, so it no
+  longer needs iOS 27 (from iOS 26.4 up to 27 it still needs one made on a computer). The pairing
+  code, the Trust prompt, what went wrong and the last steps on their iPhone show on the page
+  instead of in popups, and a wrong IP address fails in seconds instead of after a minute.
 - **Your Apple ID session and pairing stay on this iPhone.** SideInstaller's private files (the
   developer token, the signing key, the anisette identity and the pairing files) were included in
   iCloud and computer backups. They're now left out, and the saved Apple ID password is kept in
@@ -26,6 +37,30 @@ All notable changes to SideInstaller are documented here.
   log posted to a GitHub issue could hold them. The log now says only how many bytes were read,
   the device library's protocol messages are left out unless Settings › Activity Log › Verbose
   logging is on, and any long run of numbers is taken out of the log, whatever wrote it.
+- **Side by Side no longer keeps the other person's signing key.** It signed their Apple ID in
+  with your iPhone's own sign-in files, so the private key for the certificate it made stayed on
+  your iPhone after the run. Their Apple ID now signs in from a temporary folder, deleted once
+  the app is set up on their iPhone, when you tap Clear their details or when the Apple ID
+  changes; one left by a run that was cut short goes the next time SideInstaller opens. An Apple
+  ID saved in Settings › Account still signs with your own key. Setting up the same person
+  again, Install another app included, now asks Apple for a new certificate, since the old key is
+  gone, and Apple may send their iPhone a code again.
+- **A pairing that stalls can be cancelled, and gives up by itself.** Once Settings had connected,
+  cancelling a pairing (on the Install tab, the Pairing page or in Side by Side) didn't stop it,
+  and nothing timed it out. If the iPhone then stopped responding, every later try said
+  “Pairing is already in progress” until SideInstaller was closed. Cancelling now ends a pairing
+  at any point. A pairing also gives up if the iPhone connects but doesn't ask for a code within
+  30 seconds, or if the code isn't entered within 5 minutes. An internal error while pairing now
+  shows a message instead of closing SideInstaller.
+- **Two sign-ins no longer share one 2FA code.** The install, Certificates, Entitlements and Side
+  by Side each sign in to Apple on their own, and could do it at the same time: opening
+  Certificates during an install, say. They shared one code prompt, so a code could reach the
+  other sign-in, and the first to finish closed the prompt the other was still waiting on, which
+  then waited forever. Sign-ins now take turns, and each code goes to the sign-in that asked for
+  it. The ones that wait reuse the sign-in that went first, so you usually enter one code. The
+  code prompt now shows which Apple ID it's for.
+- **The number pad comes back after a wrong 2FA code.** The code field emptied for the next try,
+  but the number pad stayed down until you tapped the field.
 
 ## 1.6.5
 

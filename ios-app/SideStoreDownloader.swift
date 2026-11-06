@@ -469,6 +469,12 @@ struct ReleaseCatalog: Codable {
 /// into Documents.
 enum SideStoreDownloader {
 
+    /// Told how much of a release download has arrived (0…1) as it does, for
+    /// a caller that shows it, as Side by Side does. Set for the task that
+    /// downloads (`$reportProgress.withValue`); unset, nothing is reported.
+    /// Called on the download's own queue.
+    @TaskLocal static var reportProgress: (@Sendable (Double) -> Void)?
+
     struct GHAsset: Decodable {
         let name: String
         let browser_download_url: String
@@ -870,7 +876,8 @@ enum SideStoreDownloader {
                               idleTimeout: TimeInterval = 30,
                               log: @escaping (String) -> Void) async throws -> Fetched {
         log("Downloading \(name) …")
-        let download = ResumingDownload(from: url, name: name, idleTimeout: idleTimeout, log: log)
+        let download = ResumingDownload(from: url, name: name, idleTimeout: idleTimeout,
+                                        progress: reportProgress, log: log)
         do {
             let file = try await download.run()
             let tag = download.tag.map { ", release \($0)" } ?? ""
@@ -1282,6 +1289,8 @@ private final class ResumingDownload: NSObject, URLSessionDataDelegate, @uncheck
     /// A transfer that gets no data for this long has stalled, once the file
     /// has started arriving.
     private let idleTimeout: TimeInterval
+    /// Told the fraction that has arrived, once the file's size is known.
+    private let progress: (@Sendable (Double) -> Void)?
     private let log: (String) -> Void
     private let queue: OperationQueue = {
         let queue = OperationQueue()
@@ -1314,10 +1323,12 @@ private final class ResumingDownload: NSObject, URLSessionDataDelegate, @uncheck
     private var writeError: Error?
     private var finish: CheckedContinuation<Error?, Never>?
 
-    init(from start: URL, name: String, idleTimeout: TimeInterval, log: @escaping (String) -> Void) {
+    init(from start: URL, name: String, idleTimeout: TimeInterval,
+         progress: (@Sendable (Double) -> Void)? = nil, log: @escaping (String) -> Void) {
         self.start = start
         self.name = name
         self.idleTimeout = idleTimeout
+        self.progress = progress
         self.log = log
         file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).download")
     }
@@ -1490,6 +1501,9 @@ private final class ResumingDownload: NSObject, URLSessionDataDelegate, @uncheck
         do {
             try output?.write(contentsOf: data)
             written += data.count
+            if let progress, let total, total > 0 {
+                progress(min(1, Double(written) / Double(total)))
+            }
         } catch {
             writeError = error
             dataTask.cancel()
@@ -2268,7 +2282,8 @@ enum PrivateStore {
         peerPairingsFile(prefix: "remote", host: host)
     }
 
-    /// Where Side by Side pairs another device that has no address typed in.
+    /// Where Side by Side pairs another device from its Settings, before it
+    /// knows the address it's reached at.
     /// The pairing reports the address it connected from, and the file then
     /// moves to `peerRemotePairing(host:)`.
     static var unaddressedPeerRemotePairing: URL {
@@ -2297,6 +2312,32 @@ enum PrivateStore {
         let dir = directory.appendingPathComponent("peer-pairings", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    /// A new, empty folder for signing in someone else's Apple ID (Side by
+    /// Side), in the app's temporary folder. isideload keeps that Apple ID's
+    /// signing key and anisette identity in it, apart from `isideload`, which
+    /// holds this iPhone's own. Side by Side deletes it when the session ends.
+    static func newPeerSignInFolder() throws -> URL {
+        forgetEarlierPeerSignIns()
+        let folder = peerSignInsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    /// Deletes the sign-in folders an earlier launch left behind, closed before
+    /// Side by Side could delete them. Runs once per launch, before the first
+    /// new folder is made, so it never deletes one in use.
+    static func forgetEarlierPeerSignIns() {
+        _ = sweptPeerSignIns
+    }
+
+    private static let sweptPeerSignIns: Void = {
+        try? FileManager.default.removeItem(at: peerSignInsDirectory)
+    }()
+
+    private static var peerSignInsDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("peer-sign-ins", isDirectory: true)
     }
 
     /// isideload's `FsStorage` root, created on demand as isideload expects.

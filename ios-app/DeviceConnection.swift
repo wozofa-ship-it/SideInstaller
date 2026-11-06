@@ -572,13 +572,18 @@ final class DeviceConnection {
     /// Blocks while the device shows the Trust prompt. Tries each host in order
     /// (e.g. the VPN peer, then 127.0.0.1) and returns the first record created.
     /// A failure to connect or to pair throws a `LockdownPairError`.
+    ///
+    /// `onConnected` runs once a host has answered, before the `Pair` request:
+    /// from then on the device may show the Trust prompt.
     func lockdownPairRecordDirect(hosts: [String], hostID: String, systemBUID: String,
-                                  hostName: String) throws -> Data {
+                                  hostName: String,
+                                  onConnected: (() -> Void)? = nil) throws -> Data {
         var lastError: Error?
         for host in hosts {
             do {
                 return try pairOverLockdown(host: host, hostID: hostID,
-                                            systemBUID: systemBUID, hostName: hostName)
+                                            systemBUID: systemBUID, hostName: hostName,
+                                            onConnected: onConnected)
             } catch {
                 lastError = error
                 Engine.shared.log("lockdownd at \(host):\(Self.lockdownPort) didn't pair (\(error)).")
@@ -588,7 +593,7 @@ final class DeviceConnection {
     }
 
     private func pairOverLockdown(host: String, hostID: String, systemBUID: String,
-                                  hostName: String) throws -> Data {
+                                  hostName: String, onConnected: (() -> Void)?) throws -> Data {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = Self.lockdownPort.bigEndian
@@ -609,6 +614,7 @@ final class DeviceConnection {
             throw LockdownPairError(stage: .connect, underlying: error)
         }
         guard let device else { throw fail("lockdown socket handle was null") }
+        onConnected?()
 
         // `lockdownd_new` takes ownership of the socket, so it's never freed here.
         var client: OpaquePointer?
@@ -1446,6 +1452,32 @@ final class DeviceConnection {
                       },
                       "afc_rename_path(\(staging) → \(remotePath)) failed")
             return written
+        }
+    }
+
+    /// Writes `data` at `containerPath` (relative to the container root) in
+    /// `bundleID`'s container, anywhere in it rather than only in Documents,
+    /// reads it back to verify, and returns the byte count.
+    @discardableResult
+    func writeFile(intoBundleID bundleID: String, containerPath: String, data: Data) throws -> Int {
+        // Anything outside Documents needs the whole container.
+        let reachingLibrary = !containerPath.hasPrefix("Documents/")
+        return try withAppContainer(bundleID, reachingLibrary: reachingLibrary) { afc in
+            try writeVerified(afc, remotePath: "/\(containerPath)", data: data)
+        }
+    }
+
+    /// Deletes the file at `containerPath` (relative to the container root) in
+    /// `bundleID`'s container. No file there is no error.
+    func removeFile(inBundleID bundleID: String, containerPath: String) throws {
+        let remotePath = "/\(containerPath)"
+        let reachingLibrary = !containerPath.hasPrefix("Documents/")
+        try withAppContainer(bundleID, reachingLibrary: reachingLibrary) { afc in
+            if let error = ffiError(remotePath.withCString { afc_remove_path(afc, $0) },
+                                    "afc_remove_path(\(remotePath)) failed") {
+                // AFC error 106, sub-code 8: ObjectNotFound.
+                guard error.code == 106 && error.subCode == 8 else { throw error }
+            }
         }
     }
 

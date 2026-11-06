@@ -495,6 +495,65 @@ let japaneseStrings: [String: String] = [
     "The device has no provisioning profile for this App ID. The app may already have stopped launching — install it again to fix that.":
         "デバイスにこの App ID 用のプロビジョニングプロファイルがありません。アプリが既に起動できなくなっている可能性があります。再インストールすれば解決します。",
 
+    // MARK: - Side by Side, step by step
+
+    "Needs LocalDevVPN on their iPhone": "相手の iPhone に LocalDevVPN が必要",
+    "Couldn't download %@: %@": "%@ をダウンロードできませんでした：%@",
+    "Their iPhone already has three apps signed with a free Apple ID, the most iOS allows, counting expired ones. They need to delete one, then you can try again.":
+        "相手の iPhone には、無料 Apple ID で署名されたアプリがすでに 3 つあります（期限切れのものも含む）。これが iOS の上限です。1 つ削除してもらってから、もう一度お試しください。",
+    "%@ is on their iPhone, but its pairing file couldn't be added (%@). Run Side by Side again, or import a pairing file in %@.":
+        "%@ は相手の iPhone に入りましたが、ペアリングファイルを追加できませんでした（%@）。Side by Side をもう一度実行するか、%@ でペアリングファイルを読み込んでください。",
+    "How it works": "しくみ",
+    "Pick an app": "アプリを選ぶ",
+    "SideInstaller, SideStore, or LiveContainer with SideStore built in.":
+        "SideInstaller、SideStore、または SideStore 内蔵の LiveContainer。",
+    "Pair their iPhone": "相手の iPhone をペアリング",
+    "Install over Wi-Fi": "Wi-Fi でインストール",
+    "This iPhone signs the app and sends it across. No computer needed.":
+        "この iPhone がアプリに署名して送ります。コンピュータは不要です。",
+    "What you need": "必要なもの",
+    "Both iPhones on the same Wi-Fi network": "同じ Wi-Fi ネットワークにある 2 台の iPhone",
+    "An Apple ID to sign with, ideally theirs": "署名に使う Apple ID（できれば相手のもの）",
+    "Get started": "はじめる",
+    "What should go on their iPhone?": "相手の iPhone に何を入れますか？",
+    "Pick one. You can come back for another one later.": "1 つ選んでください。あとで戻って別のものも入れられます。",
+    "Stable is the release most people use. Nightly is built from the newest code.":
+        "Stable は多くの人が使うリリースです。Nightly は最新のコードからビルドされます。",
+    "Which Apple ID signs it?": "どの Apple ID で署名しますか？",
+    "The app is signed with it, and needs it again every 7 days to keep opening. Use the iPhone owner's.":
+        "アプリはこの Apple ID で署名され、開き続けるには 7 日ごとに再びこの Apple ID が必要です。iPhone の持ち主のものを使ってください。",
+    "Their Apple ID": "相手の Apple ID",
+    "Recommended: they keep their apps signed with it.": "おすすめ：相手がこれでアプリの署名を保てます。",
+    "My Apple ID": "自分の Apple ID",
+    "Only if you'll keep their apps signed yourself: they won't have this Apple ID's password.":
+        "相手のアプリの署名を自分で保ち続ける場合だけ：相手はこの Apple ID のパスワードを知りません。",
+    "Used for this install only, and never saved.": "今回のインストールにだけ使い、保存しません。",
+    "Apple may send a code to their devices, so keep their iPhone close.":
+        "Apple から相手のデバイスにコードが送られることがあります。相手の iPhone を近くに置いてください。",
+    "Get their iPhone ready": "相手の iPhone を準備",
+    "Do this on their iPhone, then start.": "相手の iPhone で次のことを済ませてから開始してください。",
+    "Connect their iPhone to the same Wi-Fi network as this one.":
+        "相手の iPhone をこの iPhone と同じ Wi-Fi ネットワークに接続します。",
+    "Turn on Developer Mode under Settings › Privacy & Security › Developer Mode, and confirm it after the restart.":
+        "「設定 › プライバシーとセキュリティ › デベロッパモード」でデベロッパモードをオンにし、再起動後に確認します。",
+    "Unlock their iPhone and keep it next to this one.": "相手の iPhone のロックを解除し、この iPhone のそばに置きます。",
+    "Installing %@ on their iPhone": "%@ を相手の iPhone にインストール中",
+    "Waiting for their iPhone…": "相手の iPhone を待っています…",
+    "Looking for their iPhone…": "相手の iPhone を探しています…",
+    "Handing over the pairing file…": "ペアリングファイルを渡しています…",
+    "Change details": "内容を変更",
+    "%@ is on their iPhone": "%@ を相手の iPhone に入れました",
+    "Finish on their iPhone": "相手の iPhone で仕上げ",
+    "This iPhone no longer keeps a pairing with theirs.":
+        "この iPhone は相手の iPhone とのペアリングをもう保持していません。",
+    "Install another app": "別のアプリをインストール",
+    "Get LocalDevVPN from the App Store and connect it: SideStore works through it.":
+        "App Store から LocalDevVPN を入手して接続します。SideStore はそれを通じて動作します。",
+    "Open SideStore and sign in with the same Apple ID. Its pairing file is already in place.":
+        "SideStore を開き、同じ Apple ID でサインインします。ペアリングファイルはすでに入っています。",
+    "Open LiveContainer, go to its Settings tab, and tap “Import Certificate From SideStore”.":
+        "LiveContainer を開き、「Settings」タブで「Import Certificate From SideStore」をタップします。",
+
     // MARK: - Settings
 
     "Settings": "設定",
@@ -897,60 +956,38 @@ let japaneseStrings: [String: String] = [
     // The tool's name is left in English everywhere, as SideStore's is.
     "Side by Side": "Side by Side",
     "Set up someone else's iPhone": "他の人の iPhone をセットアップ",
-    "Steps": "手順",
     "Same Wi-Fi network": "同じ Wi-Fi ネットワーク",
-    "Their iPhone needs iOS %@ — SideInstaller pairs itself once it's installed, and nothing older can.":
-        "相手の iPhone には iOS %@ が必要です。インストール後、SideInstaller は自分でペアリングしますが、それより古いバージョンではできません。",
-    "Their iPhone": "相手の iPhone",
-    "This iPhone is %@, so theirs will look similar.": "この iPhone は %@ です。相手のアドレスもこれに近い形になります。",
-    "IP address (optional)": "IP アドレス（任意）",
-    "Optional: leave it empty, and it fills in when their iPhone pairs.":
-        "任意：空欄のままにすると、相手の iPhone がペアリングしたときに自動で入力されます。",
-    "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
-        "相手の iPhone で「設定」>「Wi-Fi」>ネットワーク横の ⓘ >「IP アドレス」の順に開きます。",
-    "“%@” isn't an IPv4 address. It should look like 192.168.1.42.":
-        "「%@」は IPv4 アドレスではありません。192.168.1.42 のような形式で入力してください。",
-    "%@ is an address this iPhone already holds. Side by Side installs onto someone else's iPhone — use theirs. To install on this one, use the Install tab.":
-        "%@ はこの iPhone 自身のアドレスです。Side by Side は他の人の iPhone にインストールするための機能なので、相手のアドレスを入力してください。この iPhone にインストールするには「インストール」タブを使用してください。",
     "The iPhone that paired was this one. Pair from their iPhone's Settings instead. To install on this iPhone, use the Install tab.":
         "ペアリングしたのはこの iPhone でした。相手の iPhone の「設定」からペアリングしてください。この iPhone にインストールするには「インストール」タブを使用してください。",
     "Wi-Fi is off. Both iPhones have to be on the same Wi-Fi network for this to work.":
         "Wi-Fi がオフになっています。この機能を使うには、両方の iPhone が同じ Wi-Fi ネットワークに接続されている必要があります。",
     "Pair with their iPhone": "相手の iPhone とペアリング",
     "No pair record for their iPhone.": "相手の iPhone のペアリングレコードがありません。",
-    "The link to their iPhone dropped — start again.": "相手の iPhone との接続が切断されました。最初からやり直してください。",
-    "Sign in to their Apple ID": "相手の Apple ID でサインイン",
+    "The link to their iPhone dropped. Start again.": "相手の iPhone との接続が切断されました。最初からやり直してください。",
     "Apple ID to sign with": "署名に使用する Apple ID",
     "Enter the Apple ID to sign with, and its password.": "署名に使用する Apple ID とそのパスワードを入力してください。",
-    "Tip: Use the iPhone/iPad owner's Apple account credentials":
-        "ヒント：その iPhone/iPad の持ち主の Apple アカウントの認証情報を使ってください",
-    "Use my saved Apple ID instead": "保存済みの自分の Apple ID を使用",
     "Clear their details": "入力した情報を消去",
     "This iPhone is still paired with theirs. Clearing forgets it.":
         "この iPhone はまだ相手の iPhone とペアリングされています。消去するとこのペアリングも削除されます。",
-    "Download SideInstaller": "SideInstaller をダウンロード",
     "Couldn't download the latest SideInstaller release: %@": "SideInstaller の最新リリースをダウンロードできませんでした：%@",
-    "The release download wasn't an IPA. GitHub may be returning an error page — try again in a minute.":
+    "The release download wasn't an IPA. GitHub may be returning an error page, so try again in a minute.":
         "ダウンロードされたファイルが IPA ではありませんでした。GitHub がエラーページを返している可能性があります。しばらくしてからもう一度お試しください。",
     "No SideInstaller IPA downloaded.": "SideInstaller の IPA がダウンロードされていません。",
     "Start the install": "インストールを開始",
     "Install on their iPhone": "相手の iPhone にインストール",
-    "Install again": "もう一度インストール",
     "%d%% downloaded": "%d%% ダウンロード済み",
     "%d%% uploaded": "%d%% アップロード済み",
     "Apple wouldn't register their iPhone with this Apple ID's developer team, so it won't issue a provisioning profile. %@":
         "Apple がこの Apple ID の開発者チームに相手の iPhone を登録できなかったため、プロビジョニングプロファイルが発行されません。%@",
-    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). One has to be revoked first — with the Certificates tool if this is the Apple ID saved in Settings › Account, and at developer.apple.com signed in as it otherwise.":
+    "Apple won't issue a signing certificate for this Apple ID: it reports that one already exists (error 7460). One has to be revoked first. Use the Certificates tool if this is the Apple ID saved in Settings › Account, or developer.apple.com signed in as it otherwise.":
         "Apple がこの Apple ID の署名証明書を発行しません。すでに証明書が存在すると報告されています（エラー 7460）。まず既存の証明書を失効させる必要があります。「設定」>「アカウント」に保存されている Apple ID の場合は「証明書」ツールで、それ以外の場合は developer.apple.com にその Apple ID でサインインして失効させてください。",
-    "Last step: they trust %@": "最後の手順：相手が %@ を信頼します",
-    "Waiting for them to tap Trust…": "相手が「信頼」をタップするのを待っています…",
     "Waiting for them to pair in Settings…":
         "相手が「設定」でペアリングするのを待っています…",
     "Waiting for them to enter the code…":
         "相手がコードを入力するのを待っています…",
     "Pair their iPhone in Settings":
         "「設定」で相手の iPhone をペアリング",
-    "Their iPhone won't ask by itself — pairing starts from its Settings.":
+    "Their iPhone won't ask by itself. Pairing starts from its Settings.":
         "相手の iPhone には何も表示されません。ペアリングはその iPhone の「設定」から始めます。",
     "On their iPhone, open Settings › Privacy & Security › Developer Mode.":
         "相手の iPhone で「設定 › プライバシーとセキュリティ › デベロッパモード」を開いてください。",
@@ -962,23 +999,20 @@ let japaneseStrings: [String: String] = [
         "ここに表示されるコードを、相手の iPhone のダイアログに入力してください。",
     "Type this into the prompt on their iPhone.":
         "この番号を相手の iPhone のダイアログに入力してください。",
-    "They tapped “Don't Trust” on their iPhone. Start again, and have them tap Trust.":
-        "相手が iPhone で「信頼しない」をタップしました。最初からやり直し、「信頼」をタップしてもらってください。",
-    "SideInstaller is already waiting for an iPhone to pair with it — from the Install tab, the Pairing page, or an earlier attempt here. Finish that pairing, or close and reopen SideInstaller, then try again.":
+    "SideInstaller is already waiting for an iPhone to pair with it, from the Install tab, the Pairing page, or an earlier attempt here. Finish that pairing, or close and reopen SideInstaller, then try again.":
         "SideInstaller はすでに iPhone とのペアリングを待っています（「インストール」タブ、「ペアリング」画面、またはここでの前回の試行によるもの）。そのペアリングを完了するか、SideInstaller を閉じて開き直してから、もう一度お試しください。",
     "Pairing with their iPhone didn't finish: %@":
         "相手の iPhone とのペアリングが完了しませんでした：%@",
     "Their iPhone at %@ refused the connection. It only accepts one while Developer Mode is on, and iOS asks to confirm Developer Mode again after every restart: on their iPhone, turn it on under Settings › Privacy & Security › Developer Mode, then try again.":
         "%@ の相手の iPhone が接続を拒否しました。デベロッパモードが有効なときだけ接続を受け付け、再起動のたびに iOS が確認を求めます。相手の iPhone で「設定 › プライバシーとセキュリティ › デベロッパモード」を有効にしてから、もう一度お試しください。",
-    "Couldn't reach their iPhone at %@. Check the address (Settings › Wi-Fi › ⓘ on their iPhone), that both iPhones are on the same Wi-Fi network, and that Local Network is on for SideInstaller in this iPhone's Settings. Guest and public networks often keep devices from reaching each other.":
-        "%@ の相手の iPhone に接続できませんでした。アドレス（相手の iPhone の「設定」>「Wi-Fi」> ⓘ）、両方の iPhone が同じ Wi-Fi ネットワークに接続されていること、この iPhone の「設定」で SideInstaller のローカルネットワークがオンになっていることを確認してください。ゲストネットワークや公共のネットワークでは、デバイス同士の通信が遮断されることがよくあります。",
+    "Couldn't reach their iPhone at %@. Check that both iPhones are on the same Wi-Fi network, and that Local Network is on for SideInstaller in this iPhone's Settings. Guest and public networks often keep devices from reaching each other.":
+        "%@ の相手の iPhone に接続できませんでした。両方の iPhone が同じ Wi-Fi ネットワークに接続されていること、この iPhone の「設定」で SideInstaller のローカルネットワークがオンになっていることを確認してください。ゲストネットワークや公共のネットワークでは、デバイス同士の通信が遮断されることがよくあります。",
     "The link to their iPhone didn't come up: %@":
         "相手の iPhone との接続を確立できませんでした：%@",
     "On their iPhone: Settings › General › VPN & Device Management.":
         "相手の iPhone で「設定」>「一般」>「VPN とデバイス管理」を開きます。",
     "Tap the Apple ID under “Developer App”, then tap Trust.":
         "「デベロッパ App」の下にある Apple ID をタップし、「信頼」をタップします。",
-    "Open it from their Home Screen — they're set up.": "あとはホーム画面から開くだけで、セットアップは完了です。",
 
     // MARK: - About
 
@@ -1176,4 +1210,44 @@ let japaneseStrings: [String: String] = [
         "非公式のコピーを使用しますか？",
     "If this copy was changed, it can send your Apple ID and password to someone else. Continue only if you trust where it came from.":
         "このコピーが改変されている場合、Apple ID とパスワードが第三者に送信される可能性があります。入手元を信頼できる場合のみ続行してください。",
+
+    // MARK: - Side by Side: their address, and the pairing file SideInstaller gets
+
+    "Couldn't reach their iPhone at %@. Check the address (Settings › Wi-Fi › ⓘ on their iPhone), that both iPhones are on the same Wi-Fi network, and that Local Network is on for SideInstaller in this iPhone's Settings. Guest and public networks often keep devices from reaching each other.":
+        "%@ の相手の iPhone に接続できませんでした。アドレス（相手の iPhone の「設定」>「Wi-Fi」> ⓘ）、両方の iPhone が同じ Wi-Fi ネットワークに接続されていること、この iPhone の「設定」で SideInstaller のローカルネットワークがオンになっていることを確認してください。ゲストネットワークや公共のネットワークでは、デバイス同士の通信が遮断されることがよくあります。",
+    "Their iPhone": "相手の iPhone",
+    "They tapped “Don't Trust” on their iPhone. Start again, and have them tap Trust.":
+        "相手が iPhone で「信頼しない」をタップしました。最初からやり直し、「信頼」をタップしてもらってください。",
+    "Pairs from its Settings": "相手の「設定」からペアリング",
+    "Waiting for them to tap Trust…": "相手が「信頼」をタップするのを待っています…",
+    "Tap Trust on their iPhone": "相手の iPhone で「信頼」をタップ",
+    "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
+        "相手の iPhone で「設定」>「Wi-Fi」>ネットワーク横の ⓘ >「IP アドレス」の順に開きます。",
+    "Unlock their iPhone, then tap Trust in the prompt that comes up.":
+        "相手の iPhone のロックを解除し、表示される確認で「信頼」をタップしてください。",
+    "This iPhone is %@, so theirs will look similar.": "この iPhone は %@ です。相手のアドレスもこれに近い形になります。",
+    "“%@” isn't an IPv4 address. It should look like 192.168.1.42.":
+        "「%@」は IPv4 アドレスではありません。192.168.1.42 のような形式で入力してください。",
+    "Do you have the device's IP?": "相手のデバイスの IP アドレスはわかりますか？",
+    "Optional": "任意",
+    "SideInstaller asks their iPhone to pair directly. Needed below iOS 27.":
+        "SideInstaller が相手の iPhone に直接ペアリングを求めます。iOS 27 より前では必要です。",
+    "Their iPhone pairs from its own Settings, which needs iOS 27.":
+        "相手の iPhone が自分の「設定」からペアリングします。iOS 27 が必要です。",
+    "IP address": "IP アドレス",
+    "On iOS 27 they type in a code this iPhone shows. On older iOS, they tap Trust.":
+        "iOS 27 では、この iPhone に表示されるコードを相手が入力します。それより前の iOS では「信頼」をタップします。",
+    "Their iPhone unlocked and nearby": "ロックを解除して近くに置いた相手の iPhone",
+    "Below iOS 27, their iPhone's IP address": "iOS 27 より前の場合は、相手の iPhone の IP アドレス",
+    "Their iPhone runs iOS %@. From iOS 26.4 on, SideInstaller can't use the pairing their iPhone gives over Wi-Fi, so it needs a pairing file made on a computer.":
+        "相手の iPhone は iOS %@ です。iOS 26.4 以降では、相手の iPhone が Wi-Fi 経由で渡すペアリングを SideInstaller は使えないため、コンピュータで作ったペアリングファイルが必要です。",
+    "Get LocalDevVPN from the App Store and connect it: SideInstaller works through it.":
+        "App Store から LocalDevVPN を入手して接続します。SideInstaller はそれを通じて動作します。",
+    "Open SideInstaller. Its pairing file is already in place.": "SideInstaller を開きます。ペアリングファイルはすでに入っています。",
+    "Open SideInstaller and import a pairing file made on a computer.":
+        "SideInstaller を開き、コンピュータで作ったペアリングファイルを読み込みます。",
+    "%@ is an address this iPhone already holds. Side by Side installs onto someone else's iPhone, so use theirs. To install on this one, use the Install tab.":
+        "%@ はこの iPhone 自身のアドレスです。Side by Side は他の人の iPhone にインストールするための機能なので、相手のアドレスを入力してください。この iPhone にインストールするには「インストール」タブを使用してください。",
+    "Their iPhone runs iOS %@. From iOS 26.4 on, %@ can't use the pairing their iPhone gives over Wi-Fi. iOS 27 pairs from its own Settings instead, which works: update their iPhone, then try again and answer No when asked for its IP.":
+        "相手の iPhone は iOS %@ です。iOS 26.4 以降では、相手の iPhone が Wi-Fi 経由で渡すペアリングを %@ は使えません。iOS 27 なら自分の「設定」からペアリングするので動作します。相手の iPhone をアップデートしてからもう一度お試しください。IP を聞かれたら「いいえ」を選びます。",
 ]

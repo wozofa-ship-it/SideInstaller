@@ -405,6 +405,123 @@ instructions, Cancel ending the host, and a second run starting cleanly. The PIN
 exchange and the tunnel need a second iPhone; the reporter ran the same mechanism
 (pairable host → RPPairing tunnel → RSD → install) end to end on two iOS 27 iPhones.
 
+#### Side by Side, step by step: SideStore and LiveContainer too
+
+Side by Side is a wizard (`SideBySideManager.Stage`): a welcome, four numbered pages (what to
+install, whether they have their iPhone's IP address, the Apple ID, getting their iPhone ready,
+with an editable summary), then the run and its outcome on the same page. Pages slide in the
+direction of travel
+(`movingForward` is published a beat before `stage`, so the leaving page is drawn with it). The
+pairing code, the Trust prompt, errors and the last steps are inline, so `RootView` no longer
+stacks Side by Side popups. The page keeps the screen awake while a run goes.
+
+It installs `SideBySideApp`: SideInstaller (its latest release, as before), or SideStore /
+LiveContainer + SideStore, downloaded exactly as the Install tab does
+(`SideStoreDownloader.downloadLatest`, shared Documents copy, imported IPAs used as they are;
+`$reportProgress` reports the download's fraction). Every app gets a `setUp` step that hands it
+the pair record the run connected with (XML, UDID stamped into a lockdown record):
+
+- **SideStore builds** get what `Engine.performWritePairing` writes: `ALTPairingFile`, the split
+  files and `isPairingReset`/`activePairingProtocol`, the anisette settings, and `Account.sideconf`.
+- **SideInstaller** (2026-11-06, user's request) gets it as an imported pairing file, as
+  `Engine.importPairingFile` leaves one: the record at
+  `Library/Application Support/rp_pairing_file.plist` (`PrivateStore.pairingFile`, written with
+  `house_arrest_vend_container`, `DeviceConnection.writeFile(intoBundleID:containerPath:data:)`),
+  `combined_pairing_file.plist` deleted, and `importedPairingFileName` = `SideBySide.plist` in
+  `Library/Preferences/<bundle id>.plist`. Release 1.6.5 reads the same paths and key. Not
+  Documents: `PrivateStore.migrate()` moves a Documents copy in only when Application Support has
+  none, and deletes it otherwise, so a reinstall would keep the old file. The mark also makes it
+  ask for Local Network before connecting on iOS 27 (`ensureLocalNetworkForImportedPairing`), and
+  it connects with the file without pairing itself, so the "Needs iOS 27" label is gone: it works
+  wherever the record does (below 26.4 with a lockdown record, on 27 with an RPPairing one). On
+  26.4 to 26.x a lockdown-only record can't get through LocalDevVPN, so SideInstaller is installed
+  without it (`pairingLeftOutOn`) and the last page asks for a computer-made file.
+- **Each record lives on in an app on their iPhone**, so each pairing gets an identity of its
+  own: a fresh UUID identifier for Remote Pairing (`pairPeer(outPath:identifier:)`, always into a
+  fresh `remote-new.plist`, since an existing file lends its identifier) and a fresh HostID for
+  the lockdown `Pair` (SystemBUID stays this install's). With a shared one, a later Side by Side
+  pairing of the same iPhone would replace the record and break the file an app holds. This
+  iPhone still forgets its copy once the run succeeds.
+- **No certificate for an Apple ID saved on this iPhone.** `Account.sideconf` carries the
+  certificate's private key; handing the user's own over would leave it on someone else's iPhone.
+  Their SideStore then asks to resign itself on first sign-in.
+- **The IP address is a Yes/No question** ("Do you have the device's IP?", Optional; the field
+  shows under Yes). Without it the run pairs from their Settings, which only iOS 27 offers; with
+  it, lockdown `Pair` with a Trust prompt, which is how iPhones below 27 pair. For a "No" run,
+  the address their iPhone was reached at stays in memory (`pairedAddress`): a retry probes it
+  (6 s, port 62078) and reuses the record saved for it, and silence or a record that no longer
+  opens a link falls back to pairing from Settings again. A typed address is corrected to the one
+  their iPhone paired from.
+- **Lockdown-only on 26.4+:** a SideStore build can't use a lockdown record through LocalDevVPN
+  from 26.4 on (see below), so `checkCompatibility` stops before anything is signed; SideInstaller
+  goes on without the record (above).
+- **A typed address is probed first** (`NetworkStatus.probeConnect`, 6 s, port 62078): silence
+  fails at once with the unreachable advice instead of after the system's ~75 s connect timeout,
+  and a refusal goes straight to Remote Pairing. The Trust card only shows once lockdownd has
+  answered (`lockdownPairRecordDirect(onConnected:)`), after 1.2 s, so a lockdownd that resets the
+  connection at once (iOS 27) never flashes it.
+- The step 1 app cards have no description lines, and the Side by Side copy, its translations
+  and its log lines use no dashes (hyphens inside words such as Wi-Fi stay), at the user's request
+  (2026-11-06).
+- A blocking call that ends in an error after Cancel counts as the cancel.
+
+Verified in the iPhone 17e simulator (iOS 27.2): every page and run state, English, Italian and
+Japanese; a real run against 192.0.2.1 (fails in ~6 s; Try again and Change details); a real
+Remote Pairing wait with the per-run identifier seen in the advertisement from the Mac, then
+Cancel. **Not run on a second iPhone**: the pairing itself, sign-in, install and the SideStore
+hand-off on their side.
+
+#### Side by Side: someone else's Apple ID signs in from a temporary folder
+
+isideload's `FsStorage` folder holds the signing key (`<sha256(email)>/key`) and
+the anisette identities (`anisette_state*`, `anisette_slots.json`). Side by Side
+used to sign the other person in from `PrivateStore.isideload`, this iPhone's own
+folder, so their private key stayed here after the run, able to sign as them with
+the certificate it made. Now an Apple ID that isn't saved in Settings › Account
+signs in from `tmp/peer-sign-ins/<UUID>/` (`PrivateStore.newPeerSignInFolder`).
+`SideBySideManager.signOut` deletes it with the session: when the Apple ID
+changes, at the end of a successful run (`finishSuccess` signs out now) and on
+Clear their details. Folders left by a launch that ended mid-run go when the next
+launch creates the manager (`RootView`'s `@StateObject`). A failed or cancelled
+run keeps both, so a retry signs with the same key and finds the certificate it
+made.
+
+- **The key is needed until the run ends, not just until the install.** `setUp`
+  builds SideStore's `Account.sideconf` from it (`si_account_config` reads the
+  session's `storage_dir`), so the folder goes in `finishSuccess`, after `setUp`;
+  the deletion is queued on `signQueue`, behind anything still signing. The
+  signed `.app` isn't in the folder: isideload unpacks it into
+  `tmp/<name>_extracted`.
+- **Install another app signs in again.** The finished run signed out, so someone
+  else's Apple ID gets a new folder: a new anisette identity, so Apple may ask
+  their iPhone for a code again, and a new certificate. Keeping the session until
+  Done would save both, but the key would then stay on this iPhone for as long as
+  the done page is left open, and Done is easy to skip. The run already forgets
+  the pairing at the same point, so Install another app pairs again anyway.
+- **A saved Apple ID still uses `PrivateStore.isideload`**, so "My Apple ID" keeps
+  reusing this iPhone's own key and certificate instead of minting a certificate
+  for a key that is thrown away. It gets no `Account.sideconf` (see above).
+- **Each new session mints a certificate on their account**, since the key that
+  matched the last one is gone. A free account has three; when they're taken, the
+  run stops with 7460 (`MaxCertsBehavior::Error`, nothing is revoked) until one is
+  revoked. Never revoke the run's certificate at the end: the app just installed
+  on their iPhone is signed with it, and their SideStore was handed it.
+- **The server it signed in through doesn't become the Auto pick.**
+  `anisetteSignedIn` moves Auto to a server because it keeps this iPhone's
+  identity and the saved token with it; a temporary folder's identity is thrown
+  away, so only the server's recent failure is cleared.
+
+Keys earlier versions left in `isideload` stay: nothing tells them apart from
+the folders of Apple IDs removed from Settings › Account, whose keys still match
+certificates.
+
+Checked in the iPhone 17e simulator (iOS 27.2) with a hook in a scratch copy and
+no anisette server, so nothing reached Apple: the real sign-in step making,
+reusing and replacing the folder, `start()` with another Apple ID, `finishSuccess`,
+Install another app, Clear, a saved Apple ID signing in from `isideload`, `deinit`,
+and the launch sweep. Not run with a real Apple ID or a second iPhone, so a real
+key and the SideStore certificate hand-off before the deletion are unchecked.
+
 #### The pairing Live Activity
 
 Pairing this iPhone means typing a code SideInstaller shows into a prompt in
