@@ -9,6 +9,24 @@ All notable changes to SideInstaller are documented here.
   with your iPhone set to Turkish. Thanks to [Mr3242-Scripter](https://github.com/Mr3242-Scripter)
   for the translation (#111), who's now in About › Special thanks.
 
+### Changed
+- **Your Apple ID session and pairing stay on this iPhone.** SideInstaller's private files (the
+  developer token, the signing key, the anisette identity and the pairing files) were included in
+  iCloud and computer backups. They're now left out, and the saved Apple ID password is kept in
+  the Keychain for this iPhone only, so a backup can't carry it to another device; passwords saved
+  earlier move over the next time SideInstaller opens. After restoring from a backup, expect to
+  sign in to Apple and pair again.
+
+### Fixed
+- **Keys and passwords stay out of the activity log.** SideInstaller reads back each file it
+  hands SideStore, LiveContainer or Madeira, to check it arrived, and the device library logged
+  what it read byte by byte: the pairing file with its private keys, SideStore's
+  `Account.sideconf` (the signing certificate's private key, its password and the anisette
+  identity) and Madeira's sign-in. Copying the log and Report a problem took them along, so a
+  log posted to a GitHub issue could hold them. The log now says only how many bytes were read,
+  the device library's protocol messages are left out unless Settings › Activity Log › Verbose
+  logging is on, and any long run of numbers is taken out of the log, whatever wrote it.
+
 ## 1.6.5
 
 ### Added

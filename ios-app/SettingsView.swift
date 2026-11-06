@@ -452,8 +452,14 @@ struct SettingsView: View {
                 }
             }
             .font(.subheadline)
+            // 上游 1ae5489 的 Verbose logging 开关（只拿开关 + 下面的
+            // footer 说明）；“Report a problem”按钮不搬回，仍留
+            // AboutView（fork 2026-11-05 的位置），用户 2026-11-06 批准。
+            Toggle(L("Verbose logging"), isOn: $engine.verboseLogging)
         } header: {
             Text(L("Activity Log (%d)", engine.lines.count))
+        } footer: {
+            Text(L("Adds the messages exchanged with iOS to the log, for tracking down a connection problem. Leave it off otherwise, as they quickly fill the log."))
         }
     }
 }
