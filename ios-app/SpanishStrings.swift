@@ -586,23 +586,10 @@ let spanishStrings: [String: String] = [
         "Su iPhone ya tiene tres apps firmadas con un Apple ID gratuito, el máximo que permite iOS, contando las caducadas. Tienen que borrar una y luego puedes volver a intentarlo.",
     "%@ is on their iPhone, but its pairing file couldn't be added (%@). Run Side by Side again, or import a pairing file in %@.":
         "%@ está en su iPhone, pero no se pudo añadir su archivo de emparejamiento (%@). Ejecuta Side by Side otra vez o importa un archivo de emparejamiento en %@.",
-    "How it works": "Cómo funciona",
-    "Pick an app": "Elige una app",
-    "SideInstaller, SideStore, or LiveContainer with SideStore built in.":
-        "SideInstaller, SideStore o LiveContainer con SideStore integrado.",
-    "Pair their iPhone": "Empareja su iPhone",
-    "Install over Wi-Fi": "Instala por Wi-Fi",
-    "This iPhone signs the app and sends it across. No computer needed.":
-        "Este iPhone firma la app y se la envía. No hace falta un ordenador.",
-    "What you need": "Qué necesitas",
-    "Both iPhones on the same Wi-Fi network": "Los dos iPhone en la misma red Wi-Fi",
-    "An Apple ID to sign with, ideally theirs": "Un Apple ID para firmar, mejor si es el suyo",
     "Get started": "Empezar",
     "What should go on their iPhone?": "¿Qué quieres instalar en su iPhone?",
     "Pick one. You can come back for another one later.":
         "Elige una. Puedes volver por otra más tarde.",
-    "Stable is the release most people use. Nightly is built from the newest code.":
-        "Stable es la versión que usa la mayoría. Nightly se compila con el código más reciente.",
     "Which Apple ID signs it?": "¿Qué Apple ID la firma?",
     "The app is signed with it, and needs it again every 7 days to keep opening. Use the iPhone owner's.":
         "La app se firma con él y lo necesita de nuevo cada 7 días para seguir abriéndose. Usa el del propietario del iPhone.",
@@ -1081,6 +1068,8 @@ let spanishStrings: [String: String] = [
         "El emparejamiento, el túnel y la instalación en sí. De jkcoxson, MIT.",
     "Apple ID sign in, certificates and signing on the device. By nab138, MIT.":
         "Inicio de sesión con Apple ID, certificados y firma en el dispositivo. De nab138, MIT.",
+    "The code signer isideload uses for each app. By Dadoum, LGPL-2.1.":
+        "El firmador de código que isideload usa para cada app. De Dadoum, LGPL-2.1.",
     "The sideloading app this installs for you.":
         "La app de sideloading que esta instala por ti.",
     "Runs sideloaded apps without spending an app slot on each one.":
@@ -1268,10 +1257,6 @@ let spanishStrings: [String: String] = [
     "Their iPhone pairs from its own Settings, which needs iOS 27.":
         "Su iPhone se empareja desde sus propios Ajustes, lo que requiere iOS 27.",
     "IP address": "Dirección IP",
-    "On iOS 27 they type in a code this iPhone shows. On older iOS, they tap Trust.":
-        "En iOS 27 escriben un código que muestra este iPhone. En versiones anteriores, tocan Confiar.",
-    "Their iPhone unlocked and nearby": "Su iPhone desbloqueado y cerca",
-    "Below iOS 27, their iPhone's IP address": "Por debajo de iOS 27, la dirección IP de su iPhone",
     "Their iPhone runs iOS %@. From iOS 26.4 on, SideInstaller can't use the pairing their iPhone gives over Wi-Fi, so it needs a pairing file made on a computer.":
         "Su iPhone tiene iOS %@. Desde iOS 26.4, SideInstaller no puede usar el emparejamiento que su iPhone da por Wi-Fi, así que necesita un archivo de emparejamiento hecho en un ordenador.",
     "Get LocalDevVPN from the App Store and connect it: SideInstaller works through it.":

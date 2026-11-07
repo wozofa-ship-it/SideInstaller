@@ -940,6 +940,8 @@ let turkishStrings: [String: String] = [
         "Eşleme, tünel ve yüklemenin kendisi. jkcoxson, MIT.",
     "Apple ID sign in, certificates and signing on the device. By nab138, MIT.":
         "Apple kimliği oturum açma, sertifikalar ve cihazda imzalama. nab138, MIT.",
+    "The code signer isideload uses for each app. By Dadoum, LGPL-2.1.":
+        "isideload’un her uygulama için kullandığı kod imzalayıcı. Dadoum, LGPL-2.1.",
     "The sideloading app this installs for you.": "Senin için yüklediği yan yükleme uygulaması.",
     "Runs sideloaded apps without spending an app slot on each one.":
         "Yan yüklenen uygulamaları her biri için uygulama yuvası harcamadan çalıştırır.",
@@ -1114,10 +1116,6 @@ let turkishStrings: [String: String] = [
     "Their iPhone pairs from its own Settings, which needs iOS 27.":
         "Diğer iPhone kendi Ayarlar'ından eşlenir, bunun için iOS 27 gerekir.",
     "IP address": "IP adresi",
-    "On iOS 27 they type in a code this iPhone shows. On older iOS, they tap Trust.":
-        "iOS 27'de bu iPhone'un gösterdiği kodu girerler. Daha eski iOS'ta Güven'e dokunurlar.",
-    "Their iPhone unlocked and nearby": "Diğer iPhone kilidi açık ve yakında",
-    "Below iOS 27, their iPhone's IP address": "iOS 27'nin altındaysa diğer iPhone'un IP adresi",
     "Their iPhone runs iOS %@. From iOS 26.4 on, SideInstaller can't use the pairing their iPhone gives over Wi-Fi, so it needs a pairing file made on a computer.":
         "Diğer iPhone iOS %@ kullanıyor. iOS 26.4'ten itibaren SideInstaller, diğer iPhone'un Wi-Fi üzerinden verdiği eşlemeyi kullanamaz, bu yüzden bilgisayarda yapılmış bir eşleme dosyası gerekir.",
     "Get LocalDevVPN from the App Store and connect it: SideInstaller works through it.":
