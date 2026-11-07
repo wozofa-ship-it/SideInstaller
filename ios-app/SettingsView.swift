@@ -305,7 +305,20 @@ struct SettingsView: View {
         } header: {
             Text(L("Auto Refresh"))
         } footer: {
+            autoRefreshFooter
+        }
+    }
+
+    /// 定位降级明示（Seal 同款）：定位没给“始终”时，巡检只有音频
+    /// 保活在撑，锁屏续签可能被挂起——直接写在开关下面，不让用户猜。
+    /// 只在开关开着时显示；开关关着时巡检本来就不跑，写了也没意义。
+    private var autoRefreshFooter: some View {
+        VStack(alignment: .leading, spacing: 4) {
             Text(L("SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher."))
+            if autoRefreshEnabled && AutoRefreshService.shared.locationDegraded {
+                Text(L("Location is not set to “Always”, so only silent audio is keeping the app alive — renewal from the lock screen may be suspended. Set Location to “Always” in Settings."))
+                    .foregroundStyle(.orange)
+            }
         }
     }
 

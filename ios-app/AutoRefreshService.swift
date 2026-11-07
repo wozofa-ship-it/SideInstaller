@@ -17,6 +17,7 @@ final class AutoRefreshService {
     nonisolated static let enabledKey = "SIDAutoRefreshEnabled"
     private static let lastRoundKey = "SIDAutoRefreshLastRound"
     private static let lastAlertKey = "SIDAutoRefreshLastAlert"
+    private static let lastTickKey = "SIDAutoRefreshLastTick"
 
     /// 巡检间隔：30 分钟。
     private static let checkInterval: UInt64 = 30 * 60 * 1_000_000_000
@@ -24,12 +25,21 @@ final class AutoRefreshService {
     private static let minRoundInterval: TimeInterval = 6 * 3600
     /// 到期提醒（隧道没通时）的最小间隔：12 小时。
     private static let minAlertInterval: TimeInterval = 12 * 3600
+    /// 两轮巡检的最小间隔：10 分钟。30 分钟循环、BG 唤醒、回前台
+    /// 三路都可能短时间内各触发一轮巡检；这是来源去重——上一轮
+    /// 刚跑过就静默跳过。6 小时那道只管“真续签”冷却，不管巡检本身。
+    private static let minTickInterval: TimeInterval = 10 * 60
 
     private let keepAlive = KeepAlive()
     private var loopTask: Task<Void, Never>?
     private var isRunning = false
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.enabledKey) }
+
+    /// 定位降级状态（Seal 同款明示）：定位被拒/受限或系统定位总开关
+    /// 关了时为真，这时只有音频保活在撑，锁屏续签可能被挂起。
+    /// 设置页开关下面直接写出来，不让用户猜。
+    var locationDegraded: Bool { keepAlive.locationUnavailable }
 
     /// 开关开着且巡检没在跑时启动：双保活＋巡检循环。重复调用无副作用。
     func start() {
@@ -38,6 +48,9 @@ final class AutoRefreshService {
         keepAlive.startAudio()
         keepAlive.startLocation()
         Engine.shared.log("Auto refresh: resident patrol started.")
+        if keepAlive.locationUnavailable {
+            Engine.shared.log("Auto refresh: location unavailable — audio-only keep-alive; lock-screen renewal may be suspended.")
+        }
         loopTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -79,6 +92,13 @@ final class AutoRefreshService {
         let engine = Engine.shared
         guard isEnabled, !manager.isRefreshing, !engine.isRunning else { return }
 
+        // 来源去重：上一轮巡检 10 分钟内跑过就静默跳过。BG 唤醒、
+        // 30 分钟循环、回前台三路撞在一起时，只留一轮干活。
+        let tickNow = Date().timeIntervalSince1970
+        let lastTick = UserDefaults.standard.double(forKey: Self.lastTickKey)
+        guard tickNow - lastTick >= Self.minTickInterval else { return }
+        UserDefaults.standard.set(tickNow, forKey: Self.lastTickKey)
+
         engine.refreshNetworkStatus()
         guard engine.vpnConnected else {
             await alertIfCritical(manager: manager)
@@ -92,6 +112,10 @@ final class AutoRefreshService {
             try? await Task.sleep(nanoseconds: 500_000_000)
         }
         guard manager.hasLoaded, !manager.isRefreshing else { return }
+
+        // 到期通知排期：每轮巡检拿到新清单就重排一次（本地通知，
+        // 不用服务器）；旧的先清掉，新的按到期日排。
+        ExpiryNotificationScheduler.reschedule(for: manager.entries)
 
         // 可续签的 App 里，描述文件已过期或 3 天内到期的才算到期。
         let dueIDs = Set(manager.refreshable.filter { job in
@@ -147,5 +171,50 @@ final class AutoRefreshService {
             identifier: "resign-auto-\(Int(Date().timeIntervalSince1970))",
             content: content, trigger: nil)
         try? await UNUserNotificationCenter.current().add(request)
+    }
+}
+
+/// 到期通知排期（Seal 的 ExpiryNotificationScheduler，本机本地通知，
+/// 不用服务器）：每轮巡检拿到新清单就重排一次。先清掉旧的
+/// expiry-<bundleID>，再给 3 天内到期的 App 各排一条——到期前
+/// 1 天提醒；24 小时内就到期的，1 小时后提醒。续签完到期日变了，
+/// 下一轮巡检会自动重排，旧提醒不会赖着不走。
+enum ExpiryNotificationScheduler {
+
+    private static let prefix = "expiry-"
+
+    static func reschedule(for entries: [SideloadedAppStatus]) {
+        let center = UNUserNotificationCenter.current()
+        center.getPendingNotificationRequests { requests in
+            let stale = requests.filter { $0.identifier.hasPrefix(prefix) }.map(\.identifier)
+            if !stale.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: stale)
+            }
+            let now = Date()
+            for entry in entries {
+                guard let current = entry.current,
+                      let expiration = current.expirationDate else { continue }
+                guard !current.isExpired,
+                      let days = current.daysRemaining, days <= 3 else { continue }
+                // 到期前 1 天提醒；不足 1 天的，1 小时后提醒。
+                let fireDate = expiration.timeIntervalSince(now) <= 24 * 3600
+                    ? now.addingTimeInterval(3600)
+                    : expiration.addingTimeInterval(-24 * 3600)
+                guard fireDate > now else { continue }
+                let content = UNMutableNotificationContent()
+                content.title = L("续签提醒")
+                let dateText = expiration.formatted(
+                    Date.FormatStyle(date: .abbreviated, time: .omitted).locale(Localizer.locale))
+                content.body = L("%@ 将在 %@ 过期，打开 SideInstaller 续签。", entry.app.name, dateText)
+                content.sound = .default
+                let trigger = UNCalendarNotificationTrigger(
+                    dateMatching: Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute], from: fireDate),
+                    repeats: false)
+                let request = UNNotificationRequest(
+                    identifier: prefix + entry.app.bundleID, content: content, trigger: trigger)
+                Task { try? await center.add(request) }
+            }
+        }
     }
 }

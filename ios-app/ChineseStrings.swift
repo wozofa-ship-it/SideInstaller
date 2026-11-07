@@ -1226,6 +1226,8 @@ let chineseStrings: [String: String] = [
     "Auto Refresh": "自动续签",
     "SideInstaller stays alive in the background (silent audio + location) and checks every 30 minutes. Apps whose signing expires within 3 days are re-signed automatically. Location access must be set to “Always” and the tunnel must stay connected (the built-in tunnel is enough). The system also wakes the app in the background from time to time to run a check — don't swipe it away from the app switcher.":
         "SideInstaller 在后台保持存活（无声音频 + 定位），每 30 分钟检查一次，签名 3 天内到期的应用会自动续签。定位权限须设为“始终”，隧道须保持连接（内置隧道即可）。系统也会不时在后台唤醒应用检查一次，不要在应用切换器里把它划掉。",
+    "Location is not set to “Always”, so only silent audio is keeping the app alive — renewal from the lock screen may be suspended. Set Location to “Always” in Settings.":
+        "定位没设成“始终”，现在只有无声音频在撑着后台，锁屏续签可能被挂起。去设置里把定位改成“始终”。",
     "App Sources": "应用源",
     "Link": "链接",
     "This link is waiting for confirmation.": "此链接正在等待确认。",
