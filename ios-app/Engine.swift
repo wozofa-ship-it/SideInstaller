@@ -1974,18 +1974,10 @@ final class Engine: ObservableObject {
         }
         try Task.checkCancellation()
         let left = cost.available.map(String.init) ?? "unknown"
-        log("App IDs: this app needs \(cost.cost) new (\(cost.newIDs.joined(separator: ", "))); \(left) left. Waiting for the go-ahead.")
-        appIDCost = cost
-        setStep(.sign, .waiting)
-        let proceed = await withTaskCancellationHandler {
-            await withCheckedContinuation { appIDCostReply = $0 }
-        } onCancel: {
-            Task { @MainActor in self.answerAppIDCost(false) }
-        }
-        appIDCost = nil
-        guard proceed else { throw CancellationError() }
-        log("App IDs: going ahead.")
-        setStep(.sign, .active)
+        log("App IDs: this app needs \(cost.cost) new (\(cost.newIDs.joined(separator: ", "))); \(left) left. Installing directly, no confirmation popup.")
+        // 2026-11-08：用户亲定去掉 App ID 确认弹窗，直接安装。
+        // 之前这里置 appIDCost 弹确认框、等用户点安装才继续；
+        // 现在只记账不等待，直接进签名安装。
     }
 
     private func performAppIDQuota(session: OpaquePointer, bundleID: String) throws -> AppIDCost {
