@@ -4,7 +4,7 @@ import UIKit
 /// The settings sheet: occasional configuration and the activity log, kept out
 /// of the main flow.
 struct SettingsView: View {
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine
     /// Observed for the language picker, and to redraw on language change.
     @EnvironmentObject private var loc: Localizer
     /// The saved Apple IDs the Account section manages.
@@ -52,6 +52,7 @@ struct SettingsView: View {
                 autoRefreshSection
                 downloadsSection
                 anisetteSection
+                advancedSection
                 logSection
             }
             .sheet(item: $editorTarget) { AccountEditor(target: $0) }
@@ -245,6 +246,15 @@ struct SettingsView: View {
     @ViewBuilder
     private var tunnelSection: some View {
         Section {
+            Toggle(L("Start LocalDevVPN when needed"), isOn: Bindable(engine).autoStartVPN)
+            Button {
+                Task {
+                    let opened = await engine.startLocalDevVPN()
+                    localDevVPNDidntOpen = !opened
+                }
+            } label: {
+                Label(L("Start LocalDevVPN now"), systemImage: "bolt.horizontal.circle")
+            }
             HStack {
                 Text(L("Built-in tunnel interface"))
                 Spacer()
@@ -397,8 +407,14 @@ struct SettingsView: View {
                 Divider()
                 Text(L("Custom…")).tag(String?.none)
             }
-            if anisetteIsCustom {
-                TextField(L("Server URL"), text: $engine.anisetteURL)
+            if engine.anisetteAuto {
+                Text(L("Starts with %@", anisetteName))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else if anisetteIsCustom {
+                TextField(L("Server URL"), text: Bindable(engine).anisetteURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -415,6 +431,11 @@ struct SettingsView: View {
     }
 
     /// The menu's selection: a server's address, or nil for "Custom…".
+    /// The server Auto starts with, by its name on the list if it has one.
+    private var anisetteName: String {
+        engine.anisetteServers.first { $0.address == engine.anisetteURL }?.name ?? engine.anisetteURL
+    }
+
     private var anisetteSelection: Binding<String?> {
         Binding(
             get: { anisetteIsCustom ? nil : engine.anisetteURL },
@@ -429,37 +450,41 @@ struct SettingsView: View {
         )
     }
 
+    // MARK: Advanced
+
+    private var advancedSection: some View {
+        Section {
+            HStack {
+                Text(L("Device IP"))
+                Spacer()
+                TextField("10.7.0.1", text: Bindable(engine).deviceIP)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(L("Advanced"))
+        }
+    }
+
     // MARK: Activity log
 
+    // The lines are read only in `LogConsole` and `LogHeader`, so a new one
+    // redraws those two and not the rest of Settings.
     private var logSection: some View {
         Section {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(engine.lines) { line in
-                            Text("\(line.stamp)  \(line.text)")
-                                .font(.system(.caption2, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(line.id)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .frame(height: 240)
-                .onChange(of: engine.lines.count) { _, _ in
-                    if let last = engine.lines.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                }
-            }
+            LogConsole()
             HStack {
                 Button {
-                    UIPasteboard.general.string = engine.logText()
+                    UIPasteboard.general.string = LogStore.shared.text
                 } label: {
                     Label(L("Copy"), systemImage: "doc.on.doc")
                 }
                 Spacer()
                 Button(role: .destructive) {
-                    engine.clearLog()
+                    LogStore.shared.clear()
                 } label: {
                     Label(L("Clear"), systemImage: "trash")
                 }
@@ -468,11 +493,48 @@ struct SettingsView: View {
             // 上游 1ae5489 的 Verbose logging 开关（只拿开关 + 下面的
             // footer 说明）；“Report a problem”按钮不搬回，仍留
             // AboutView（fork 2026-11-05 的位置），用户 2026-11-06 批准。
-            Toggle(L("Verbose logging"), isOn: $engine.verboseLogging)
+            Toggle(L("Verbose logging"), isOn: Bindable(engine).verboseLogging)
         } header: {
-            Text(L("Activity Log (%d)", engine.lines.count))
+            LogHeader()
         } footer: {
             Text(L("Adds the messages exchanged with iOS to the log, for tracking down a connection problem. Leave it off otherwise, as they quickly fill the log."))
         }
+    }
+}
+
+/// The activity log's lines, following the newest.
+private struct LogConsole: View {
+    private var log: LogStore { .shared }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(log.lines) { line in
+                        Text("\(line.stamp)  \(line.text)")
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(line.id)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(height: 240)
+            // The last line, not the count, which stops changing once the log is full.
+            .onChange(of: log.lines.last?.id) { _, last in
+                if let last { proxy.scrollTo(last, anchor: .bottom) }
+            }
+        }
+    }
+}
+
+/// “Activity Log (n)”.
+private struct LogHeader: View {
+    /// Observed to redraw on language change.
+    @EnvironmentObject private var loc: Localizer
+
+    var body: some View {
+        Text(L("Activity Log (%d)", LogStore.shared.lines.count))
     }
 }

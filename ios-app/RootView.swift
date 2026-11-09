@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Tab container (Certificates, Files, Install, Tools, About). Each page draws its own
 /// `AppBackground`, since `TabView` would hide a shared one; they stay in sync
@@ -56,7 +57,7 @@ struct RootView: View {
         var id: AnyHashable { group.map { AnyHashable($0) } ?? AnyHashable(items[0]) }
     }
 
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine
     /// Declared so a language change relabels the tab bar.
     @EnvironmentObject private var loc: Localizer
     /// Watched so switching Apple ID invalidates every cached sign-in below.
@@ -382,7 +383,7 @@ struct RootView: View {
 /// devices, text or call). Stays open through wrong codes and resends; closes
 /// when the sign-in returns.
 struct TwoFactorSheet: View {
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine
     /// Declared so every label redraws when the language changes.
     @EnvironmentObject private var loc: Localizer
 
@@ -550,6 +551,8 @@ struct ToolsView: View {
     @ObservedObject var sideBySideManager: SideBySideManager
 
     @State private var showSettings = false
+    /// WebDAV 服务单例（0.9.88）：开关状态不持久化，默认关闭。
+    @StateObject private var webdav = CZFWebDAVServer.shared
 
     var body: some View {
         NavigationStack {
@@ -629,6 +632,10 @@ struct ToolsView: View {
                     }
                     .buttonStyle(.plain, sound: .tick)
                     .cascadeItem(rowIndex(7))
+                    // WebDAV 文件服务（0.9.88）：开关 + 开启后的局域网
+                    // 地址与安全提示。放最后，不打乱上面各行的级联序号。
+                    webdavCard
+                        .cascadeItem(rowIndex(8))
                 }
                 // No bottom padding: the tab bar's inset already clears the last
                 // row, and the extra 20pt would make a page that fits scroll.
@@ -656,6 +663,75 @@ struct ToolsView: View {
             .font(.largeTitle.weight(.bold))
             .frame(maxWidth: .infinity)
             .padding(.top, 8)
+    }
+
+    /// WebDAV 文件服务卡片（0.9.88）：开关 + 开启后的局域网地址、
+    /// 复制按钮与安全提示。样式跟 ToolRow 同款（PanelCard + 46×46
+    /// 渐变图标），不另起视觉语言。开关不持久化，默认关闭；开关
+    /// 绑服务的 isRunning，启动失败时开关自动弹回关闭并显示原因。
+    @ViewBuilder
+    private var webdavCard: some View {
+        PanelCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: Binding(
+                    get: { webdav.isRunning },
+                    set: { on in
+                        CZFHaptics.impact()
+                        if on { webdav.start() } else { webdav.stop() }
+                    }
+                )) {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Rectangle().fill(Theme.gradient(.cyan))
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 46, height: 46)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("WebDAV file service"))
+                                .font(.headline)
+                            Text(L("Transfer files to Documents over LAN"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if webdav.isRunning {
+                    if let address = webdav.address {
+                        HStack(spacing: 8) {
+                            Text(address)
+                                .font(.subheadline.monospaced())
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Button {
+                                CZFHaptics.impact()
+                                UIPasteboard.general.string = address
+                            } label: {
+                                Text(L("Copy"))
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(.bordered, sound: .tap)
+                        }
+                    } else {
+                        Text(L("Wi-Fi not connected"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(L("Anyone on your LAN can access it without a password. Turn it off when done."))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let error = webdav.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
     }
 }
 

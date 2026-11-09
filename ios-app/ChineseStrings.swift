@@ -196,6 +196,10 @@ let chineseStrings: [String: String] = [
     "Sign in to Apple ID": "登录 Apple ID",
     "Download %@": "下载 %@",
     "Use your imported IPA": "使用已导入的 IPA",
+    "Use a custom .ipa instead": "改用自定义 .ipa",
+    "Pick an .ipa to install.": "请选择要安装的 .ipa。",
+    "Signed with the Apple ID and installed as it is, without a pairing file.": "用该 Apple ID 签名后原样安装，不附带配对文件。",
+    "Open %@.": "打开 %@。",
     "Sign the app": "为应用签名",
     "Finish setup": "完成设置",
 
@@ -1268,6 +1272,14 @@ let chineseStrings: [String: String] = [
     "Tap Trust on their iPhone": "在对方的 iPhone 上轻点“信任”",
     "On their iPhone: Settings › Wi-Fi › ⓘ next to the network, then “IP Address”.":
         "在对方的 iPhone 上：设置 › 无线局域网 › 网络旁的 ⓘ，然后查看“IP 地址”。",
+    // MARK: - WebDAV (0.9.88)
+
+    "WebDAV file service": "WebDAV 文件服务",
+    "Transfer files to Documents over LAN": "局域网传文件到 Documents",
+    "Anyone on your LAN can access it without a password. Turn it off when done.": "局域网内无密码可访问，传完请关闭",
+    "Wi-Fi not connected": "未连接 Wi-Fi",
+    "WebDAV failed to start": "WebDAV 启动失败",
+
     "Unlock their iPhone, then tap Trust in the prompt that comes up.": "解锁对方的 iPhone，然后在弹出的提示中轻点“信任”。",
     "This iPhone is %@, so theirs will look similar.": "这台 iPhone 是 %@，对方的地址会与之相近。",
     "“%@” isn't an IPv4 address. It should look like 192.168.1.42.": "“%@”不是 IPv4 地址。它应该形如 192.168.1.42。",
