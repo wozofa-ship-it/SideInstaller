@@ -128,11 +128,11 @@ final class Engine {
 
     static let anisetteAutoKey = "anisetteServerAuto"
 
-    @Published private(set) var appIDCost: AppIDCost?
+    private(set) var appIDCost: AppIDCost?
     /// Resumed with the answer to `appIDCost`: true to sign and install.
     private var appIDCostReply: CheckedContinuation<Bool, Never>?
     /// The `sideinstaller://` link waiting for the go-ahead.
-    @Published private(set) var pendingLink: DeepLink?
+    private(set) var pendingLink: DeepLink?
     /// When SideStore was last asked for its pairing file, so the file it sends
     /// back can be told from one some other link brought.
     private var sideStorePairingRequestedAt: Date?
@@ -141,7 +141,7 @@ final class Engine {
     private var sideStoreCertificateRequest: (at: Date, retryInstall: Bool)?
     /// A certificate a link brought, for `RootView` to hand to the Certificates
     /// manager, which checks it against the Apple ID's own before using it.
-    @Published var certificateToImport: CertificateImport?
+    var certificateToImport: CertificateImport?
 
     /// The saved anisette server, or the one to start with, saved.
     ///
@@ -395,7 +395,7 @@ final class Engine {
     /// 认成这次的；调用方起跑后快照它、结束时比对才认。跑完
     /// 不清零（下一跑起跑时自然轮换；清零会让结束时的比对
     /// 永远对不上）。
-    @Published var installSessionID: UUID?
+    var installSessionID: UUID?
 
     /// True from a cancel until the run stops, which waits for the step in
     /// flight to reach a safe point.

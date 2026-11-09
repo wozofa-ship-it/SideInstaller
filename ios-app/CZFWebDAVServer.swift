@@ -41,19 +41,19 @@ final class CZFWebDAVServer: ObservableObject {
         DispatchQueue.main.async { self.errorMessage = nil }
         let root = root
         let server = GCDWebServer()
-        server.addDefaultHandler(forMethod: "PROPFIND", requestClass: GCDWebServerRequest.self) { [weak self] request in
+        server.addDefaultHandler(forMethod: "PROPFIND", request: GCDWebServerRequest.self) { [weak self] request in
             self?.handlePropfind(request, root: root)
         }
-        server.addDefaultHandler(forMethod: "GET", requestClass: GCDWebServerRequest.self) { [weak self] request in
+        server.addDefaultHandler(forMethod: "GET", request: GCDWebServerRequest.self) { [weak self] request in
             self?.handleGet(request, root: root)
         }
-        server.addDefaultHandler(forMethod: "PUT", requestClass: GCDWebServerDataRequest.self) { [weak self] request in
+        server.addDefaultHandler(forMethod: "PUT", request: GCDWebServerDataRequest.self) { [weak self] request in
             self?.handlePut(request, root: root)
         }
-        server.addDefaultHandler(forMethod: "DELETE", requestClass: GCDWebServerRequest.self) { [weak self] request in
+        server.addDefaultHandler(forMethod: "DELETE", request: GCDWebServerRequest.self) { [weak self] request in
             self?.handleDelete(request, root: root)
         }
-        server.addDefaultHandler(forMethod: "MKCOL", requestClass: GCDWebServerRequest.self) { [weak self] request in
+        server.addDefaultHandler(forMethod: "MKCOL", request: GCDWebServerRequest.self) { [weak self] request in
             self?.handleMkcol(request, root: root)
         }
         var port = Self.defaultPort

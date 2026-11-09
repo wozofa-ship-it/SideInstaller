@@ -24,7 +24,7 @@ struct CertTabView: View {
     /// 由 SideInstallerApp 注入全 tab 共用，安装 tab 的 ID 线
     /// 与企业页读同一实例——企业页只认自己那次安装的状态，
     /// 完成判定只看 enterpriseInstallInFlight 期间的变化）。
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine: Engine
     /// Declared so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     @EnvironmentObject private var workspace: CertWorkspace

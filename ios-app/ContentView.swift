@@ -1216,7 +1216,7 @@ private func precheckHasBlocked(_ engine: Engine) -> Bool {
 }
 
 private struct PrecheckSheet: View {
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine: Engine
     @Environment(\.dismiss) private var dismiss
     let onContinue: () -> Void
 
