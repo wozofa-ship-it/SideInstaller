@@ -107,7 +107,7 @@ struct SourcesView: View {
 /// One source's apps, each with an Install button that downloads the IPA and
 /// hands it to the one-click pipeline on the main screen.
 struct SourceAppsView: View {
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine: Engine
     /// Observed so labels redraw when the language changes.
     @EnvironmentObject private var loc: Localizer
     /// 企业页共享工作区（RootView 在 TabView 层注入，证书页与

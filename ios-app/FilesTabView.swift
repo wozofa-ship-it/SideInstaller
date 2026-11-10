@@ -89,7 +89,7 @@ struct FilesTabView: View {
     // 这里重新观察 Engine（v63 曾拿掉，v68 拿回来，只为企业已
     // 签名安装；安装 tab 的 ID 线与文件页仍是各认各次安装的状
     // 态，不串台——结果判定只看 fileInstallInFlight 期间的变化）。
-    @EnvironmentObject private var engine: Engine
+    @Environment(Engine.self) private var engine: Engine
     /// 步骤日志存放处（单例，与证书页共用同一份 diagnosticLog）：
     /// 文件页安装的传输不再走它的 install()，只用 appendStepLog
     /// 记配对安装开始/完成/失败，证书页的诊断日志里能看到。
