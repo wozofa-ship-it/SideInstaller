@@ -10,18 +10,18 @@
       "iconURL": "https://raw.githubusercontent.com/FrizzleM/SideInstaller/main/ios-app/Assets.xcassets/AppIcon.appiconset/AppIcon~ios-marketing.png",
       "subtitle": "An an app that installs Sidestore on iOS 27, fully on-device",
       "localizedDescription": "Install SideStore and LiveContainer directly on your iPhone. No PC required.",
-      "version": "1.7.0",
-      "versionDate": "2026-11-09T17:55:39Z",
-      "versionDescription": "### Added\n- **Turkish.** Pick Türkçe in Settings › Language. Thanks to Mr3242-Scripter (#111).\n- **A nudge to update to iOS 27 at setup** on devices that can run it: on iOS 27 the iPhone pairs with itself, no computer needed.\n\n### Changed\n- **Side by Side goes step by step** and can now install SideStore and LiveContainer + SideStore too (Stable or Nightly), each set up with the pairing file on the other iPhone.\n- **Your Apple ID session and pairing stay on this iPhone:** private files are left out of backups, and the saved password is kept in the Keychain for this device only. After restoring a backup, sign in and pair again.\n\n### Fixed\n- Keys and passwords no longer end up in the activity log or problem reports.\n- Side by Side no longer keeps the other person's signing key on your iPhone.\n- A stalled pairing can be cancelled, and gives up by itself.\n- Two sign-ins running at once no longer share one 2FA code; the number pad comes back after a wrong code.\n- Local Network turned off is noticed in about two seconds instead of a minute.\n- Pairing keeps going through a call, Siri, an alarm or AirPods connecting.\n- The app stays smooth while the activity log fills.",
-      "downloadURL": "https://github.com/FrizzleM/SideInstaller/releases/download/v1.7.0/SideInstaller.ipa",
-      "size": 10739837,
+      "version": "2.0.1",
+      "versionDate": "2026-11-12T20:00:38Z",
+      "versionDescription": "### Changed\n- **Blue is back.** The greys from 2.0.0 are blues again: night-blue pages, cards and popups under a still navy wash at the top, a solid blue main button, and a lighter blue for progress, links, selections and switches. The app icon and the logo tiles have their colour back, in a brighter blue than before 2.0.0. The Live Activities and sideinstaller.net match.",
+      "downloadURL": "https://github.com/FrizzleM/SideInstaller/releases/download/v2.0.1/SideInstaller.ipa",
+      "size": 10770716,
       "versions": [
         {
-          "version": "1.7.0",
-          "date": "2026-11-09T17:55:39Z",
-          "downloadURL": "https://github.com/FrizzleM/SideInstaller/releases/download/v1.7.0/SideInstaller.ipa",
-          "localizedDescription": "### Added\n- **Turkish.** Pick Türkçe in Settings › Language. Thanks to Mr3242-Scripter (#111).\n- **A nudge to update to iOS 27 at setup** on devices that can run it: on iOS 27 the iPhone pairs with itself, no computer needed.\n\n### Changed\n- **Side by Side goes step by step** and can now install SideStore and LiveContainer + SideStore too (Stable or Nightly), each set up with the pairing file on the other iPhone.\n- **Your Apple ID session and pairing stay on this iPhone:** private files are left out of backups, and the saved password is kept in the Keychain for this device only. After restoring a backup, sign in and pair again.\n\n### Fixed\n- Keys and passwords no longer end up in the activity log or problem reports.\n- Side by Side no longer keeps the other person's signing key on your iPhone.\n- A stalled pairing can be cancelled, and gives up by itself.\n- Two sign-ins running at once no longer share one 2FA code; the number pad comes back after a wrong code.\n- Local Network turned off is noticed in about two seconds instead of a minute.\n- Pairing keeps going through a call, Siri, an alarm or AirPods connecting.\n- The app stays smooth while the activity log fills.",
-          "size": 10739837
+          "version": "2.0.1",
+          "date": "2026-11-12T20:00:38Z",
+          "downloadURL": "https://github.com/FrizzleM/SideInstaller/releases/download/v2.0.1/SideInstaller.ipa",
+          "localizedDescription": "### Changed\n- **Blue is back.** The greys from 2.0.0 are blues again: night-blue pages, cards and popups under a still navy wash at the top, a solid blue main button, and a lighter blue for progress, links, selections and switches. The app icon and the logo tiles have their colour back, in a brighter blue than before 2.0.0. The Live Activities and sideinstaller.net match.",
+          "size": 10770716
         }
       ]
     },
